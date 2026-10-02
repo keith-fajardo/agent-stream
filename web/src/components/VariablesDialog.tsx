@@ -61,7 +61,7 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
     const current = new Set(p.variables.map((v) => v.name));
     // A variable the planner renamed or deleted meanwhile no longer exists under its opened name: skip it.
     const stillThere = (r: Row) => r.original !== undefined && current.has(r.original);
-    for (const r of rows) if (r.deleted && stillThere(r)) op({ type: 'deleteVariable', name: r.original });
+    for (const r of rows) if (r.deleted && r.original !== undefined && stillThere(r)) op({ type: 'deleteVariable', name: r.original });
     for (const r of live) {
       if (r.original !== undefined) {
         if (!stillThere(r)) continue;
