@@ -172,11 +172,12 @@ export type ChatEntry = { at: string; role: ChatRole; text: string };
 
 export type AuthInfo = { ok: boolean; method?: string; plan?: string; email?: string; error?: string };
 
-export type GraphListItem = { id: string; name: string; error?: string };
+export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string } };
 
 export type ServerMessage =
   | { type: 'hello'; auth: AuthInfo; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
+  | { type: 'graphDeleted'; graphId: string }
   | { type: 'graphOpened'; graph: Graph; chat: ChatEntry[]; chatBusy: boolean; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }
   | { type: 'graph'; graph: Graph }
   | { type: 'opRejected'; graphId: string; error: string }

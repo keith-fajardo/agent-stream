@@ -77,6 +77,10 @@ function reduceServer(state: State, msg: ServerMessage): State {
       return { ...state, connected: true, auth: msg.auth, project: msg.project, graphs: msg.graphs, approvals: msg.approvals };
     case 'graphs':
       return { ...state, graphs: msg.graphs };
+    case 'graphDeleted':
+      return msg.graphId === current
+        ? { ...state, graph: undefined, run: undefined, runs: [], chat: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, toast: 'This graph was deleted.' }
+        : state;
     case 'graphOpened':
       return {
         ...state,

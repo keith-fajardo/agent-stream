@@ -58,6 +58,18 @@ export class RunStore {
     return meta;
   }
 
+  /** The newest run of every graph, keyed by graph id. */
+  latestByGraph(): Map<string, RunSummary> {
+    const out = new Map<string, RunSummary>();
+    if (!existsSync(this.paths.runsDir)) return out;
+    for (const id of readdirSync(this.paths.runsDir).filter(isRunId).sort().reverse()) {
+      const m = this.get(id);
+      if (!m || out.has(m.graphId)) continue;
+      out.set(m.graphId, { id: m.id, graphId: m.graphId, status: m.status, startedAt: m.startedAt, endedAt: m.endedAt });
+    }
+    return out;
+  }
+
   list(graphId: string): RunSummary[] {
     if (!existsSync(this.paths.runsDir)) return [];
     return readdirSync(this.paths.runsDir)

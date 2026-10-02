@@ -54,7 +54,7 @@ describe('app', () => {
       type: 'hello',
       auth: signedIn,
       project: expect.any(String),
-      graphs: [{ id: 'first', name: 'First' }],
+      graphs: [{ id: 'first', name: 'First', updatedAt: expect.any(String) }],
       approvals: [],
     });
   });
@@ -65,7 +65,7 @@ describe('app', () => {
     const b = client();
     await app.handle(a.c, { type: 'createGraph', name: 'Parity' });
     expect(a.of('graphOpened')[0].graph.id).toBe('parity');
-    expect(b.of('graphs').at(-1)?.graphs).toEqual([{ id: 'parity', name: 'Parity' }]);
+    expect(b.of('graphs').at(-1)?.graphs).toEqual([{ id: 'parity', name: 'Parity', updatedAt: expect.any(String) }]);
     await app.handle(a.c, { type: 'op', graphId: 'parity', op: { type: 'addNode', node: { title: 'Plan', kind: 'agent', prompt: 'p' } } });
     expect(b.of('graph').at(-1)?.graph.nodes[0]).toMatchObject({ id: 'n1', createdBy: 'user' });
     await app.handle(a.c, { type: 'op', graphId: 'parity', op: { type: 'connect', from: 'n1', to: 'n1' } });
@@ -310,5 +310,43 @@ describe('app', () => {
     await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature, ...extra });
     await vi.waitFor(() => expect(a.of('run').filter((m) => m.run.id !== firstId).at(-1)?.run.status).toBe('succeeded'));
     expect(commands).toEqual(["echo 'a'", "echo 'b'"]);
+  });
+
+  describe('graph management', () => {
+    it('lists graphs with their last run', async () => {
+      const { app, client } = setup();
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+      await vi.waitFor(() => expect(app.listGraphs()[0].lastRun?.status).toBe('succeeded'));
+      expect(a.of('graphs').at(-1)?.graphs[0].lastRun?.status).toBe('succeeded');
+    });
+
+    it('duplicates with local values, and deletes values with the graph', () => {
+      const { app } = setup();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addVariable', name: 'schema' }, 'user');
+      app.values.set(g.id, 'schema', 'dev');
+      const copy = app.duplicateGraph(g.id);
+      if (!copy.ok) throw new Error(copy.error);
+      expect(app.values.get(copy.graph.id)).toEqual({ schema: 'dev' });
+      expect(app.deleteGraph(copy.graph.id)).toEqual({ ok: true });
+      expect(app.values.get(copy.graph.id)).toEqual({});
+    });
+
+    it('refuses to delete a graph that is running, and announces deletions', async () => {
+      const gate = { release: () => {} };
+      const { app, client } = setup(signedIn, () => new Promise((resolve) => (gate.release = () => resolve({ ok: true, output: '' }))));
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'x' } }, 'user');
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+      expect(app.deleteGraph(g.id)).toEqual({ ok: false, error: 'Stop the run first.' });
+      gate.release();
+      await vi.waitFor(() => expect(app.runner.activeFor(g.id)).toBeUndefined());
+      expect(app.deleteGraph(g.id)).toEqual({ ok: true });
+      expect(a.of('graphDeleted')).toEqual([{ type: 'graphDeleted', graphId: g.id }]);
+    });
   });
 });

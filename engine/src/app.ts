@@ -5,6 +5,8 @@ import {
   type ChatEntry,
   type ClientMessage,
   type Graph,
+  type GraphListItem,
+  type GraphResult,
   type NodeEvent,
   type NodeRunState,
   type Op,
@@ -75,6 +77,48 @@ export function createApp(d: AppDeps) {
   };
 
   /** Planner's request_run: validate, then let the user confirm in the browser. */
+  function listGraphs(): GraphListItem[] {
+    const latest = runStore.latestByGraph();
+    return graphStore.list().map((g) => {
+      const run = latest.get(g.id);
+      return run ? { ...g, lastRun: { status: run.status, startedAt: run.startedAt } } : g;
+    });
+  }
+  const broadcastGraphs = () => broadcast({ type: 'graphs', graphs: listGraphs() });
+
+  function createGraph(name: string): Graph {
+    const graph = graphStore.create(name);
+    broadcastGraphs();
+    return graph;
+  }
+  function renameGraph(id: string, name: string): GraphResult {
+    const r = graphStore.rename(id, name);
+    if (r.ok) broadcastGraphs();
+    return r;
+  }
+  function duplicateGraph(id: string): GraphResult {
+    const r = graphStore.duplicate(id);
+    if (r.ok) {
+      values.copyGraph(id, r.graph.id);
+      broadcastGraphs();
+    }
+    return r;
+  }
+  function deleteGraph(id: string): { ok: true } | { ok: false; error: string } {
+    if (runner.activeFor(id)) return { ok: false, error: 'Stop the run first.' };
+    const r = graphStore.delete(id);
+    if (!r.ok) return r;
+    values.deleteGraph(id);
+    broadcast({ type: 'graphDeleted', graphId: id });
+    broadcastGraphs();
+    return r;
+  }
+  function importGraph(content: string): GraphResult {
+    const r = graphStore.importGraph(content);
+    if (r.ok) broadcastGraphs();
+    return r;
+  }
+
   function requestRun(graphId: string, fromNodeId?: string): string | null {
     const r = graphStore.load(graphId);
     if (!r.ok) return r.error;
@@ -102,6 +146,7 @@ export function createApp(d: AppDeps) {
   runner.on('run', (run: RunMeta) => {
     broadcast({ type: 'run', run });
     broadcast({ type: 'runs', graphId: run.graphId, runs: runStore.list(run.graphId) });
+    broadcastGraphs();
   });
   runner.on('node', (runId: string, nodeId: string, state: NodeRunState) => broadcast({ type: 'runNode', runId, nodeId, state }));
   runner.on('event', (runId: string, nodeId: string, event: NodeEvent) => broadcast({ type: 'nodeEvent', runId, nodeId, event }));
@@ -126,7 +171,7 @@ export function createApp(d: AppDeps) {
 
   function connect(client: Client): () => void {
     clients.add(client);
-    client.send({ type: 'hello', auth: d.auth, project: d.projectDir, graphs: graphStore.list(), approvals: broker.pending() });
+    client.send({ type: 'hello', auth: d.auth, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
     return () => {
       clients.delete(client);
     };
@@ -142,8 +187,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'createGraph': {
-        const graph = graphStore.create(msg.name);
-        broadcast({ type: 'graphs', graphs: graphStore.list() });
+        const graph = createGraph(msg.name);
         client.send(opened(graph));
         return;
       }
@@ -209,5 +253,22 @@ export function createApp(d: AppDeps) {
     }
   }
 
-  return { connect, handle, requestRun, graphStore, runStore, runner, broker, planner, values };
+  return {
+    connect,
+    handle,
+    requestRun,
+    graphStore,
+    runStore,
+    runner,
+    broker,
+    planner,
+    values,
+    listGraphs,
+    createGraph,
+    renameGraph,
+    duplicateGraph,
+    deleteGraph,
+    exportGraph: (id: string) => graphStore.exportGraph(id),
+    importGraph,
+  };
 }

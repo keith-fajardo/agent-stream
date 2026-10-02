@@ -92,4 +92,16 @@ describe('RunStore', () => {
     // readEvents should return the two valid events and skip the truncated line
     expect(store.readEvents(runId, 'n1').map((e) => e.type)).toEqual(['text', 'stdout']);
   });
+
+  it('finds the latest run of every graph', () => {
+    const paths = tmpProject();
+    const store = new RunStore(paths);
+    const meta = (id: string, graphId: string): RunMeta => ({ id, graphId, status: 'succeeded', startedAt: id, snapshot: emptyGraph(graphId, graphId, 't'), nodes: {} });
+    store.create(meta('20261001-100000-aaaa', 'a'));
+    store.create(meta('20261002-100000-bbbb', 'a'));
+    store.create(meta('20261001-120000-cccc', 'b'));
+    const latest = store.latestByGraph();
+    expect(latest.get('a')?.id).toBe('20261002-100000-bbbb');
+    expect(latest.get('b')?.id).toBe('20261001-120000-cccc');
+  });
 });

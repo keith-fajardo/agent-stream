@@ -96,4 +96,11 @@ describe('client state', () => {
     expect(reduce(withPreview, { kind: 'closeConfirm' }).preview).toBeUndefined();
     expect(reduce(apply(opened(graph('a'))), server({ type: 'runPreview', preview })).preview).toBeUndefined(); // no dialog open
   });
+
+  it('drops the open graph when it is deleted', () => {
+    const s = apply(opened(graph('a', ['n1'])), { kind: 'selectNode', id: 'n1' });
+    expect(reduce(s, server({ type: 'graphDeleted', graphId: 'b' })).graph?.id).toBe('a');
+    const gone = reduce(s, server({ type: 'graphDeleted', graphId: 'a' }));
+    expect(gone).toMatchObject({ graph: undefined, selectedNodeId: undefined, toast: 'This graph was deleted.' });
+  });
 });

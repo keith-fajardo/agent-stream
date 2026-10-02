@@ -1,11 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
   emptyGraph,
   nextNodeId,
+  parseExportFile,
   parseGraph,
+  toExportFile,
   type Actor,
   type Graph,
   type GraphListItem,
@@ -43,15 +45,29 @@ export class GraphStore extends EventEmitter {
     return join(this.paths.graphsDir, `${id}.ops.jsonl`);
   }
 
+  private chatFile(id: string): string {
+    return join(this.paths.graphsDir, `${id}.chat.jsonl`);
+  }
+
+  private uniqueId(name: string): string {
+    const base = slugify(name);
+    let id = base;
+    for (let i = 2; existsSync(this.file(id)); i++) id = `${base}-${i}`;
+    return id;
+  }
+
   list(): GraphListItem[] {
     const ids = readdirSync(this.paths.graphsDir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => f.slice(0, -'.json'.length))
       .sort();
-    return ids.map((id) => {
+    const items = ids.map((id): GraphListItem => {
       const r = this.load(id);
-      return r.ok ? { id, name: r.graph.name } : { id, name: id, error: r.error };
+      return r.ok ? { id, name: r.graph.name, updatedAt: r.graph.updatedAt } : { id, name: id, error: r.error };
     });
+    return items.sort(
+      (a, b) => Number(!!a.error) - Number(!!b.error) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || a.id.localeCompare(b.id),
+    );
   }
 
   load(id: string): GraphResult {
@@ -86,12 +102,58 @@ export class GraphStore extends EventEmitter {
   }
 
   create(name: string): Graph {
-    const base = slugify(name);
-    let id = base;
-    for (let i = 2; existsSync(this.file(id)); i++) id = `${base}-${i}`;
+    const id = this.uniqueId(name);
     const graph = emptyGraph(id, name.trim() || id, this.clock());
     this.save(graph);
     return graph;
+  }
+
+  /** Changes the display name only; the id (file name) stays, so runs keep pointing at it. */
+  rename(id: string, name: string): GraphResult {
+    const trimmed = name.trim();
+    if (!trimmed) return { ok: false, error: 'A graph needs a name.' };
+    const r = this.load(id);
+    if (!r.ok) return r;
+    const graph = { ...r.graph, name: trimmed, updatedAt: this.clock() };
+    this.save(graph);
+    this.emit('changed', graph);
+    return { ok: true, graph };
+  }
+
+  /** "<name> copy" with the same definition; no planner session, chat, edit history or runs. */
+  duplicate(id: string): GraphResult {
+    const r = this.load(id);
+    if (!r.ok) return r;
+    const names = new Set(this.list().map((g) => g.name));
+    let name = `${r.graph.name} copy`;
+    for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
+    const { plannerSessionId: _session, plannerOpCursor: _cursor, ...definition } = r.graph;
+    const graph: Graph = { ...definition, id: this.uniqueId(name), name, updatedAt: this.clock() };
+    this.save(graph);
+    return { ok: true, graph };
+  }
+
+  /** Removes the graph, its edit history and its chat. Run logs stay on disk. */
+  delete(id: string): { ok: true } | { ok: false; error: string } {
+    if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
+    if (!existsSync(this.file(id))) return { ok: false, error: `graph "${id}" not found` };
+    for (const f of [this.file(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
+    this.cache.delete(id);
+    return { ok: true };
+  }
+
+  exportGraph(id: string): { ok: true; fileName: string; content: string } | { ok: false; error: string } {
+    const r = this.load(id);
+    if (!r.ok) return r;
+    return { ok: true, fileName: `${id}.claude-stream.json`, content: `${JSON.stringify(toExportFile(r.graph, this.clock()), null, 2)}\n` };
+  }
+
+  importGraph(content: string): GraphResult {
+    const parsed = parseExportFile(content, 'import', this.clock());
+    if (!parsed.ok) return parsed;
+    const graph = { ...parsed.graph, id: this.uniqueId(parsed.graph.name) };
+    this.save(graph);
+    return { ok: true, graph };
   }
 
   apply(graphId: string, op: Op, by: Actor): GraphResult {

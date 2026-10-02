@@ -10,7 +10,7 @@ describe('GraphStore', () => {
     const store = new GraphStore(tmpProject(), fixedClock());
     expect(store.create('dbt Parity: orders!').id).toBe('dbt-parity-orders');
     expect(store.create('dbt parity orders').id).toBe('dbt-parity-orders-2');
-    expect(store.list().map((g) => g.id)).toEqual(['dbt-parity-orders', 'dbt-parity-orders-2']);
+    expect(store.list().map((g) => g.id)).toEqual(['dbt-parity-orders-2', 'dbt-parity-orders']);
   });
 
   it('applies ops, persists them, logs them and emits changes', () => {
@@ -141,5 +141,62 @@ describe('ChatLog', () => {
     appendFileSync(join(paths.graphsDir, 'g.chat.jsonl'), '<<<<<<< HEAD\n');
     log.append('g', { at: 't2', role: 'assistant', text: 'hello' });
     expect(log.read('g').map((e) => e.text)).toEqual(['hi', 'hello']);
+  });
+
+  describe('management', () => {
+    it('lists the newest graph first with its update time', () => {
+      const store = new GraphStore(tmpProject(), fixedClock());
+      store.create('Old');
+      store.create('New');
+      expect(store.list().map((g) => g.id)).toEqual(['new', 'old']);
+      expect(store.list()[0].updatedAt).toEqual(expect.any(String));
+    });
+
+    it('renames the display name only and refuses blank names', () => {
+      const store = new GraphStore(tmpProject(), fixedClock());
+      const { id } = store.create('First');
+      expect(store.rename(id, '  ')).toEqual({ ok: false, error: 'A graph needs a name.' });
+      const r = store.rename(id, 'Parity check');
+      expect(r.ok && r.graph).toMatchObject({ id: 'first', name: 'Parity check' });
+      expect(store.get('first').name).toBe('Parity check');
+    });
+
+    it('duplicates the definition without planner state', () => {
+      const store = new GraphStore(tmpProject(), fixedClock());
+      const { id } = store.create('G');
+      store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+      store.setPlannerState(id, { plannerSessionId: 's', plannerOpCursor: 1 });
+      const first = store.duplicate(id);
+      const second = store.duplicate(id);
+      if (!first.ok || !second.ok) throw new Error('duplicate failed');
+      expect([first.graph.name, second.graph.name]).toEqual(['G copy', 'G copy 2']);
+      expect(first.graph.nodes).toHaveLength(1);
+      expect(first.graph.plannerSessionId).toBeUndefined();
+      expect(store.readOps(first.graph.id)).toEqual([]);
+    });
+
+    it('deletes the graph, its edit history and its chat', () => {
+      const paths = tmpProject();
+      const store = new GraphStore(paths, fixedClock());
+      const { id } = store.create('G');
+      store.apply(id, { type: 'setGoal', goal: 'x' }, 'user');
+      new ChatLog(paths).append(id, { at: 't', role: 'user', text: 'hi' });
+      expect(store.delete(id)).toEqual({ ok: true });
+      expect(store.list()).toEqual([]);
+      expect(store.load(id)).toEqual({ ok: false, error: `graph "${id}" not found` });
+      expect(new ChatLog(paths).read(id)).toEqual([]);
+      expect(store.delete(id)).toEqual({ ok: false, error: `graph "${id}" not found` });
+    });
+
+    it('exports and imports under a new, unique id', () => {
+      const store = new GraphStore(tmpProject(), fixedClock());
+      const { id } = store.create('Parity');
+      const exported = store.exportGraph(id);
+      if (!exported.ok) throw new Error(exported.error);
+      expect(exported.fileName).toBe('parity.claude-stream.json');
+      const imported = store.importGraph(exported.content);
+      expect(imported.ok && imported.graph.id).toBe('parity-2');
+      expect(store.importGraph('nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });
+    });
   });
 });
