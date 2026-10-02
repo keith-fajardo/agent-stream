@@ -1,6 +1,6 @@
 # claude-stream
 
-A local web app where you and a Claude planner co-create a workflow as a graph, then run it step by step on your Claude subscription. Every agent action waits for your approval, and every step keeps its own logs.
+A local web app where you and a Claude planner co-create a workflow as a graph, then run it step by step on your Claude subscription. Every file edit, shell command, or other non-read-only action an agent step attempts waits for your approval, and every step keeps its own logs.
 
 ## Requirements
 
@@ -50,6 +50,7 @@ This is a personal tool: anyone else who runs it uses their own Claude Code logi
 - The server listens on 127.0.0.1 only and requires the token in the URL it prints (exchanged for a cookie).
 - Command steps run exactly as written with your shell environment, after you confirm the run.
 - Agent steps can't start sub-agents and wait for you before any edit, write, or shell command.
+- Agent steps and the planner load the repo's .claude/settings.json (including its hooks, which run without approval) and CLAUDE.md. claude-stream refuses to run when that settings file would route Claude to an API key or another provider.
 
 ## Development
 
