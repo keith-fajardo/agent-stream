@@ -73,7 +73,7 @@ describe('commandShell', () => {
     expect(commandShell({ platform: 'linux', env: {}, command: 'x' })).toMatchObject({ file: '/bin/sh' });
     expect(commandShell({ platform: 'win32', env: {}, command: 'dbt build', gitBashPath: 'C:\\Program Files\\Git\\bin\\bash.exe' })).toEqual({
       file: 'C:\\Program Files\\Git\\bin\\bash.exe',
-      args: ['-lc', 'eval "$CLAUDE_STREAM_COMMAND"'],
+      args: ['-lc', '__cs_cmd=$CLAUDE_STREAM_COMMAND; unset CLAUDE_STREAM_COMMAND; eval "$__cs_cmd"'],
       detached: false,
       windowsHide: true,
       env: { CLAUDE_STREAM_COMMAND: 'dbt build' },

@@ -40,6 +40,13 @@ describe.runIf(process.platform === 'win32')('on real Windows', () => {
     expect(outcome).toMatchObject({ ok: true, output: `it's a; test|` });
   });
 
+  it('keeps the rendered command out of the environment of what the command starts', async () => {
+    if (!gitBash.ok) throw new Error(gitBash.error);
+    const outcome = await createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path })(ctx('echo "${CLAUDE_STREAM_COMMAND-unset}"', mkdtempSync(join(tmpdir(), 'e-'))));
+    expect(outcome).toMatchObject({ ok: true });
+    expect(outcome.output.trim()).toBe('unset');
+  });
+
   it('stops a running command and everything it started with taskkill', async () => {
     if (!gitBash.ok) throw new Error(gitBash.error);
     const controller = new AbortController();

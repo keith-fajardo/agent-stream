@@ -110,7 +110,10 @@ const posixShell = (shell: string | undefined) => (shell && POSIX_SHELLS.has(pat
 export function commandShell(o: { platform: NodeJS.Platform; env: NodeJS.ProcessEnv; command: string; shell?: string; gitBashPath?: string }): ShellSpec | { error: string } {
   if (o.platform === 'win32') {
     if (!o.gitBashPath) return { error: GIT_BASH_MISSING };
-    return { file: o.gitBashPath, args: ['-lc', 'eval "$CLAUDE_STREAM_COMMAND"'], detached: false, windowsHide: true, env: { CLAUDE_STREAM_COMMAND: o.command } };
+    // The command travels in the environment (MSYS would mangle it as an argument); it is unset before it runs,
+    // so the rendered command, which may hold values, isn't passed on to what the command starts.
+    const script = '__cs_cmd=$CLAUDE_STREAM_COMMAND; unset CLAUDE_STREAM_COMMAND; eval "$__cs_cmd"';
+    return { file: o.gitBashPath, args: ['-lc', script], detached: false, windowsHide: true, env: { CLAUDE_STREAM_COMMAND: o.command } };
   }
   return { file: o.shell ?? posixShell(o.env.SHELL), args: ['-lc', o.command], detached: true, windowsHide: false };
 }
