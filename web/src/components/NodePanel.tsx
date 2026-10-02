@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { GraphNode, NodeKind, NodePatch } from '@claude-stream/shared';
+import { actions } from '../actions';
 import { send } from '../bridge';
-import { dispatch, useStore } from '../store';
+import { useStore } from '../store';
 
 type Draft = { title: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
 
@@ -115,11 +116,11 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
         <button
           disabled={!latest || running}
           title={latest ? `Run this step and everything after it again, reusing run ${latest.id} for the rest` : 'Run the graph once first'}
-          onClick={() => latest && dispatch({ kind: 'openConfirm', request: { fromNodeId: node.id, sourceRunId: latest.id } })}
+          onClick={actions.rerunFromSelected}
         >
           Re-run from here
         </button>
-        <button className="danger" onClick={() => send({ type: 'op', graphId, op: { type: 'deleteNode', id: node.id } })}>
+        <button className="danger" onClick={actions.deleteSelectedStep}>
           Delete
         </button>
       </div>

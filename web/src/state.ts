@@ -35,10 +35,11 @@ export type State = {
   tab: Tab;
   toast?: string;
   minimap: boolean;
+  logsHidden: boolean;
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat', minimap: true };
+export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat', minimap: true, logsHidden: false };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -49,6 +50,7 @@ export type Action =
   | { kind: 'closeConfirm' }
   | { kind: 'dismissToast' }
   | { kind: 'setMinimap'; value: boolean }
+  | { kind: 'toggleLogs' }
   | { kind: 'openVariables'; focus?: string; addRow?: boolean }
   | { kind: 'closeVariables' };
 
@@ -70,6 +72,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, confirm: undefined, preview: undefined };
     case 'dismissToast':
       return { ...state, toast: undefined };
+    case 'toggleLogs':
+      return { ...state, logsHidden: !state.logsHidden };
     case 'setMinimap':
       return { ...state, minimap: action.value };
     case 'openVariables':

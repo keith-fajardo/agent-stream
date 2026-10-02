@@ -12,6 +12,7 @@ export function LogsPanel() {
   const selectedId = useStore((s) => s.selectedNodeId);
   const run = useStore((s) => s.run);
   const approvals = useStore((s) => s.approvals);
+  const logsHidden = useStore((s) => s.logsHidden);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   const state = node && run ? run.nodes[node.id] : undefined;
   const key = run && node ? logKey(run.id, node.id) : '';
@@ -37,7 +38,7 @@ export function LogsPanel() {
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [eventCount, runId, nodeId]);
 
-  if (!graph || !node) return null;
+  if (!graph || !node || logsHidden) return null;
   const sourceRunId = run?.sourceRunId;
   const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
   return (

@@ -1,32 +1,21 @@
 :root {
-  --bg: #f7f7f5;
-  --panel: #ffffff;
-  --border: #e3e2de;
-  --text: #1f1f1d;
-  --muted: #6b6a66;
-  --accent: #c96442;
-  --accent-text: #ffffff;
-  --danger: #b42318;
-  --ok: #2e7d32;
-  --warn: #b26a00;
-  --info: #1d5fa8;
-  --skip: #8a8a86;
-  --code-bg: #f1f0ec;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 14px;
+  --bg: var(--vscode-editor-background, #f7f7f5);
+  --panel: var(--vscode-sideBar-background, var(--vscode-editor-background, #ffffff));
+  --border: var(--vscode-panel-border, var(--vscode-widget-border, #e3e2de));
+  --text: var(--vscode-foreground, #1f1f1d);
+  --muted: var(--vscode-descriptionForeground, #6b6a66);
+  --accent: var(--vscode-button-background, #c96442);
+  --accent-text: var(--vscode-button-foreground, #ffffff);
+  --danger: var(--vscode-errorForeground, #b42318);
+  --ok: var(--vscode-testing-iconPassed, #2e7d32);
+  --warn: var(--vscode-editorWarning-foreground, #b26a00);
+  --info: var(--vscode-textLink-foreground, #1d5fa8);
+  --skip: var(--vscode-disabledForeground, #8a8a86);
+  --code-bg: var(--vscode-textCodeBlock-background, #f1f0ec);
+  font-family: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
   color: var(--text);
   background: var(--bg);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1b19;
-    --panel: #262523;
-    --border: #3a3936;
-    --text: #ecebe8;
-    --muted: #a3a29e;
-    --code-bg: #2f2e2b;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -36,7 +25,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button.link { border: none; background: none; padding: 0; color: var(--info); text-decoration: underline; }
-input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+input, select, textarea { font: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+input, select, textarea { background: var(--vscode-input-background, var(--panel)); color: var(--vscode-input-foreground, var(--text)); border-color: var(--vscode-input-border, var(--border)); }
 textarea { width: 100%; resize: vertical; }
 pre, code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; margin: 4px 0; max-height: 400px; overflow: auto; }
@@ -44,13 +34,21 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .pad { padding: 16px; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
-.topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.brand { font-weight: 600; margin-right: 8px; }
-.new-graph { display: flex; gap: 6px; }
-.goal { flex: 1; min-width: 120px; }
-.auth { margin-left: auto; font-size: 12px; white-space: nowrap; }
-.auth.ok { color: var(--ok); }
-.auth.bad { color: var(--danger); }
+
+.topbar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.graph-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; }
+.menubar { display: flex; gap: 2px; }
+.menu { position: relative; }
+.menu > button { border: none; background: none; padding: 3px 8px; }
+.menu > button.open, .menu > button:hover { background: var(--vscode-toolbar-hoverBackground, var(--code-bg)); }
+.menu-items { position: absolute; z-index: 20; top: 100%; left: 0; min-width: 240px; padding: 4px 0; display: flex; flex-direction: column; background: var(--vscode-menu-background, var(--panel)); color: var(--vscode-menu-foreground, var(--text)); border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+.menu-items button { border: none; border-radius: 0; background: none; color: inherit; text-align: left; padding: 4px 12px 4px 4px; display: flex; gap: 4px; }
+.menu-items button:not(:disabled):hover { background: var(--vscode-menu-selectionBackground, var(--accent)); color: var(--vscode-menu-selectionForeground, var(--accent-text)); }
+.menu-items button.warn { color: var(--warn); }
+.menu-items .check { width: 16px; text-align: center; }
+.menu-items hr { border: none; border-top: 1px solid var(--vscode-menu-separatorBackground, var(--border)); margin: 4px 0; width: 100%; }
+.react-flow { --xy-background-color: var(--bg); --xy-minimap-background-color: var(--panel); --xy-controls-button-background-color: var(--panel); --xy-controls-button-color: var(--text); --xy-controls-button-border-color: var(--border); --xy-edge-stroke: var(--muted); }
 .banner { padding: 8px 12px; background: rgba(180, 35, 24, 0.1); color: var(--danger); border-bottom: 1px solid var(--border); }
 .main { flex: 1; display: flex; min-height: 0; }
 

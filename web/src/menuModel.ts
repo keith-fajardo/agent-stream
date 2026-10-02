@@ -1,0 +1,68 @@
+import type { HostCommand } from '@claude-stream/shared';
+import { actions, graphApprovals } from './actions';
+import type { State, Tab } from './state';
+
+export type MenuAction = { label: string; enabled: boolean; checked?: boolean; warn?: boolean; run: () => void };
+export type MenuEntry = MenuAction | { separator: true };
+export type Menu = { id: 'file' | 'edit' | 'run' | 'variables' | 'view'; label: string; items: MenuEntry[] };
+
+const SEPARATOR: MenuEntry = { separator: true };
+const item = (label: string, enabled: boolean, run: () => void, extra: Partial<MenuAction> = {}): MenuAction => ({ label, enabled, run, ...extra });
+const host = (label: string, command: HostCommand, enabled = true): MenuAction => item(label, enabled, () => actions.host(command));
+
+/** The menu bar (spec §4.3): items that don't apply right now are disabled, never hidden. */
+export function buildMenus(s: State): Menu[] {
+  const hasGraph = !!s.graph;
+  const running = s.run?.status === 'running';
+  const signedIn = !!s.auth?.ok;
+  const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
+  const pending = graphApprovals(s).length;
+  const tab = (label: string, t: Tab) => item(label, hasGraph, () => actions.showTab(t), { checked: s.tab === t });
+  return [
+    {
+      id: 'file',
+      label: 'File',
+      items: [
+        host('New graph…', 'newGraph'),
+        host('Open…', 'openGraph'),
+        host('Import…', 'importGraph'),
+        SEPARATOR,
+        host('Export…', 'exportGraph', hasGraph),
+        host('Rename…', 'renameGraph', hasGraph),
+        host('Duplicate', 'duplicateGraph', hasGraph),
+        SEPARATOR,
+        host('Delete…', 'deleteGraph', hasGraph && !running),
+      ],
+    },
+    {
+      id: 'edit',
+      label: 'Edit',
+      items: [item('Add step', hasGraph, actions.addStep), item('Delete selected step', selected, actions.deleteSelectedStep), item('Tidy layout', hasGraph, actions.tidy)],
+    },
+    {
+      id: 'run',
+      label: 'Run',
+      items: [
+        item('Run…', hasGraph && signedIn && !running, actions.run),
+        item('Stop', running, actions.stop),
+        item('Re-run from selected step…', signedIn && !running && selected && s.runs.length > 0, actions.rerunFromSelected),
+        SEPARATOR,
+        item(`Approve all (${pending})`, pending > 0, actions.approveAll),
+      ],
+    },
+    {
+      id: 'view',
+      label: 'View',
+      items: [
+        item('Logs panel', selected, actions.toggleLogs, { checked: selected && !s.logsHidden }),
+        item('Minimap', hasGraph, actions.toggleMinimap, { checked: s.minimap }),
+        SEPARATOR,
+        tab('Chat', 'chat'),
+        tab('Node', 'node'),
+        tab('Graph', 'graph'),
+        SEPARATOR,
+        host('Show sidebar', 'showSidebar'),
+      ],
+    },
+  ];
+}

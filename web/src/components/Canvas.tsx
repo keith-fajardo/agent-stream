@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import { nextNodeId, type Op, type Position } from '@claude-stream/shared';
 import { buildFlowEdges, buildFlowNodes } from '../flowNodes';
-import { layoutPositions } from '../layout';
+import { actions, registerCanvas } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
 import { dispatch, useStore } from '../store';
@@ -29,6 +29,7 @@ export function Canvas() {
   const run = useStore((s) => s.run);
   const approvals = useStore((s) => s.approvals);
   const selectedId = useStore((s) => s.selectedNodeId);
+  const minimap = useStore((s) => s.minimap);
   const { screenToFlowPosition } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
@@ -60,7 +61,13 @@ export function Canvas() {
     [],
   );
 
-  if (!graph) return <div className="empty">Create a graph with “+ New” to start.</div>;
+  const addInView = useRef<() => void>(() => {});
+  useEffect(() => {
+    registerCanvas({ addStepInView: () => addInView.current() });
+    return () => registerCanvas(undefined);
+  }, []);
+
+  if (!graph) return <div className="empty">Loading the graph…</div>;
 
   const graphId = graph.id;
   const op = (o: Op) => send({ type: 'op', graphId, op: o });
@@ -73,9 +80,7 @@ export function Canvas() {
     const r = wrapper.current?.getBoundingClientRect();
     if (r) addAt(screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }));
   };
-  const tidy = () => {
-    for (const [id, position] of layoutPositions(graph, false)) op({ type: 'moveNode', id, position });
-  };
+  addInView.current = addInCenter;
   const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => {
     const ids = new Set(deleted.map((n) => n.id));
     for (const e of removed) if (!ids.has(e.source) && !ids.has(e.target)) op({ type: 'disconnect', from: e.source, to: e.target });
@@ -92,8 +97,8 @@ export function Canvas() {
       }}
     >
       <div className="canvas-toolbar">
-        <button onClick={addInCenter}>+ Step</button>
-        <button onClick={tidy}>Tidy</button>
+        <button onClick={actions.addStep}>+ Step</button>
+        <button onClick={actions.tidy}>Tidy</button>
         {stale && <span className="stale">Graph changed since this run started</span>}
       </div>
       <ReactFlow
@@ -122,7 +127,7 @@ export function Canvas() {
       >
         <Background />
         <Controls />
-        <MiniMap pannable zoomable position="top-right" />
+        {minimap && <MiniMap pannable zoomable position="top-right" />}
       </ReactFlow>
     </div>
   );
