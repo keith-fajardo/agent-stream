@@ -1,8 +1,11 @@
 {
-  "name": "@claude-stream/server",
-  "version": "0.1.0",
+  "name": "@claude-stream/engine",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p ."
@@ -12,12 +15,6 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "@claude-stream/shared": "*",
     "@modelcontextprotocol/sdk": "^1.31.0",
-    "open": "^11.0.4",
-    "tsx": "^4.23.15",
-    "ws": "^8.22.0",
     "zod": "^4.6.5"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.2"
   }
 }
