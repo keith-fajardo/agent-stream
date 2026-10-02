@@ -7,7 +7,11 @@
     "shared",
     "server"
   ],
+  "bin": {
+    "claude-stream": "server/bin/claude-stream.mjs"
+  },
   "scripts": {
+    "start": "node server/bin/claude-stream.mjs",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
