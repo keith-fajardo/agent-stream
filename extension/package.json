@@ -5,6 +5,11 @@
   "version": "0.2.0",
   "publisher": "claude-stream-local",
   "license": "UNLICENSED",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keith-fajardo/claude-stream.git"
+  },
   "type": "module",
   "engines": {
     "vscode": "^1.100.0"
@@ -258,7 +263,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:all": "cd .. && npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license && node scripts/check-vsix.mjs",
+    "package": "vsce package --no-dependencies --skip-license && node scripts/check-vsix.mjs",
     "test": "vitest run",
     "test:integration": "npm run build:all && node test/integration/runTest.mjs",
     "typecheck": "tsc -p ."
