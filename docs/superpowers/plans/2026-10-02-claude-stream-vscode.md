@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - VS Code manifest: `engines.vscode` `^1.100.0`; `extensionKind: ["workspace"]`; publisher id `claude-stream-local`; `npm run package` produces `claude-stream-<version>.vsix`.
+- **The `.vsix` is universal:** one package for every OS and CPU (the user will publish it to the Marketplace and install it on Windows). Never use `vsce package --target`; no `os`/`cpu` fields in `extension/package.json`; the package contains no `node_modules/`, no native files (`.node`, `.exe`, `.dll`, `.dylib`, `.so`) and none of the Agent SDK's per-platform Claude Code binaries (`@anthropic-ai/claude-agent-sdk-<platform>`). The bundle is plain JavaScript, every OS difference is decided at runtime (`process.platform`), and agent steps always run the user's installed Claude Code through `pathToClaudeCodeExecutable`. `extension/scripts/check-vsix.mjs` enforces this on every `npm run package`.
 - The subscription rules from v1 stay exactly as they are: sanitized environment (no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_*`), `claude auth status` must report `authMethod: claude.ai` and `apiProvider: firstParty`, init `apiKeySource` must be `none` or `oauth`, and `projectSettingsProblem` is checked per folder, per agent step and per planner turn.
 - The approval gate stays exactly as it is: only `Read`, `Glob` and `Grep` pass without approval.
 - Variable values are never written to the graph file, an export, or anything the planner sees. They live in `<folder>/.claude-stream/variables.local.json` (gitignored, file mode `0600` on macOS/Linux). A value is a string of at most 10,000 characters; an empty string means "not set".
@@ -4768,7 +4769,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 16: Extension package, build and webview page
 
 **Files:**
-- Create: `extension/package.json`, `extension/tsconfig.json`, `extension/vitest.config.ts`, `extension/bundle.config.json`, `extension/build.mjs`, `extension/.vscodeignore`, `extension/README.md`, `extension/media/icon.svg`, `extension/src/extension.ts`, `extension/src/webviewHtml.ts`, `extension/test/vscode.ts`, `extension/test/webviewHtml.test.ts`, `extension/test/bundle.test.ts`
+- Create: `extension/package.json`, `extension/tsconfig.json`, `extension/vitest.config.ts`, `extension/bundle.config.json`, `extension/build.mjs`, `extension/.vscodeignore`, `extension/README.md`, `extension/media/icon.svg`, `extension/scripts/check-vsix.mjs`, `extension/src/extension.ts`, `extension/src/webviewHtml.ts`, `extension/test/vscode.ts`, `extension/test/webviewHtml.test.ts`, `extension/test/bundle.test.ts`
 - Modify: `package.json` (root), `web/vite.config.ts`
 
 **Interfaces:**
@@ -4825,7 +4826,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   "scripts": {
     "build": "node build.mjs",
     "build:all": "cd .. && npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license && node scripts/check-vsix.mjs",
     "test": "vitest run",
     "test:integration": "npm run build:all && node test/integration/runTest.mjs",
     "typecheck": "tsc -p ."
@@ -4899,6 +4900,55 @@ await build({ ...options, entryPoints: ['src/extension.ts'], outfile: 'dist/exte
 !package.json
 !README.md
 ```
+
+`extension/scripts/check-vsix.mjs` — fails the package step unless the `.vsix` is universal (see Global Constraints). It reads the zip's central directory itself, so it runs on any OS without `unzip`:
+
+```js
+// Fails unless the .vsix is one universal package for every OS and CPU.
+import { readFileSync } from 'node:fs';
+
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const file = process.argv[2] ?? new URL(`../${manifest.name}-${manifest.version}.vsix`, import.meta.url);
+
+/** Names of the files inside a zip (a .vsix is a zip), read from its central directory. */
+function zipEntries(buf) {
+  let end = buf.length - 22;
+  while (end >= 0 && buf.readUInt32LE(end) !== 0x06054b50) end--;
+  if (end < 0) throw new Error('not a zip file');
+  const count = buf.readUInt16LE(end + 10);
+  let p = buf.readUInt32LE(end + 16);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('corrupt zip central directory');
+    const nameLength = buf.readUInt16LE(p + 28);
+    const extraLength = buf.readUInt16LE(p + 30);
+    const commentLength = buf.readUInt16LE(p + 32);
+    names.push(buf.toString('utf8', p + 46, p + 46 + nameLength));
+    p += 46 + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
+
+const problems = [];
+for (const key of ['os', 'cpu']) if (manifest[key]) problems.push(`package.json sets "${key}", which limits the platforms`);
+const names = zipEntries(readFileSync(file));
+for (const name of names) {
+  if (/(^|\/)node_modules\//.test(name)) problems.push(`contains node_modules: ${name}`);
+  if (/\.(node|exe|dll|dylib|so)$/i.test(name)) problems.push(`contains a native file: ${name}`);
+  if (/claude-agent-sdk-(darwin|linux|win32)/.test(name)) problems.push(`contains a per-platform Claude Code binary: ${name}`);
+}
+for (const required of ['extension/package.json', 'extension/dist/extension.cjs', 'extension/dist/webview/assets/index.js', 'extension/dist/webview/assets/index.css', 'extension/media/icon.svg']) {
+  if (!names.includes(required)) problems.push(`missing ${required}`);
+}
+if (!names.includes('extension.vsixmanifest')) problems.push('missing extension.vsixmanifest');
+if (problems.length) {
+  console.error(`The .vsix is not a universal package:\n- ${problems.join('\n- ')}`);
+  process.exit(1);
+}
+console.log(`${names.length} files; universal package (no platform-specific files).`);
+```
+
+(`vsce package --target <platform>` would also add a platform suffix to the file name, which makes the default path above not exist — the check fails in that case too.)
 
 `extension/README.md`:
 
@@ -5118,8 +5168,8 @@ export function webviewHtml(p: WebviewPage): string {
 
 - [ ] **Step 5: Run the tests, build and package**
 
-Run: `npm test -w extension && npm run typecheck && npm run build && ls extension/dist extension/dist/webview/assets && npm run package && unzip -l extension/claude-stream-0.2.0.vsix | rtk proxy grep -E "extension.cjs|index.js|index.css|icon.svg"`
-Expected: tests PASS; `dist/extension.cjs` exists; `dist/webview/assets/` contains `index.js` and `index.css` (if the CSS has another name, fix `assetFileNames` until it is `index.css`); the `.vsix` lists `extension/dist/extension.cjs`, `extension/dist/webview/assets/index.js`, `extension/dist/webview/assets/index.css` and `extension/media/icon.svg`. If `vsce` stops at an interactive question, add the flag it names to the `package` script.
+Run: `npm test -w extension && npm run typecheck && npm run build && ls extension/dist extension/dist/webview/assets && npm run package`
+Expected: tests PASS; `dist/extension.cjs` exists; `dist/webview/assets/` contains `index.js` and `index.css` (if the CSS has another name, fix `assetFileNames` until it is `index.css`); `npm run package` ends with `… files; universal package (no platform-specific files).` If `vsce` stops at an interactive question, add the flag it names to the `package` script. To prove the check bites, temporarily add `"os": ["darwin"]` to `extension/package.json`, run `npm run package -w extension`, see it fail, and remove the line.
 
 - [ ] **Step 6: Commit**
 
@@ -7553,3 +7603,139 @@ git commit -m "docs: README for the VS Code extension and a Windows checklist
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 24: Real Windows checks in CI (macOS, Windows, Linux)
+
+The user will publish the universal `.vsix` and install it on Windows. Everything Windows-specific so far is tested through simulation on macOS; this task runs the suites — plus Windows-only tests of the real Git Bash path — on real Windows, macOS and Linux runners.
+
+**Files:**
+- Create: `.github/workflows/ci.yml`, `engine/test/windows.test.ts`
+- Modify: `engine/test/commandExecutor.test.ts` (POSIX-only tests skip on Windows)
+
+**Interfaces:**
+- Consumes: `findGitBash`, `createCommandExecutor`, `renderTemplate` (Tasks 4, 9); `npm run package` and `check-vsix.mjs` (Task 16); `npm run test:integration -w extension` (Task 21).
+- Produces: a CI workflow that, on every push, runs typecheck, all unit tests, the build, the VS Code integration test and (once) the universal-package check, and uploads the `.vsix`.
+
+- [ ] **Step 1: Write the Windows-only tests** — `engine/test/windows.test.ts`
+
+```ts
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { emptyGraph, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
+import { createCommandExecutor } from '../src/commandExecutor';
+import type { NodeContext } from '../src/executors';
+import { findGitBash } from '../src/platform';
+import { renderTemplate } from '../src/templates';
+
+function ctx(command: string, cwd: string, signal: AbortSignal = new AbortController().signal): NodeContext {
+  const node: GraphNode = { id: 'n1', title: 'cmd', kind: 'command', command, createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
+  const events: NodeEventBody[] = [];
+  return { runId: 'r', graph: emptyGraph('g', 'G', 't'), node, prompt: '', cwd, signal, emit: (e) => events.push(e) };
+}
+
+describe.runIf(process.platform === 'win32')('on real Windows', () => {
+  const gitBash = findGitBash({ env: process.env });
+
+  it('finds Git Bash, and not WSL bash', () => {
+    expect(gitBash).toMatchObject({ ok: true });
+    if (gitBash.ok) expect(gitBash.path.toLowerCase()).not.toContain('system32');
+  });
+
+  it('runs a command step in Git Bash, in a folder with spaces, with the Windows defaults', async () => {
+    if (!gitBash.ok) throw new Error(gitBash.error);
+    const cwd = mkdtempSync(join(tmpdir(), 'my project '));
+    const run = createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path });
+    const outcome = await run(ctx('pwd -W && echo "$CHERE_INVOKING $PYTHONIOENCODING"', cwd));
+    expect(outcome.ok).toBe(true);
+    const [where, defaults] = outcome.output.trim().split(/\r?\n/);
+    expect(where.toLowerCase()).toBe(realpathSync(cwd).replace(/\\/g, '/').toLowerCase());
+    expect(defaults).toBe('1 utf-8');
+  });
+
+  it('passes a quoted value through Git Bash as one argument', async () => {
+    if (!gitBash.ok) throw new Error(gitBash.error);
+    const command = renderTemplate('printf "%s|" {{ v }}', { mode: 'command', context: { v: `it's a; test` }, env: () => undefined });
+    const outcome = await createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path })(ctx(command, mkdtempSync(join(tmpdir(), 'q-'))));
+    expect(outcome).toMatchObject({ ok: true, output: `it's a; test|` });
+  });
+
+  it('stops a running command and everything it started with taskkill', async () => {
+    if (!gitBash.ok) throw new Error(gitBash.error);
+    const controller = new AbortController();
+    const started = Date.now();
+    const running = createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path })(ctx('sleep 60 & sleep 60; wait', mkdtempSync(join(tmpdir(), 's-')), controller.signal));
+    await new Promise((r) => setTimeout(r, 1500));
+    controller.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(20_000);
+  }, 30_000);
+});
+```
+
+- [ ] **Step 2: Mark the POSIX-only command tests**
+
+In `engine/test/commandExecutor.test.ts`, change the top-level `describe('command executor', …)` to `describe.skipIf(process.platform === 'win32')('command executor', …)` — those tests use `/bin/sh`, POSIX signals and symlinks; `windows.test.ts` covers Windows. Run `npm test` on macOS: everything still passes and `windows.test.ts` reports its tests as skipped.
+
+- [ ] **Step 3: Write `.github/workflows/ci.yml`**
+
+```yaml
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Integration test in VS Code
+        if: runner.os != 'Linux'
+        run: npm run test:integration -w extension
+      - name: Integration test in VS Code (virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration -w extension
+      - name: Package the universal .vsix
+        if: runner.os == 'Linux'
+        run: npm run package -w extension
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: claude-stream-vsix
+          path: extension/*.vsix
+```
+
+(The runners have no Claude Code sign-in, so the integration test checks activation, the graph list and the graph tab loading under the CSP, and skips the real run with a message. GitHub's Windows runners include Git for Windows, so `windows.test.ts` runs the real Git Bash path there.)
+
+- [ ] **Step 4: Verify locally, then commit**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS on macOS (Windows-only tests skipped).
+
+```bash
+git add .github/workflows/ci.yml engine/test/windows.test.ts engine/test/commandExecutor.test.ts
+git commit -m "ci: run tests, the VS Code integration test and the package check on Windows, macOS and Linux
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 5: Run it on GitHub (needs the user's go-ahead)**
+
+The repository has no GitHub remote yet. Creating one and pushing is an outward-facing action: ask the user first. With their yes: `gh repo create claude-stream --private --source . --push`, then `gh run watch` on the CI run. Every job must pass; a Windows failure is fixed (with a test) before finishing the branch.
