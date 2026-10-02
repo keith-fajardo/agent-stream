@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
-/** Write to a temp file, then rename, so readers never see a half-written file. */
-export function writeFileAtomic(path: string, data: string): void {
+/** Write to a temp file (created with `mode`, if given), then rename, so readers never see a half-written file. */
+export function writeFileAtomic(path: string, data: string, mode?: number): void {
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
-  writeFileSync(tmp, data);
+  writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
   renameSync(tmp, path);
 }
 
