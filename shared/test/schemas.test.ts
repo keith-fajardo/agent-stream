@@ -87,4 +87,10 @@ describe('format', () => {
     expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'env_var' }] })).toEqual({ ok: false, error: 'invalid variable: "env_var" is a reserved word.' });
     expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'a' }, { name: 'a' }] })).toEqual({ ok: false, error: 'invalid variable: A variable named "a" already exists.' });
   });
+
+  it('accepts preview and variable value messages', () => {
+    expect(parseClientMessage(JSON.stringify({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r' })).ok).toBe(true);
+    expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'dev' })).ok).toBe(true);
+    expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) })).ok).toBe(false);
+  });
 });

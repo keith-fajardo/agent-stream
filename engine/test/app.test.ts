@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { contentSignature, emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
+import { emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
@@ -11,14 +11,14 @@ const instant: NodeExecutor = async (ctx) => {
 };
 const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max', email: 'me@example.com' };
 
-function setup(auth: AuthInfo = signedIn) {
+function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant) {
   const paths = tmpProject();
   const app = createApp({
     projectDir: paths.root,
     claudePath: 'claude',
     auth,
     maxParallel: 2,
-    executors: { agent: instant, command: instant },
+    executors: { agent: instant, command },
     queryFn: async function* () {},
   });
   const client = () => {
@@ -30,6 +30,14 @@ function setup(auth: AuthInfo = signedIn) {
     return { c, msgs, of };
   };
   return { paths, app, client };
+}
+
+type TestClient = ReturnType<ReturnType<typeof setup>['client']>;
+
+/** Asks for a run preview like the dialog does and returns it (its signature is what Start sends). */
+async function reviewed(app: ReturnType<typeof setup>['app'], c: TestClient, graphId: string, extra: { fromNodeId?: string; sourceRunId?: string } = {}) {
+  await app.handle(c.c, { type: 'previewRun', graphId, ...extra });
+  return c.of('runPreview').at(-1)!.preview;
 }
 
 describe('app', () => {
@@ -71,7 +79,7 @@ describe('app', () => {
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: contentSignature(app.graphStore.get(g.id)) });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
     await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
     const runId = a.of('run')[0].run.id;
     expect(a.of('run')[0].run.status).toBe('running');
@@ -91,10 +99,10 @@ describe('app', () => {
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'command', command: 'echo reviewed' } }, 'user');
-    const reviewed = contentSignature(app.graphStore.get(g.id));
+    const preview = await reviewed(app, a, g.id);
     app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { command: 'echo swapped' } }, 'agent');
-    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed });
-    expect(a.of('error').map((m) => m.message)).toEqual(['The graph changed after you reviewed it. Review the run again.']);
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    expect(a.of('error').map((m) => m.message)).toEqual(['Something changed since you reviewed this run (a step, a variable or an environment variable). Review it again.']);
     expect(a.of('run')).toEqual([]);
     expect(app.runStore.list(g.id)).toEqual([]);
   });
@@ -104,7 +112,7 @@ describe('app', () => {
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: contentSignature(app.graphStore.get(g.id)) });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
     await app.handle(a.c, { type: 'chat', graphId: g.id, text: 'hi' });
     expect(a.of('error').map((m) => m.message)).toEqual(['Runs are disabled: Not signed in.', 'Chat is disabled: Not signed in.']);
     expect(a.of('run')).toEqual([]);
@@ -144,5 +152,54 @@ describe('app', () => {
     });
     const app = createApp({ projectDir: paths.root, claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
     expect(app.runStore.get('20261001-120000-abcd')).toMatchObject({ status: 'interrupted', nodes: { n1: { status: 'interrupted' } } });
+  });
+
+  it('previews and starts a run with variable values filled in', async () => {
+    const commands: string[] = [];
+    const { app, client } = setup(signedIn, async (ctx) => {
+      commands.push(ctx.node.command ?? '');
+      return { ok: true, output: '' };
+    });
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'model' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'dbt build -s {{ model }}' } }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'model', value: 'orders v2' });
+    expect(a.of('variableValues').at(-1)).toEqual({ type: 'variableValues', graphId: g.id, values: { model: 'orders v2' } });
+    const preview = await reviewed(app, a, g.id);
+    expect(preview.steps[0].text).toBe("dbt build -s 'orders v2'");
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    expect(commands).toEqual(["dbt build -s 'orders v2'"]);
+  });
+
+  it('refuses to start when a value changed after review', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'model' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'echo {{ model }}' } }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'model', value: 'a' });
+    const preview = await reviewed(app, a, g.id);
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'model', value: 'b' });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    expect(a.of('error').at(-1)?.message).toBe('Something changed since you reviewed this run (a step, a variable or an environment variable). Review it again.');
+    expect(a.of('run')).toEqual([]);
+  });
+
+  it('sends values with the opened graph, refuses unknown variables, and follows renames and deletes', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'schema' }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'schema', value: 'dev' });
+    await app.handle(a.c, { type: 'openGraph', graphId: g.id });
+    expect(a.of('graphOpened').at(-1)?.variableValues).toEqual({ schema: 'dev' });
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'nope', value: 'x' });
+    expect(a.of('error').at(-1)?.message).toBe('variable nope does not exist');
+    await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'renameVariable', name: 'schema', newName: 'target' } });
+    expect(app.values.get(g.id)).toEqual({ target: 'dev' });
+    await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'deleteVariable', name: 'target' } });
+    expect(app.values.get(g.id)).toEqual({});
   });
 });

@@ -6,10 +6,12 @@ import {
   upstream,
   validateRunnable,
   type Graph,
+  type GraphNode,
   type NodeEvent,
   type NodeEventBody,
   type NodeRunState,
   type NodeStatus,
+  type RenderedRun,
   type RunMeta,
 } from '@claude-stream/shared';
 import type { ApprovalBroker } from './approvals';
@@ -34,7 +36,7 @@ export type RunnerDeps = {
   newRunId?: () => string;
 };
 
-export type StartRunInput = { graph: Graph; sourceRunId?: string; fromNodeId?: string };
+export type StartRunInput = { graph: Graph; rendered?: RenderedRun; sourceRunId?: string; fromNodeId?: string };
 export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string };
 
 type ActiveRun = {
@@ -88,9 +90,10 @@ export class Runner extends EventEmitter {
       source = this.deps.runStore.get(input.sourceRunId);
       if (!source) return { ok: false, error: `run ${input.sourceRunId} not found` };
     }
-    const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId) : new Set<string>();
+    const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered) : new Set<string>();
 
     const meta: RunMeta = { id: this.makeRunId(), graphId: graph.id, status: 'running', startedAt: this.clock(), snapshot: graph, nodes: {} };
+    if (input.rendered) meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
     if (input.fromNodeId) meta.fromNodeId = input.fromNodeId;
     for (const n of graph.nodes) {
@@ -151,16 +154,18 @@ export class Runner extends EventEmitter {
       .then(() => {
         // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.
         const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => ({
-          node: meta.snapshot.nodes.find((n) => n.id === parentId)!,
+          node: executionNode(meta, parentId),
           state: meta.nodes[parentId],
           output: this.deps.runStore.readOutput(meta.id, parentId),
           outputPath: this.deps.runStore.outputRelPath(meta.id, parentId),
         }));
-        const prompt = node.kind === 'agent' ? buildNodePrompt(meta.snapshot, node, upstreamResults) : '';
+        const graph = meta.rendered ? { ...meta.snapshot, goal: meta.rendered.goal, instructions: meta.rendered.instructions } : meta.snapshot;
+        const execNode = executionNode(meta, nodeId);
+        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, execNode, upstreamResults) : '';
         return executor({
           runId: meta.id,
-          graph: meta.snapshot,
-          node,
+          graph,
+          node: execNode,
           prompt,
           cwd: this.deps.projectDir,
           signal: controller.signal,
@@ -262,4 +267,12 @@ export class Runner extends EventEmitter {
       console.error(`[claude-stream] a '${event}' listener failed`, e);
     }
   }
+}
+
+/** The step as it runs: its prompt or command replaced by the text rendered for this run. */
+function executionNode(meta: RunMeta, id: string): GraphNode {
+  const node = meta.snapshot.nodes.find((n) => n.id === id)!;
+  const text = meta.rendered?.nodes[id];
+  if (text === undefined) return node;
+  return node.kind === 'command' ? { ...node, command: text } : { ...node, prompt: text };
 }

@@ -177,7 +177,7 @@ export type GraphListItem = { id: string; name: string; error?: string };
 export type ServerMessage =
   | { type: 'hello'; auth: AuthInfo; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
-  | { type: 'graphOpened'; graph: Graph; chat: ChatEntry[]; chatBusy: boolean; runs: RunSummary[]; run?: RunMeta }
+  | { type: 'graphOpened'; graph: Graph; chat: ChatEntry[]; chatBusy: boolean; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }
   | { type: 'graph'; graph: Graph }
   | { type: 'opRejected'; graphId: string; error: string }
   | { type: 'runs'; graphId: string; runs: RunSummary[] }
@@ -189,6 +189,8 @@ export type ServerMessage =
   | { type: 'chatEntry'; graphId: string; entry: ChatEntry }
   | { type: 'chatBusy'; graphId: string; busy: boolean }
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'runPreview'; preview: RunPreview }
+  | { type: 'variableValues'; graphId: string; values: Record<string, string> }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
@@ -196,8 +198,10 @@ export type ClientMessage =
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
   | { type: 'chat'; graphId: string; text: string }
-  /** `reviewed` is contentSignature() of the graph the user confirmed; the server refuses a run if it changed since. */
+  /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
   | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'setVariableValue'; graphId: string; name: string; value: string }
   | { type: 'stopRun'; runId: string }
   | { type: 'selectRun'; runId: string }
   | { type: 'getNodeLogs'; runId: string; nodeId: string }

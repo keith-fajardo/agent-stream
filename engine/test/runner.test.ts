@@ -279,4 +279,25 @@ describe('Runner when the filesystem or a listener fails', () => {
     expect(done.nodes.n1.error).toMatch(/^claude-stream internal error: /);
     expect(done.nodes.n2.status).toBe('not_run');
   });
+
+  it('runs and records the rendered text instead of the templates', async () => {
+    const { runner, fake, runStore } = setup();
+    const g = graphOf([{ type: 'addNode', node: { title: 'build', kind: 'command', command: 'dbt build -s {{ model }}' } }, agent('check'), link('n1', 'n2')]);
+    const rendered = { goal: 'goal!', instructions: 'be careful', nodes: { n1: "dbt build -s 'orders'", n2: 'do check now' } };
+    const r = started(runner.start({ graph: g, rendered }));
+    await tick();
+    expect(fake.contexts.get('n1')?.node.command).toBe("dbt build -s 'orders'");
+    fake.finish('n1');
+    await tick();
+    const ctx = fake.contexts.get('n2')!;
+    expect(ctx.node.prompt).toBe('do check now');
+    expect(ctx.graph.goal).toBe('goal!');
+    expect(ctx.prompt).toContain("## n1 · build (command `dbt build -s 'orders'`");
+    expect(ctx.prompt).toContain('# Instructions & context\nbe careful');
+    fake.finish('n2');
+    const done = await r.done;
+    expect(done.rendered).toEqual(rendered);
+    expect(done.snapshot.nodes[0].command).toBe('dbt build -s {{ model }}');
+    expect(runStore.get(done.id)?.rendered).toEqual(rendered);
+  });
 });

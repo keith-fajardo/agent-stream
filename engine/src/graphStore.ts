@@ -108,6 +108,7 @@ export class GraphStore extends EventEmitter {
       appendFileSync(this.opsFile(graphId), `${JSON.stringify(record)}\n`);
     }
     this.emit('changed', r.graph);
+    this.emit('op', graphId, resolved);
     return r;
   }
 

@@ -1,5 +1,4 @@
 import {
-  contentSignature,
   validateRunnable,
   type ApprovalRequest,
   type AuthInfo,
@@ -8,6 +7,7 @@ import {
   type Graph,
   type NodeEvent,
   type NodeRunState,
+  type Op,
   type RunMeta,
   type ServerMessage,
 } from '@claude-stream/shared';
@@ -20,9 +20,14 @@ import type { Executors } from './executors';
 import { GraphStore } from './graphStore';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
+import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { Runner } from './runner';
 import { RunStore } from './runStore';
 import type { QueryFn } from './sdk';
+import type { EnvLookup } from './templates';
+import { VariableValues } from './variableValues';
+
+export const CHANGED_SINCE_REVIEW = 'Something changed since you reviewed this run (a step, a variable or an environment variable). Review it again.';
 
 export type Client = { send(msg: ServerMessage): void };
 
@@ -34,6 +39,8 @@ export type AppDeps = {
   executors?: Executors;
   queryFn?: QueryFn;
   clock?: Clock;
+  env?: EnvLookup;
+  platform?: NodeJS.Platform;
 };
 
 export type App = ReturnType<typeof createApp>;
@@ -45,6 +52,11 @@ export function createApp(d: AppDeps) {
   const graphStore = new GraphStore(paths, clock);
   const chatLog = new ChatLog(paths);
   const runStore = new RunStore(paths);
+  const platform = d.platform ?? process.platform;
+  const env = d.env ?? envLookup(process.env, platform);
+  const values = new VariableValues(paths, platform);
+  /** Why command steps can't run on this machine, if so (always null until the platform checks exist). */
+  const commandShellProblem: string | null = null;
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
   const executors = d.executors ?? {
@@ -76,6 +88,11 @@ export function createApp(d: AppDeps) {
 
   const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, claudePath: d.claudePath, requestRun, queryFn: d.queryFn, clock });
 
+  values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
+  graphStore.on('op', (graphId: string, op: Op) => {
+    if (op.type === 'renameVariable') values.rename(graphId, op.name, op.newName);
+    if (op.type === 'deleteVariable') values.delete(graphId, op.name);
+  });
   graphStore.on('changed', (graph: Graph) => broadcast({ type: 'graph', graph }));
   runner.on('run', (run: RunMeta) => {
     broadcast({ type: 'run', run });
@@ -87,10 +104,19 @@ export function createApp(d: AppDeps) {
   planner.on('entry', (graphId: string, entry: ChatEntry) => broadcast({ type: 'chatEntry', graphId, entry }));
   planner.on('busy', (graphId: string, busy: boolean) => broadcast({ type: 'chatBusy', graphId, busy }));
 
+  function preview(graph: Graph, fromNodeId?: string, sourceRunId?: string): { ok: true; outcome: PreviewOutcome } | { ok: false; error: string } {
+    let source: RunMeta | undefined;
+    if (sourceRunId) {
+      source = runStore.get(sourceRunId);
+      if (!source || source.graphId !== graph.id) return { ok: false, error: `run ${sourceRunId} not found` };
+    }
+    return { ok: true, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem }) };
+  }
+
   function opened(graph: Graph): ServerMessage {
     const runs = runStore.list(graph.id);
     const run = runner.activeFor(graph.id) ?? (runs[0] ? runStore.get(runs[0].id) : undefined);
-    return { type: 'graphOpened', graph, chat: chatLog.read(graph.id), chatBusy: planner.isBusy(graph.id), runs, run };
+    return { type: 'graphOpened', graph, chat: chatLog.read(graph.id), chatBusy: planner.isBusy(graph.id), runs, run, variableValues: values.get(graph.id) };
   }
 
   function connect(client: Client): () => void {
@@ -128,14 +154,36 @@ export function createApp(d: AppDeps) {
         planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[claude-stream] planner error', e));
         return;
       }
+      case 'previewRun': {
+        const r = graphStore.load(msg.graphId);
+        if (!r.ok) return error(r.error);
+        const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        if (!p.ok) return error(p.error);
+        client.send({ type: 'runPreview', preview: p.outcome.preview });
+        return;
+      }
       case 'startRun': {
         if (!d.auth.ok) return error(`Runs are disabled: ${d.auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        // Run only what the user saw in the confirmation dialog; the planner may have edited since.
-        if (contentSignature(r.graph) !== msg.reviewed) return error('The graph changed after you reviewed it. Review the run again.');
-        const started = runner.start({ graph: r.graph, sourceRunId: msg.sourceRunId, fromNodeId: msg.fromNodeId });
+        const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        if (!p.ok) return error(p.error);
+        // Run only what the user reviewed: a step, a value or an environment variable may have changed since.
+        if (p.outcome.preview.signature !== msg.reviewed) return error(CHANGED_SINCE_REVIEW);
+        if (!p.outcome.rendered) return error(p.outcome.preview.problems.join('\n'));
+        const started = runner.start({ graph: r.graph, rendered: p.outcome.rendered, sourceRunId: msg.sourceRunId, fromNodeId: msg.fromNodeId });
         if (!started.ok) return error(started.error);
+        return;
+      }
+      case 'setVariableValue': {
+        const r = graphStore.load(msg.graphId);
+        if (!r.ok) return error(r.error);
+        if (!r.graph.variables.some((v) => v.name === msg.name)) return error(`variable ${msg.name} does not exist`);
+        try {
+          values.set(msg.graphId, msg.name, msg.value);
+        } catch (e) {
+          return error((e as Error).message);
+        }
         return;
       }
       case 'stopRun':
@@ -156,5 +204,5 @@ export function createApp(d: AppDeps) {
     }
   }
 
-  return { connect, handle, requestRun, graphStore, runStore, runner, broker, planner };
+  return { connect, handle, requestRun, graphStore, runStore, runner, broker, planner, values };
 }

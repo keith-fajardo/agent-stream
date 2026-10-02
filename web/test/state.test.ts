@@ -17,7 +17,7 @@ const run = (id: string, graphId: string, status: RunMeta['status'] = 'running')
 });
 const server = (msg: ServerMessage): Action => ({ kind: 'server', msg });
 const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOpened' }>> = {}): Action =>
-  server({ type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], ...extra });
+  server({ type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: {}, ...extra });
 const apply = (...actions: Action[]): State => actions.reduce(reduce, initialState);
 
 describe('client state', () => {
@@ -83,5 +83,17 @@ describe('client state', () => {
     const errored = reduce(s, server({ type: 'error', message: 'boom' }));
     expect(errored.toast).toBe('boom');
     expect(reduce(errored, { kind: 'dismissToast' }).toast).toBeUndefined();
+  });
+
+  it('keeps the open graph’s variable values and the preview for the open dialog', () => {
+    const preview = { graphId: 'a', problems: [], warnings: [], steps: [], variables: [], signature: 's' };
+    const s = apply(opened(graph('a'), { variableValues: { schema: 'dev' } }), { kind: 'openConfirm', request: {} });
+    expect(s.variableValues).toEqual({ schema: 'dev' });
+    expect(reduce(s, server({ type: 'variableValues', graphId: 'b', values: {} })).variableValues).toEqual({ schema: 'dev' });
+    expect(reduce(s, server({ type: 'variableValues', graphId: 'a', values: { schema: 'prod' } })).variableValues).toEqual({ schema: 'prod' });
+    const withPreview = reduce(s, server({ type: 'runPreview', preview }));
+    expect(withPreview.preview).toEqual(preview);
+    expect(reduce(withPreview, { kind: 'closeConfirm' }).preview).toBeUndefined();
+    expect(reduce(apply(opened(graph('a'))), server({ type: 'runPreview', preview })).preview).toBeUndefined(); // no dialog open
   });
 });

@@ -6,6 +6,7 @@ import type {
   GraphListItem,
   NodeEvent,
   RunMeta,
+  RunPreview,
   RunSummary,
   ServerMessage,
 } from '@claude-stream/shared';
@@ -28,12 +29,14 @@ export type State = {
   chat: ChatEntry[];
   chatBusy: boolean;
   confirm?: ConfirmRequest;
+  variableValues: Record<string, string>;
+  preview?: RunPreview;
   selectedNodeId?: string;
   tab: Tab;
   toast?: string;
 };
 
-export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, tab: 'chat' };
+export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat' };
 
 export type Action =
   | { kind: 'server'; msg: ServerMessage }
@@ -57,9 +60,9 @@ export function reduce(state: State, action: Action): State {
     case 'setTab':
       return { ...state, tab: action.tab };
     case 'openConfirm':
-      return { ...state, confirm: action.request };
+      return { ...state, confirm: action.request, preview: undefined };
     case 'closeConfirm':
-      return { ...state, confirm: undefined };
+      return { ...state, confirm: undefined, preview: undefined };
     case 'dismissToast':
       return { ...state, toast: undefined };
     case 'server':
@@ -84,6 +87,8 @@ function reduceServer(state: State, msg: ServerMessage): State {
         run: msg.run,
         logs: {},
         confirm: undefined,
+        variableValues: msg.variableValues,
+        preview: undefined,
         selectedNodeId: current === msg.graph.id ? state.selectedNodeId : undefined,
       };
     case 'graph': {
@@ -121,6 +126,10 @@ function reduceServer(state: State, msg: ServerMessage): State {
       return msg.graphId === current ? { ...state, chatBusy: msg.busy } : state;
     case 'confirmRun':
       return msg.graphId === current ? { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId } } : state;
+    case 'variableValues':
+      return msg.graphId === current ? { ...state, variableValues: msg.values } : state;
+    case 'runPreview':
+      return state.confirm && msg.preview.graphId === current && msg.preview.fromNodeId === state.confirm.fromNodeId ? { ...state, preview: msg.preview } : state;
     case 'error':
       return { ...state, toast: msg.message };
   }
