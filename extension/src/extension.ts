@@ -1,7 +1,9 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { authLabel, type AuthInfo } from '@claude-stream/shared';
+import { authLabel, type AuthInfo, type HostCommand } from '@claude-stream/shared';
 import { EngineManager, type EngineEvents } from './engines';
+import { folderFor } from './folders';
+import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, type GraphPanel } from './graphEditor';
 import { readSettings } from './settings';
 import { statusBarText } from './statusBar';
 
@@ -31,6 +33,35 @@ export async function activate(context: vscode.ExtensionContext) {
   engines = manager;
   showAuth(manager.auth);
 
+  const panels = new GraphPanels();
+  const runHostCommand = (command: HostCommand, panel: GraphPanel) =>
+    void vscode.commands.executeCommand(`claudeStream.${command}`, ...hostCommandArgs(command, panel));
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      GRAPH_VIEW_TYPE,
+      new GraphEditorProvider({
+        extensionUri: context.extensionUri,
+        engines: manager,
+        panels,
+        folderFor,
+        runHostCommand,
+        minimap: () => context.globalState.get<boolean>('minimap', true),
+        setMinimap: (value) => void context.globalState.update('minimap', value),
+      }),
+      { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
+    ),
+  );
+  events.confirmRun = (folder, graphId, fromNodeId, sourceRunId) => {
+    // An open tab already got confirmRun from the engine; a closed one is opened first.
+    if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId });
+  };
+  events.graphDeleted = (folder, graphId) => {
+    const panel = panels.get(folder.key, graphId);
+    if (!panel) return;
+    panel.view.close();
+    void vscode.window.showInformationMessage(`The graph ${graphId} was deleted, so its tab was closed.`);
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeStream.retrySignIn', () => manager.checkSignIn()),
     vscode.commands.registerCommand('claudeStream.signInDetails', async () => {
@@ -47,7 +78,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   await manager.checkSignIn();
-  return { engines: manager };
+  return { engines: manager, panels };
 }
 
 export function deactivate(): void {

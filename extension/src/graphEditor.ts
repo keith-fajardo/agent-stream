@@ -1,0 +1,227 @@
+import { randomBytes } from 'node:crypto';
+import * as vscode from 'vscode';
+import { isGraphId, type App, type Client } from '@claude-stream/engine';
+import { parseWebviewMessage, type HostCommand, type HostMessage } from '@claude-stream/shared';
+import type { EngineManager, Folder } from './engines';
+import { folderUri } from './folders';
+import { escapeHtml, webviewHtml } from './webviewHtml';
+
+export const GRAPH_VIEW_TYPE = 'claudeStream.graph';
+
+/** `<folder>/.claude-stream/graphs/<id>.json` → id; undefined for any other file. */
+export function graphIdFromPath(p: string): string | undefined {
+  const m = /[\\/]\.claude-stream[\\/]graphs[\\/]([^\\/]+)\.json$/.exec(p);
+  return m && isGraphId(m[1]) ? m[1] : undefined;
+}
+
+export const panelKey = (folderKey: string, graphId: string): string => `${folderKey}|${graphId}`;
+
+/** What the registry needs from a webview panel; tests pass a fake. */
+export type PanelView = { post(msg: HostMessage): void; reveal(): void; close(): void; visible(): boolean; active(): boolean };
+
+/** One open graph tab. Messages from the extension wait until the tab has loaded its graph (ruling R5). */
+export class GraphPanel {
+  private loaded = false;
+  private queue: HostMessage[] = [];
+
+  constructor(
+    readonly folder: Folder,
+    readonly graphId: string,
+    readonly view: PanelView,
+  ) {}
+
+  get isLoaded(): boolean {
+    return this.loaded;
+  }
+
+  send(msg: HostMessage): void {
+    if (this.loaded) this.view.post(msg);
+    else this.queue.push(msg);
+  }
+
+  markLoaded(): void {
+    this.loaded = true;
+    for (const msg of this.queue.splice(0)) this.view.post(msg);
+  }
+
+  /** The tab's page started (again): wait for it to load the graph before delivering. */
+  markStarting(): void {
+    this.loaded = false;
+  }
+}
+
+/** Open graph tabs, keyed by folder + graph id (two folders may both have a graph "demo"). */
+export class GraphPanels {
+  private panels = new Map<string, GraphPanel>();
+
+  add(panel: GraphPanel): void {
+    this.panels.set(panelKey(panel.folder.key, panel.graphId), panel);
+  }
+
+  remove(panel: GraphPanel): void {
+    const key = panelKey(panel.folder.key, panel.graphId);
+    if (this.panels.get(key) === panel) this.panels.delete(key);
+  }
+
+  get(folderKey: string, graphId: string): GraphPanel | undefined {
+    return this.panels.get(panelKey(folderKey, graphId));
+  }
+
+  all(): GraphPanel[] {
+    return [...this.panels.values()];
+  }
+
+  active(): GraphPanel | undefined {
+    return this.all().find((p) => p.view.active());
+  }
+
+  isVisible(folderKey: string, graphId: string): boolean {
+    return this.get(folderKey, graphId)?.view.visible() ?? false;
+  }
+}
+
+export type MessageHandlerDeps = {
+  app: App;
+  panel: GraphPanel;
+  client: Client;
+  runHostCommand(command: HostCommand, panel: GraphPanel): void;
+  setMinimap(value: boolean): void;
+};
+
+/** Routes what a tab posts: engine messages to its folder's engine, the tab's own messages to the extension. */
+export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unknown): void; dispose(): void } {
+  let detach: (() => void) | undefined;
+  const fail = (message: string) => d.client.send({ type: 'error', message });
+  return {
+    handle(raw) {
+      const parsed = parseWebviewMessage(raw);
+      if (!parsed.ok) return fail(`claude-stream ignored a malformed message: ${parsed.error}`);
+      if (parsed.kind === 'engine') {
+        d.app.handle(d.client, parsed.msg).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
+        return;
+      }
+      const msg = parsed.msg;
+      switch (msg.type) {
+        case 'ready':
+          detach?.();
+          d.panel.markStarting();
+          detach = d.app.connect(d.client);
+          return;
+        case 'opened':
+          if (msg.graphId === d.panel.graphId) d.panel.markLoaded();
+          return;
+        case 'host':
+          d.runHostCommand(msg.command, d.panel);
+          return;
+        case 'setMinimap':
+          d.setMinimap(msg.value);
+          return;
+      }
+    },
+    dispose() {
+      detach?.();
+      detach = undefined;
+    },
+  };
+}
+
+export type EditorDeps = {
+  extensionUri: vscode.Uri;
+  engines: EngineManager;
+  panels: GraphPanels;
+  folderFor(uri: vscode.Uri): Folder | undefined;
+  runHostCommand(command: HostCommand, panel: GraphPanel): void;
+  minimap(): boolean;
+  setMinimap(value: boolean): void;
+};
+
+function messagePage(text: string): string {
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"></head><body style="font-family: var(--vscode-font-family); padding: 16px">${escapeHtml(text)}</body></html>`;
+}
+
+/** Graph files open as graph tabs (spec §3.3). The engine writes the files, so the editor is read-only to VS Code. */
+export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider {
+  constructor(private d: EditorDeps) {}
+
+  openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+    return { uri, dispose: () => {} };
+  }
+
+  resolveCustomEditor(document: vscode.CustomDocument, webviewPanel: vscode.WebviewPanel): void {
+    const root = vscode.Uri.joinPath(this.d.extensionUri, 'dist', 'webview');
+    const webview = webviewPanel.webview;
+    webview.options = { enableScripts: true, localResourceRoots: [root] };
+    const folder = this.d.folderFor(document.uri);
+    const graphId = graphIdFromPath(document.uri.fsPath);
+    if (!folder || !graphId) {
+      webview.html = messagePage('This file is not a Claude Stream graph in an open workspace folder. Use "Reopen Editor With… → Text Editor" to see it as JSON.');
+      return;
+    }
+    const app = this.d.engines.get(folder);
+    const asset = (name: string) => webview.asWebviewUri(vscode.Uri.joinPath(root, 'assets', name)).toString();
+    webview.html = webviewHtml({
+      cspSource: webview.cspSource,
+      scriptUri: asset('index.js'),
+      styleUri: asset('index.css'),
+      nonce: randomBytes(16).toString('hex'),
+      graphId,
+      minimap: this.d.minimap(),
+    });
+    const panel = new GraphPanel(folder, graphId, {
+      post: (msg) => void webview.postMessage(msg),
+      reveal: () => webviewPanel.reveal(),
+      close: () => webviewPanel.dispose(),
+      visible: () => webviewPanel.visible,
+      active: () => webviewPanel.active,
+    });
+    this.d.panels.add(panel);
+    const handler = createMessageHandler({
+      app,
+      panel,
+      client: { send: (msg) => void webview.postMessage(msg) },
+      runHostCommand: this.d.runHostCommand,
+      setMinimap: (value) => {
+        this.d.setMinimap(value);
+        for (const other of this.d.panels.all()) if (other !== panel) other.view.post({ type: 'prefs', minimap: value });
+      },
+    });
+    const subscription = webview.onDidReceiveMessage((raw) => handler.handle(raw));
+    webviewPanel.onDidDispose(() => {
+      subscription.dispose();
+      handler.dispose();
+      this.d.panels.remove(panel);
+    });
+  }
+}
+
+/** What a tab's menu passes to `claudeStream.<command>`: Open… must show the picker, New/Import act on the folder. */
+export function hostCommandArgs(command: HostCommand, panel: { folder: Folder; graphId: string }): unknown[] {
+  if (command === 'openGraph' || command === 'showSidebar') return [];
+  if (command === 'newGraph' || command === 'importGraph') return [{ folder: panel.folder }];
+  return [{ folder: panel.folder, graphId: panel.graphId }];
+}
+
+export function graphUri(folder: Folder, graphId: string): vscode.Uri {
+  return vscode.Uri.joinPath(folderUri(folder), '.claude-stream', 'graphs', `${graphId}.json`);
+}
+
+export async function openGraphTab(folder: Folder, graphId: string): Promise<void> {
+  await vscode.commands.executeCommand('vscode.openWith', graphUri(folder, graphId), GRAPH_VIEW_TYPE);
+}
+
+/** Opens (or focuses) a graph's tab, then sends it `msg` once its graph has loaded. */
+export async function openAndSend(
+  panels: GraphPanels,
+  folder: Folder,
+  graphId: string,
+  msg: HostMessage,
+  open: (folder: Folder, graphId: string) => Promise<void> = openGraphTab,
+): Promise<void> {
+  let panel = panels.get(folder.key, graphId);
+  if (panel) panel.view.reveal();
+  else {
+    await open(folder, graphId);
+    panel = panels.get(folder.key, graphId);
+  }
+  panel?.send(msg);
+}

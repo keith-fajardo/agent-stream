@@ -34,6 +34,14 @@
         }
       }
     },
+    "customEditors": [
+      {
+        "viewType": "claudeStream.graph",
+        "displayName": "Claude Stream Graph",
+        "selector": [{ "filenamePattern": "**/.claude-stream/graphs/*.json" }],
+        "priority": "default"
+      }
+    ],
     "commands": [
       { "command": "claudeStream.retrySignIn", "title": "Retry Sign-in Check", "category": "Claude Stream", "icon": "$(refresh)" },
       { "command": "claudeStream.signInDetails", "title": "Show Sign-in Details", "category": "Claude Stream" }
