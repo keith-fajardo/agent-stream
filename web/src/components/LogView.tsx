@@ -1,0 +1,142 @@
+import { useState, type ReactNode } from 'react';
+import { fmtDuration, type NodeEvent } from '@claude-stream/shared';
+
+export const LOG_STREAM_CAP = 200_000;
+
+const pretty = (value: unknown) => {
+  try {
+    return JSON.stringify(value, null, 2) ?? '';
+  } catch {
+    return String(value);
+  }
+};
+
+function Collapsible({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 600;
+  return (
+    <div className="collapsible">
+      <pre>{open || !long ? text : `${text.slice(0, 600)}…`}</pre>
+      {long && (
+        <button className="link" onClick={() => setOpen(!open)}>
+          {open ? 'Show less' : `Show all (${text.length} chars)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function LogEvent({ event: e }: { event: NodeEvent }) {
+  const time = <span className="t">{new Date(e.at).toLocaleTimeString()}</span>;
+  switch (e.type) {
+    case 'start':
+      return (
+        <div className="ev start">
+          {time}Started {e.kind} step in <code>{e.cwd}</code>
+          {e.command && <pre>{e.command}</pre>}
+          {e.prompt && (
+            <details>
+              <summary>Prompt sent to the agent</summary>
+              <pre>{e.prompt}</pre>
+            </details>
+          )}
+        </div>
+      );
+    case 'text':
+      return (
+        <div className="ev text">
+          {time}
+          <div className="body">{e.text}</div>
+        </div>
+      );
+    case 'tool_call':
+      return (
+        <div className="ev tool">
+          {time}→ <b>{e.name}</b>
+          <Collapsible text={pretty(e.input)} />
+        </div>
+      );
+    case 'tool_result':
+      return (
+        <div className={`ev result ${e.isError ? 'error' : ''}`}>
+          {time}← result
+          <Collapsible text={e.content} />
+        </div>
+      );
+    case 'approval_requested':
+      return (
+        <div className="ev approval">
+          {time}⏸ Waiting for your approval: <b>{e.toolName}</b>
+        </div>
+      );
+    case 'approval_decided':
+      return (
+        <div className={`ev approval ${e.decision}`}>
+          {time}
+          {e.decision === 'approve' ? '✔ Approved' : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
+        </div>
+      );
+    case 'retry':
+      return (
+        <div className="ev retry">
+          {time}↻ API retry {e.attempt}/{e.maxRetries}: {e.error}
+        </div>
+      );
+    case 'result': {
+      const usage = e.usage
+        ? ` · ${e.usage.inputTokens + e.usage.cacheReadTokens + e.usage.cacheWriteTokens} in / ${e.usage.outputTokens} out tokens · ${e.usage.turns} turns · ~$${e.usage.costUsd.toFixed(2)} API-equivalent`
+        : '';
+      const exit = e.exitCode !== undefined && e.exitCode !== null ? ` · exit ${e.exitCode}` : '';
+      return (
+        <div className={`ev final ${e.ok ? 'ok' : 'error'}`}>
+          {time}
+          {e.ok ? '✔ Succeeded' : `✖ Failed${e.error ? `: ${e.error}` : ''}`} · {fmtDuration(e.durationMs)}
+          {exit}
+          {usage}
+        </div>
+      );
+    }
+    case 'error':
+      return (
+        <div className="ev error">
+          {time}
+          {e.message}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+/** Renders a node's events; consecutive stdout/stderr chunks merge into one block. */
+export function LogView({ events }: { events: NodeEvent[] }) {
+  const items: ReactNode[] = [];
+  let stream: { kind: 'stdout' | 'stderr'; text: string } | undefined;
+  const flush = (key: number) => {
+    if (!stream) return;
+    const text =
+      stream.text.length > LOG_STREAM_CAP
+        ? `…[earlier output hidden; the full output is in output.md]\n${stream.text.slice(-LOG_STREAM_CAP)}`
+        : stream.text;
+    items.push(
+      <pre key={`s${key}`} className={`stream ${stream.kind}`}>
+        {text}
+      </pre>,
+    );
+    stream = undefined;
+  };
+  events.forEach((e, i) => {
+    if (e.type === 'stdout' || e.type === 'stderr') {
+      if (stream && stream.kind === e.type) stream.text += e.chunk;
+      else {
+        flush(i);
+        stream = { kind: e.type, text: e.chunk };
+      }
+      return;
+    }
+    flush(i);
+    items.push(<LogEvent key={i} event={e} />);
+  });
+  flush(events.length);
+  return <div className="logview">{items}</div>;
+}

@@ -1,5 +1,8 @@
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from './components/Canvas';
+import { RightPanel } from './components/RightPanel';
+import { RunConfirmDialog } from './components/RunConfirmDialog';
+import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { useStore } from './store';
 
@@ -13,7 +16,10 @@ export function App() {
         <ReactFlowProvider>
           <Canvas />
         </ReactFlowProvider>
+        <RightPanel />
       </main>
+      <RunConfirmDialog />
+      <Toast />
     </div>
   );
 }
