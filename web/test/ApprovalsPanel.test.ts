@@ -4,8 +4,8 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApprovalRequest } from '@claude-stream/shared';
 
-vi.mock('../src/socket', () => ({ send: vi.fn() }));
-const { send } = await import('../src/socket');
+vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
+const { send } = await import('../src/bridge');
 const { dispatch } = await import('../src/store');
 const { ApprovalsPanel } = await import('../src/components/ApprovalsPanel');
 

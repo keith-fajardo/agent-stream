@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authLabel, statusLabel } from '@claude-stream/shared';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
 export function TopBar() {

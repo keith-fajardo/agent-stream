@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ApprovalRequest } from '@claude-stream/shared';
 import { describeApprovalInput } from '../approvalView';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
 export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {

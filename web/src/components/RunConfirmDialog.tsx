@@ -1,6 +1,6 @@
 import { contentSignature } from '@claude-stream/shared';
 import { describeRunPlan } from '../runPlan';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
 export function RunConfirmDialog() {

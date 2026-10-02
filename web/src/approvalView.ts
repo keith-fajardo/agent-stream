@@ -9,6 +9,10 @@ const LAYOUTS: Record<string, Field[]> = {
     { key: 'description', label: 'Description', optional: true },
     { key: 'command', label: 'Command' },
   ],
+  PowerShell: [
+    { key: 'description', label: 'Description', optional: true },
+    { key: 'command', label: 'Command' },
+  ],
   Edit: [
     { key: 'file_path', label: 'File' },
     { key: 'old_string', label: 'Replace', tone: 'del' },

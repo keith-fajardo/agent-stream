@@ -17,7 +17,7 @@ import {
 import { nextNodeId, type Op, type Position } from '@claude-stream/shared';
 import { buildFlowEdges, buildFlowNodes } from '../flowNodes';
 import { layoutPositions } from '../layout';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { contentSignature } from '../state';
 import { dispatch, useStore } from '../store';
 import { StepNode, type StepFlowNode } from './StepNode';

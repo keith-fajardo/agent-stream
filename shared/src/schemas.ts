@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { nodeIdProblem, topoOrder } from './graph';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
-import type { ClientMessage, Graph, GraphResult } from './types';
+import type { ClientMessage, Graph, GraphResult, WebviewHostMessage } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
@@ -108,13 +108,21 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional() }),
 ]);
 
-export function parseClientMessage(raw: string): { ok: true; msg: ClientMessage } | { ok: false; error: string } {
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    return { ok: false, error: 'message is not valid JSON' };
-  }
-  const r = clientMessageSchema.safeParse(json);
-  return r.success ? { ok: true, msg: r.data as ClientMessage } : { ok: false, error: z.prettifyError(r.error) };
+const hostCommand = z.enum(['newGraph', 'openGraph', 'importGraph', 'exportGraph', 'renameGraph', 'duplicateGraph', 'deleteGraph', 'showSidebar']);
+const webviewHostSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('ready') }),
+  z.object({ type: z.literal('opened'), graphId: z.string() }),
+  z.object({ type: z.literal('host'), command: hostCommand }),
+  z.object({ type: z.literal('setMinimap'), value: z.boolean() }),
+]);
+
+/** Validates what a graph tab posts: an engine message, or one of the tab's own messages for the extension. */
+export function parseWebviewMessage(
+  value: unknown,
+): { ok: true; kind: 'engine'; msg: ClientMessage } | { ok: true; kind: 'host'; msg: WebviewHostMessage } | { ok: false; error: string } {
+  const engine = clientMessageSchema.safeParse(value);
+  if (engine.success) return { ok: true, kind: 'engine', msg: engine.data as ClientMessage };
+  const host = webviewHostSchema.safeParse(value);
+  if (host.success) return { ok: true, kind: 'host', msg: host.data as WebviewHostMessage };
+  return { ok: false, error: z.prettifyError(engine.error) };
 }

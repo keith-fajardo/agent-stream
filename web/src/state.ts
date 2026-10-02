@@ -4,11 +4,11 @@ import type {
   ChatEntry,
   Graph,
   GraphListItem,
+  HostMessage,
   NodeEvent,
   RunMeta,
   RunPreview,
   RunSummary,
-  ServerMessage,
 } from '@claude-stream/shared';
 
 export type Tab = 'chat' | 'node' | 'approvals';
@@ -34,18 +34,23 @@ export type State = {
   selectedNodeId?: string;
   tab: Tab;
   toast?: string;
+  minimap: boolean;
+  variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat' };
+export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat', minimap: true };
 
 export type Action =
-  | { kind: 'server'; msg: ServerMessage }
+  | { kind: 'server'; msg: HostMessage }
   | { kind: 'disconnected' }
   | { kind: 'selectNode'; id?: string }
   | { kind: 'setTab'; tab: Tab }
   | { kind: 'openConfirm'; request: ConfirmRequest }
   | { kind: 'closeConfirm' }
-  | { kind: 'dismissToast' };
+  | { kind: 'dismissToast' }
+  | { kind: 'setMinimap'; value: boolean }
+  | { kind: 'openVariables'; focus?: string; addRow?: boolean }
+  | { kind: 'closeVariables' };
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
@@ -65,12 +70,18 @@ export function reduce(state: State, action: Action): State {
       return { ...state, confirm: undefined, preview: undefined };
     case 'dismissToast':
       return { ...state, toast: undefined };
+    case 'setMinimap':
+      return { ...state, minimap: action.value };
+    case 'openVariables':
+      return { ...state, variablesDialog: { ...(action.focus !== undefined && { focus: action.focus }), ...(action.addRow && { addRow: true }) } };
+    case 'closeVariables':
+      return { ...state, variablesDialog: undefined };
     case 'server':
       return reduceServer(state, action.msg);
   }
 }
 
-function reduceServer(state: State, msg: ServerMessage): State {
+function reduceServer(state: State, msg: HostMessage): State {
   const current = state.graph?.id;
   switch (msg.type) {
     case 'hello':
@@ -138,5 +149,13 @@ function reduceServer(state: State, msg: ServerMessage): State {
       return state.confirm && msg.preview.graphId === current && msg.preview.fromNodeId === state.confirm.fromNodeId ? { ...state, preview: msg.preview } : state;
     case 'error':
       return { ...state, toast: msg.message };
+    case 'revealNode':
+      return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, selectedNodeId: msg.nodeId, tab: 'node' } : state;
+    case 'openRunDialog':
+      return { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId }, preview: undefined };
+    case 'openVariables':
+      return { ...state, variablesDialog: {} };
+    case 'prefs':
+      return { ...state, minimap: msg.minimap };
   }
 }

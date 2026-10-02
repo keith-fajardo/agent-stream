@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { fmtDuration, statusLabel } from '@claude-stream/shared';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
 import { ApprovalCard } from './ApprovalsPanel';

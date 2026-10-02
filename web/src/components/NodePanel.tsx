@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { GraphNode, NodeKind, NodePatch } from '@claude-stream/shared';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
 type Draft = { title: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };

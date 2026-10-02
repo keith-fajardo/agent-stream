@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { authLabel, fmtDuration, statusLabel } from '../src/format';
-import { parseClientMessage, parseGraph } from '../src/schemas';
+import { parseGraph, parseWebviewMessage } from '../src/schemas';
 
 const node = (id: string) => ({ id, title: id, kind: 'agent' });
 const edge = (from: string, to: string) => ({ id: `${from}->${to}`, from, to });
@@ -36,23 +36,28 @@ describe('parseGraph', () => {
   });
 });
 
-describe('parseClientMessage', () => {
-  it('accepts a valid message', () => {
+describe('parseWebviewMessage', () => {
+  it('accepts engine messages', () => {
     const msg = { type: 'op', graphId: 'g', op: { type: 'connect', from: 'n1', to: 'n2' } };
-    expect(parseClientMessage(JSON.stringify(msg))).toEqual({ ok: true, msg });
+    expect(parseWebviewMessage(msg)).toEqual({ ok: true, kind: 'engine', msg });
+    expect(parseWebviewMessage({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'dev' }).ok).toBe(true);
   });
 
-  it('rejects invalid JSON, unknown types and bad fields', () => {
-    expect(parseClientMessage('{nope').ok).toBe(false);
-    expect(parseClientMessage(JSON.stringify({ type: 'format_disk' })).ok).toBe(false);
-    expect(parseClientMessage(JSON.stringify({ type: 'decide', approvalId: 'a', decision: 'maybe' })).ok).toBe(false);
-    expect(parseClientMessage(JSON.stringify({ type: 'op', graphId: 'g', op: { type: 'moveNode', id: 'n1' } })).ok).toBe(false);
+  it('accepts the tab’s own messages for the extension', () => {
+    expect(parseWebviewMessage({ type: 'ready' })).toEqual({ ok: true, kind: 'host', msg: { type: 'ready' } });
+    expect(parseWebviewMessage({ type: 'opened', graphId: 'g' })).toEqual({ ok: true, kind: 'host', msg: { type: 'opened', graphId: 'g' } });
+    expect(parseWebviewMessage({ type: 'host', command: 'exportGraph' })).toEqual({ ok: true, kind: 'host', msg: { type: 'host', command: 'exportGraph' } });
+    expect(parseWebviewMessage({ type: 'setMinimap', value: false }).ok).toBe(true);
   });
 
-  it('requires startRun to say which graph content the user reviewed', () => {
-    expect(parseClientMessage(JSON.stringify({ type: 'startRun', graphId: 'g' })).ok).toBe(false);
-    const msg = { type: 'startRun', graphId: 'g', reviewed: 'sig' };
-    expect(parseClientMessage(JSON.stringify(msg))).toEqual({ ok: true, msg });
+  it('rejects unknown types, bad fields and oversized values', () => {
+    expect(parseWebviewMessage('{nope').ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'format_disk' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'host', command: 'rm' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'decide', approvalId: 'a', decision: 'maybe' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'startRun', graphId: 'g' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) }).ok).toBe(false);
   });
 });
 
@@ -86,12 +91,6 @@ describe('format', () => {
     expect(withDescriptionDefault.ok && withDescriptionDefault.graph.variables).toEqual([{ name: 'schema', description: '' }]);
     expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'env_var' }] })).toEqual({ ok: false, error: 'invalid variable: "env_var" is a reserved word.' });
     expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'a' }, { name: 'a' }] })).toEqual({ ok: false, error: 'invalid variable: A variable named "a" already exists.' });
-  });
-
-  it('accepts preview and variable value messages', () => {
-    expect(parseClientMessage(JSON.stringify({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r' })).ok).toBe(true);
-    expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'dev' })).ok).toBe(true);
-    expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) })).ok).toBe(false);
   });
 
 describe('unsafe step ids', () => {

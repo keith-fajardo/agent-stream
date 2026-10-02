@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { send } from '../socket';
+import { send } from '../bridge';
 import { useStore } from '../store';
 
 export function ChatPanel() {

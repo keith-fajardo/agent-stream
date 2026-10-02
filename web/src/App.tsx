@@ -12,7 +12,7 @@ export function App() {
   return (
     <div className="app">
       <TopBar />
-      {auth && !auth.ok && <div className="banner">{auth.error} Restart claude-stream once this is fixed.</div>}
+      {auth && !auth.ok && <div className="banner">{auth.error} Fix this, then use Retry in the Claude Stream sidebar.</div>}
       <main className="main">
         <div className="workspace">
           <ReactFlowProvider>

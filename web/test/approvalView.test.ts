@@ -56,4 +56,14 @@ describe('describeApprovalInput', () => {
     expect(describeApprovalInput('WebFetch', input)).toEqual({ primary: [], warnings: [], rest: json(input) });
     expect(describeApprovalInput('Bash', 'ls')).toEqual({ primary: [], warnings: [], rest: json('ls') });
   });
+
+  it('lays out PowerShell requests like Bash', () => {
+    expect(describeApprovalInput('PowerShell', { command: 'dbt build', description: 'Build' })).toEqual({
+      primary: [
+        { label: 'Description', text: 'Build' },
+        { label: 'Command', text: 'dbt build' },
+      ],
+      warnings: [],
+    });
+  });
 });

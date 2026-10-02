@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyGraph, type Graph, type RunMeta, type ServerMessage } from '@claude-stream/shared';
+import { emptyGraph, type Graph, type HostMessage, type RunMeta, type ServerMessage } from '@claude-stream/shared';
 import { initialState, logKey, reduce, type Action, type State } from '../src/state';
 
 const T = 't';
@@ -15,7 +15,7 @@ const run = (id: string, graphId: string, status: RunMeta['status'] = 'running')
   snapshot: graph(graphId, ['n1']),
   nodes: { n1: { status: 'queued' } },
 });
-const server = (msg: ServerMessage): Action => ({ kind: 'server', msg });
+const server = (msg: HostMessage): Action => ({ kind: 'server', msg });
 const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOpened' }>> = {}): Action =>
   server({ type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: {}, ...extra });
 const apply = (...actions: Action[]): State => actions.reduce(reduce, initialState);
@@ -107,5 +107,17 @@ describe('client state', () => {
   it('follows sign-in changes', () => {
     const s = apply(server({ type: 'hello', auth: { ok: false, error: 'x' }, project: '/p', graphs: [], approvals: [] }));
     expect(reduce(s, server({ type: 'auth', auth: { ok: true, plan: 'max' } })).auth).toEqual({ ok: true, plan: 'max' });
+  });
+
+  it('handles the extension’s own messages', () => {
+    const s = apply(opened(graph('a', ['n1'])));
+    expect(reduce(s, server({ type: 'revealNode', nodeId: 'n1' }))).toMatchObject({ selectedNodeId: 'n1', tab: 'node' });
+    expect(reduce(s, server({ type: 'revealNode', nodeId: 'missing' })).selectedNodeId).toBeUndefined();
+    expect(reduce(s, server({ type: 'openRunDialog', fromNodeId: 'n1', sourceRunId: 'r' })).confirm).toEqual({ fromNodeId: 'n1', sourceRunId: 'r' });
+    expect(reduce(s, server({ type: 'openVariables' })).variablesDialog).toEqual({});
+    expect(reduce(s, server({ type: 'prefs', minimap: false })).minimap).toBe(false);
+    expect(reduce(s, { kind: 'openVariables', focus: 'schema' }).variablesDialog).toEqual({ focus: 'schema' });
+    expect(reduce(reduce(s, { kind: 'openVariables' }), { kind: 'closeVariables' }).variablesDialog).toBeUndefined();
+    expect(reduce(s, { kind: 'setMinimap', value: false }).minimap).toBe(false);
   });
 });

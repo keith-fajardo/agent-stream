@@ -209,3 +209,23 @@ export type ClientMessage =
   | { type: 'selectRun'; runId: string }
   | { type: 'getNodeLogs'; runId: string; nodeId: string }
   | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string };
+
+/** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
+export type HostCommand = 'newGraph' | 'openGraph' | 'importGraph' | 'exportGraph' | 'renameGraph' | 'duplicateGraph' | 'deleteGraph' | 'showSidebar';
+
+/** Messages a graph tab sends that the extension handles itself (not the engine). */
+export type WebviewHostMessage =
+  | { type: 'ready' }
+  | { type: 'opened'; graphId: string }
+  | { type: 'host'; command: HostCommand }
+  | { type: 'setMinimap'; value: boolean };
+
+export type WebviewMessage = ClientMessage | WebviewHostMessage;
+
+/** Everything a graph tab receives: engine messages plus the extension's own. */
+export type HostMessage =
+  | ServerMessage
+  | { type: 'revealNode'; nodeId: string }
+  | { type: 'openRunDialog'; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'openVariables' }
+  | { type: 'prefs'; minimap: boolean };
