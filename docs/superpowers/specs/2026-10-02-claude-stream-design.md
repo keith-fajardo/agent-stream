@@ -1,11 +1,11 @@
-# claude-flow — Design
+# claude-stream — Design
 
 **Date:** 2026-10-02
 **Status:** Draft for review
 
 ## 1. Purpose
 
-claude-flow is a local web app where you and a Claude agent co-create and co-edit a
+claude-stream is a local web app where you and a Claude agent co-create and co-edit a
 workflow as a graph. The agent's plan is drawn as nodes and edges you can eyeball and
 audit; you edit it by hand, the agent edits it through tools, and both sets of edits land
 on the same graph. When the plan looks right, you run it: each node executes, shows its
@@ -16,7 +16,7 @@ signed-in `claude` binary through the Claude Agent SDK.
 
 **Success criteria for v1**
 
-1. `claude-flow ~/some/repo` opens a page in the browser.
+1. `claude-stream ~/some/repo` opens a page in the browser.
 2. You can ask the agent for a plan and watch nodes appear on the canvas as it works.
 3. You can add, edit, connect, and delete nodes yourself; the agent sees your edits on
    its next turn and revises around them.
@@ -35,7 +35,7 @@ graph maps onto v1's node types.
 
 | Topic | Decision |
 |---|---|
-| Form factor | Standalone local web app launched by a `claude-flow` CLI. No VS Code extension in v1. |
+| Form factor | Standalone local web app launched by a `claude-stream` CLI. No VS Code extension in v1. |
 | Node kinds | **Agent** nodes (a Claude Code run) and **command** nodes (a fixed shell command, no LLM). |
 | Permissions | **Ask for everything.** Every non-read-only tool call from an agent node waits for your approval. Reads/searches don't. |
 | Working directory | **One shared project folder** per graph. No worktrees. |
@@ -46,7 +46,7 @@ graph maps onto v1's node types.
 Anthropic's terms allow ordinary individual use of Claude Code and the Agent SDK on a
 Pro/Max plan, provided the unmodified `claude` binary signs in through Anthropic's own
 flow. Developers may not collect, store, or proxy Claude.ai credentials, or offer
-Claude.ai login to other users. claude-flow therefore:
+Claude.ai login to other users. claude-stream therefore:
 
 - **Never touches credentials.** It runs the installed `claude` binary (resolved from
   `PATH`, passed as the SDK's `pathToClaudeCodeExecutable`), which uses its own stored
@@ -61,13 +61,13 @@ Claude.ai login to other users. claude-flow therefore:
 - **Verifies per session.** The SDK's init message reports the auth source; if it
   indicates an API key, the node or chat turn fails with a clear error.
 
-If anyone else ever runs claude-flow, they run it on their own machine with their own
-`claude` login. claude-flow is not a hosted product.
+If anyone else ever runs claude-stream, they run it on their own machine with their own
+`claude` login. claude-stream is not a hosted product.
 
 ## 4. Architecture
 
 ```
- browser (127.0.0.1)                      claude-flow server (Node)
+ browser (127.0.0.1)                      claude-stream server (Node)
 ┌──────────────────────────┬─────────┐   ┌────────────────────────────────────┐
 │ Canvas (React Flow)      │ Right   │◄─►│ GraphStore — single source of      │
 │  nodes, edges, status    │ panel:  │ WS│   truth; every change is an op     │
@@ -84,7 +84,7 @@ If anyone else ever runs claude-flow, they run it on their own machine with thei
 Repository layout (npm workspaces):
 
 ```
-claude-flow/
+claude-stream/
   shared/   graph, op, run-event, and WS message types + zod schemas; pure graph logic
   server/   CLI entry, HTTP + WS server, GraphStore, Planner, Runner, ApprovalBroker, RunStore
   web/      Vite + React + @xyflow/react UI
@@ -114,7 +114,7 @@ the same code the server uses.
 
 ## 5. Graph model
 
-A graph is one JSON file: `<project>/.claude-flow/graphs/<name>.json`.
+A graph is one JSON file: `<project>/.claude-stream/graphs/<name>.json`.
 
 ```ts
 type Graph = {
@@ -177,7 +177,7 @@ One Agent SDK session per graph, resumed across turns via `resume: plannerSessio
   real repo) plus the in-process MCP server `graph` (via `createSdkMcpServer` + `tool()`).
   `permissionMode: "dontAsk"`, `allowedTools: ["mcp__graph__*"]`; edit, write, shell, and
   web tools are in `disallowedTools`. The planner never changes files and never prompts.
-- **System prompt addition:** explains claude-flow's node kinds, that it must build
+- **System prompt addition:** explains claude-stream's node kinds, that it must build
   plans through the graph tools, prefer command nodes for anything that must be
   reproducible (builds, timings, diffs), keep node prompts self-contained, and wire
   edges for data flow.
@@ -253,11 +253,11 @@ Each agent node is one SDK `query()`:
 # Results from earlier steps
 ## n1 · <title> (agent, succeeded)
 <output, truncated to 20,000 chars>
-Full output: .claude-flow/runs/<runId>/nodes/n1/output.md
+Full output: .claude-stream/runs/<runId>/nodes/n1/output.md
 
 ## n2 · <title> (command `dbt build -s x`, exit 0, 42.1 s)
 <stdout tail, truncated to 20,000 chars>
-Full output: .claude-flow/runs/<runId>/nodes/n2/output.md
+Full output: .claude-stream/runs/<runId>/nodes/n2/output.md
 ```
 
 - **Output** is the result message's `result` text, saved to `output.md`.
@@ -302,14 +302,14 @@ the SDK's rule evaluation, so allow rules in any settings file cannot bypass the
 On disk, per run:
 
 ```
-.claude-flow/runs/<runId>/
+.claude-stream/runs/<runId>/
   run.json                 snapshot, status, start/end, source run (for re-runs)
   nodes/<nodeId>/
     events.jsonl           every event for this node, in order
     output.md              the node's output
 ```
 
-`.claude-flow/.gitignore` is created with `runs/`, so graphs can be committed and run
+`.claude-stream/.gitignore` is created with `runs/`, so graphs can be committed and run
 logs stay local.
 
 **Agent node events:** start, assistant text, tool call (name + input), tool result
@@ -342,9 +342,9 @@ overlay (statuses, durations) and the logs to any past run.
 
 ## 10. Server, startup, and safety
 
-- **CLI:** `claude-flow [projectDir=.] [--port 4317] [--max-parallel 3] [--no-open]`.
+- **CLI:** `claude-stream [projectDir=.] [--port 4317] [--max-parallel 3] [--no-open]`.
   It resolves `claude` on PATH (exits with an install hint if missing), runs the auth
-  check, creates `.claude-flow/` if needed, starts the server, and opens the browser.
+  check, creates `.claude-stream/` if needed, starts the server, and opens the browser.
 - **Network:** binds `127.0.0.1` only. A random token is generated per launch. The
   opened URL carries it once; the server swaps it for an `HttpOnly; SameSite=Strict`
   cookie. HTTP and WS require the cookie, and WS also checks `Origin` and `Host`
@@ -389,7 +389,7 @@ Vitest across all workspaces.
     receive broadcast, approve a request).
 - **web:** unit tests for the client store reducer (applying server events). The UI is
   checked by launching the app and driving it in a browser.
-- **Opt-in live smoke test** (`CLAUDE_FLOW_LIVE=1`): a two-node graph against real
+- **Opt-in live smoke test** (`CLAUDE_STREAM_LIVE=1`): a two-node graph against real
   Claude, verifying the auth source is the subscription and an approval round-trip
   works. Not part of the default test run.
 
