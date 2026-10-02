@@ -284,6 +284,9 @@ describe('Planner private values', () => {
         permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
       },
     });
+    expect(await run('Grep', { pattern: 'x', path: '/', glob: '*' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await run('Glob', { pattern: '**/*', path: join('/', 'home', 'me', '.claude-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await run('Grep', { pattern: 'x', path: join(s.paths.root, 'src') })).toEqual({});
     expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toEqual({});
     expect(await run('Read', { file_path: 'models/a.sql' })).toEqual({});
   });

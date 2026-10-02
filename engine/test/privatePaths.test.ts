@@ -58,6 +58,32 @@ describe('privatePathDenial', () => {
     expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '.claude-stream' }, [values])).toBeNull();
     expect(privatePathDenial(root, 'Grep', { pattern: 'x' }, [values])).toBeNull();
   });
+  it('denies Grep and Glob over the values folder, anything inside it, and every folder above it', () => {
+    const valuesDir = dirname(values);
+    for (const path of [valuesDir, join(valuesDir, 'sub'), dirname(valuesDir), join('/', 'home', 'me'), '/', relative(root, valuesDir)]) {
+      expect(privatePathDenial(root, 'Grep', { pattern: 'x', path, glob: '*' }, [values])).toBe(reason);
+      expect(privatePathDenial(root, 'Glob', { pattern: '**/*', path }, [values])).toBe(reason);
+    }
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '..' }, [join(root, '..', 'secret', 'v.json')])).toBe(reason);
+  });
+  it('denies Grep and Glob over ~, ~/.claude-stream and ~/.claude-stream/values', () => {
+    const inHome = join(homedir(), '.claude-stream', 'values', '0123456789abcdef.json');
+    for (const path of ['~/.claude-stream/values', '~/.claude-stream', '~', '~/', '/']) {
+      expect(privatePathDenial(root, 'Grep', { pattern: 'x', path }, [inHome])).toBe(reason);
+    }
+    expect(privatePathDenial(root, 'Glob', { pattern: '**/*.json', path: '~' }, [inHome])).toBe(reason);
+  });
+  it('allows searches of unrelated folders and reads of other files near the values file', () => {
+    const valuesDir = dirname(values);
+    for (const path of [join(root, 'src'), 'src', root, `${valuesDir}x`, join('/', 'home', 'other'), join(dirname(valuesDir), 'graphs')]) {
+      expect(privatePathDenial(root, 'Grep', { pattern: 'x', path }, [values])).toBeNull();
+      expect(privatePathDenial(root, 'Glob', { pattern: '*', path }, [values])).toBeNull();
+    }
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', glob: '*' }, [values])).toBeNull();
+    for (const file_path of [join(valuesDir, 'fedcba9876543210.json'), valuesDir, dirname(valuesDir), '/']) {
+      expect(privatePathDenial(root, 'Read', { file_path }, [values])).toBeNull();
+    }
+  });
   it('ignores other tools and odd input', () => {
     expect(privatePathDenial(root, 'Bash', { command: `cat ${values}` }, [values])).toBeNull();
     expect(privatePathDenial(root, 'Read', null, [values])).toBeNull();

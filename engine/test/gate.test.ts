@@ -33,10 +33,13 @@ describe('approval gate', () => {
       permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
     });
     expect(decisionOf(await hook(preToolUse('Grep', { pattern: 'x', path: valuesFile })))?.permissionDecision).toBe('deny');
+    expect(decisionOf(await hook(preToolUse('Grep', { pattern: 'x', path: '/', glob: '*' })))?.permissionDecision).toBe('deny');
+    expect(decisionOf(await hook(preToolUse('Glob', { pattern: '**/*.json', path: join('/', 'home', 'me') })))?.permissionDecision).toBe('deny');
     expect(broker.pending()).toEqual([]);
     expect(events).toEqual([]);
     expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/graphs/a.json' }))).toEqual({});
     expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/variables.local.json' }))).toEqual({});
+    expect(await hook(preToolUse('Grep', { pattern: 'x', path: '/p/src' }))).toEqual({});
   });
 
   it('lets read-only tools through without asking', async () => {
