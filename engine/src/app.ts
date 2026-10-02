@@ -22,6 +22,7 @@ import type { Executors } from './executors';
 import { GraphStore } from './graphStore';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
+import { GIT_BASH_MISSING, type Found } from './platform';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { Runner } from './runner';
 import { RunStore } from './runStore';
@@ -48,6 +49,8 @@ export type AppDeps = {
   clock?: Clock;
   env?: EnvLookup;
   platform?: NodeJS.Platform;
+  /** Windows: where Git Bash is (see findGitBash), or why it can't be found. */
+  gitBash?: Found;
 };
 
 export type App = ReturnType<typeof createApp>;
@@ -62,13 +65,13 @@ export function createApp(d: AppDeps) {
   const platform = d.platform ?? process.platform;
   const env = d.env ?? envLookup(process.env, platform);
   const values = new VariableValues(d.valuesFile, platform);
-  /** Why command steps can't run on this machine, if so (always null until the platform checks exist). */
-  const commandShellProblem: string | null = null;
+  /** Why command steps can't run on this machine, shown in every run preview that has command steps. */
+  const commandShellProblem: string | null = platform === 'win32' ? (d.gitBash?.ok ? null : (d.gitBash?.error ?? GIT_BASH_MISSING)) : null;
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
   const executors = d.executors ?? {
     agent: createAgentExecutor({ claudePath: d.claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile }),
-    command: createCommandExecutor(),
+    command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
   const clients = new Set<Client>();

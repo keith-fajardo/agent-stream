@@ -375,4 +375,26 @@ describe('app', () => {
     await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(false));
     expect(app.deleteGraph(g.id)).toEqual({ ok: true });
   });
+
+  it('reports a missing Git Bash on Windows in the preview of graphs with command steps', async () => {
+    const paths = tmpProject();
+    const app = createApp({
+      projectDir: paths.root,
+      valuesFile: tmpValuesFile(),
+      claudePath: 'claude',
+      auth: signedIn,
+      maxParallel: 1,
+      platform: 'win32',
+      gitBash: { ok: false, error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.' },
+      executors: { agent: instant, command: instant },
+      queryFn: async function* () {},
+    });
+    const msgs: ServerMessage[] = [];
+    const c = { send: (m: ServerMessage) => void msgs.push(m) };
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'x' } }, 'user');
+    await app.handle(c, { type: 'previewRun', graphId: g.id });
+    const preview = msgs.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
+    expect(preview.problems).toEqual(['Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.']);
+  });
 });

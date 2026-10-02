@@ -1,23 +1,39 @@
 import { spawn } from 'node:child_process';
 import type { NodeExecutor, NodeOutcome } from './executors';
+import { childEnv, commandShell, killTree } from './platform';
 
 export const DEFAULT_TIMEOUT_SEC = 1800;
 export const KILL_GRACE_MS = 5000;
 
-export type CommandExecutorOptions = { shell?: string; env?: NodeJS.ProcessEnv };
+export type CommandExecutorOptions = {
+  platform?: NodeJS.Platform;
+  /** macOS/Linux: the shell to use instead of $SHELL. */
+  shell?: string;
+  /** Windows: Git Bash (see findGitBash). */
+  gitBashPath?: string;
+  env?: NodeJS.ProcessEnv;
+  /** Replaces the process-tree kill (tests). */
+  killTree?: typeof killTree;
+};
 
 /**
- * Runs a command node as `$SHELL -lc "<command>"` in its own process group, so stop and
- * timeout terminate everything it started (dbt, python, …), not just the shell. Uses the
- * user's normal environment so dbt profiles and credentials work as in their terminal.
+ * Runs a command node in a login shell (spec §8.1): `$SHELL -lc` on macOS/Linux in its own
+ * process group, Git Bash `-lc` on Windows. Stop and timeout end everything it started.
  */
 export function createCommandExecutor(options: CommandExecutorOptions = {}): NodeExecutor {
+  const platform = options.platform ?? process.platform;
+  const kill = options.killTree ?? killTree;
   return (ctx) =>
     new Promise<NodeOutcome>((resolve) => {
       const command = ctx.node.command ?? '';
-      const shell = options.shell ?? process.env.SHELL ?? '/bin/sh';
+      const env = options.env ?? process.env;
       const timeoutSec = ctx.node.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
       ctx.emit({ type: 'start', kind: 'command', cwd: ctx.cwd, command });
+      const spec = commandShell({ platform, env, command, shell: options.shell, gitBashPath: options.gitBashPath });
+      if ('error' in spec) {
+        resolve({ ok: false, output: '', exitCode: null, error: spec.error });
+        return;
+      }
 
       let output = '';
       let timedOut = false;
@@ -25,25 +41,27 @@ export function createCommandExecutor(options: CommandExecutorOptions = {}): Nod
       let settled = false;
       let killTimer: NodeJS.Timeout | undefined;
 
-      const child = spawn(shell, ['-lc', command], {
+      const child = spawn(spec.file, spec.args, {
         cwd: ctx.cwd,
-        env: options.env ?? process.env,
-        detached: true,
+        env: childEnv(env, platform),
+        detached: spec.detached,
+        windowsHide: spec.windowsHide,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
-      const signalGroup = (signal: NodeJS.Signals) => {
-        if (child.pid === undefined) return;
-        try {
-          process.kill(-child.pid, signal);
-        } catch {
-          // the process group already exited
-        }
+      const stopTree = (signal: NodeJS.Signals) => {
+        if (child.pid !== undefined) kill(child.pid, { platform, signal });
       };
+      let stopped = false;
+      // A timeout and a Stop can both arrive; the tree is stopped once.
       const terminate = () => {
-        signalGroup('SIGTERM');
-        killTimer ??= setTimeout(() => signalGroup('SIGKILL'), KILL_GRACE_MS);
+        if (stopped) return;
+        stopped = true;
+        stopTree('SIGTERM');
+        // On Windows taskkill /F has already ended the tree; elsewhere force it after a grace period.
+        if (platform !== 'win32') killTimer = setTimeout(() => stopTree('SIGKILL'), KILL_GRACE_MS);
       };
+
       const timer = setTimeout(() => {
         timedOut = true;
         terminate();

@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { applyOp, emptyGraph, type ApprovalRequest, type Graph, type Op } from '@claude-stream/shared';
 import { createAgentExecutor } from '../src/agentExecutor';
 import { ApprovalBroker } from '../src/approvals';
-import { checkAuth, resolveClaudePath } from '../src/auth';
+import { checkAuth } from '../src/auth';
 import { createCommandExecutor } from '../src/commandExecutor';
+import { findClaude } from '../src/platform';
 import { Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
 import { tmpProject } from './helpers';
@@ -14,8 +16,9 @@ const live = process.env.CLAUDE_STREAM_LIVE === '1';
 
 describe.skipIf(!live)('live: real Claude on the subscription', () => {
   it('runs agent and command steps with an approval round-trip', async () => {
-    const claudePath = resolveClaudePath();
-    if (!claudePath) throw new Error('claude is not on PATH');
+    const found = findClaude({ platform: process.platform, env: process.env, home: homedir() });
+    if (!found.ok) throw new Error(found.error);
+    const claudePath = found.path;
     const auth = await checkAuth(claudePath);
     expect(auth.ok, auth.error).toBe(true);
 

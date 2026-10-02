@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { emptyGraph, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
 import { createCommandExecutor } from '../src/commandExecutor';
 import type { NodeContext } from '../src/executors';
@@ -79,5 +79,49 @@ describe('command executor', () => {
     const out = await run(ctx("head -c 1000000 /dev/zero | tr '\\0' x").c);
     expect(out.ok).toBe(true);
     expect(out.output).toHaveLength(1_000_000);
+  });
+
+  it('runs in a folder whose path has spaces, with a shell whose path has spaces', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'my project '));
+    const shellDir = mkdtempSync(join(tmpdir(), 'my shells '));
+    const shell = join(shellDir, 'my sh');
+    symlinkSync('/bin/sh', shell);
+    const { c } = ctx('pwd', { cwd });
+    expect(await createCommandExecutor({ shell })(c)).toEqual({ ok: true, output: `${realpathSync(cwd)}\n`, exitCode: 0 });
+  });
+
+  it('fails clearly on Windows without Git Bash, without starting anything', async () => {
+    const { c, events } = ctx('echo hi');
+    expect(await createCommandExecutor({ platform: 'win32' })(c)).toEqual({
+      ok: false,
+      output: '',
+      exitCode: null,
+      error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.',
+    });
+    expect(events.map((e) => e.type)).toEqual(['start']);
+  });
+
+  it('on Windows runs Git Bash with the Windows defaults and stops the tree with one taskkill', async () => {
+    // /bin/sh stands in for bash.exe; the stop goes through the injected killTree.
+    const kills: { pid: number; platform: string }[] = [];
+    const exec = createCommandExecutor({
+      platform: 'win32',
+      gitBashPath: '/bin/sh',
+      killTree: (pid, o) => {
+        kills.push({ pid, platform: o.platform });
+        process.kill(pid, 'SIGKILL');
+      },
+    });
+    const { c: envCtx } = ctx('echo "$CHERE_INVOKING $PYTHONIOENCODING"');
+    expect(await exec(envCtx)).toMatchObject({ ok: true, output: '1 utf-8\n' });
+    const controller = new AbortController();
+    // `exec` so the killed process is the one holding the output pipes.
+    const { c } = ctx('exec sleep 30', { signal: controller.signal });
+    const running = exec(c);
+    await new Promise((r) => setTimeout(r, 200));
+    controller.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(kills).toHaveLength(1);
+    expect(kills[0].platform).toBe('win32');
   });
 });

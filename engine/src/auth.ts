@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AuthInfo } from '@claude-stream/shared';
 
 /** Variables that make Claude Code use an API key or send requests (and the login token) to another host. */
@@ -13,25 +13,11 @@ const SETTINGS_ENV_PREFIXES = ['CLAUDE_CODE_USE_', 'ANTHROPIC_BEDROCK', 'ANTHROP
 /** Init-message auth sources that mean "no API key": the subscription login is in use. */
 const SUBSCRIPTION_SOURCES = new Set(['none', 'oauth']);
 
-export function resolveClaudePath(env: NodeJS.ProcessEnv = process.env): string | null {
-  for (const dir of (env.PATH ?? '').split(delimiter)) {
-    if (!dir) continue;
-    const candidate = join(dir, 'claude');
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // not in this folder; keep looking
-    }
-  }
-  return null;
-}
-
 /** Copy of `env` without API-key, base-URL and provider-switch variables, so Claude Code uses the subscription login. */
 export function sanitizedEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = { ...env };
   for (const key of Object.keys(out)) {
-    if (REMOVED_VARS.includes(key) || key.startsWith(PROVIDER_SWITCH_PREFIX)) delete out[key];
+    if (REMOVED_VARS.includes(key) || key.startsWith(PROVIDER_SWITCH_PREFIX) || key === 'ELECTRON_RUN_AS_NODE') delete out[key];
   }
   return out;
 }

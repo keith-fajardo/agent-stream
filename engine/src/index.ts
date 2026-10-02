@@ -2,3 +2,5 @@
 export { createApp, type App, type AppDeps, type Client } from './app';
 export { checkAuth, projectSettingsProblem, sanitizedEnv } from './auth';
 export { valuesFileFor } from './variableValues';
+export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found } from './platform';
+export { envLookup } from './runPreview';

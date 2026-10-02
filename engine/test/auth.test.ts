@@ -2,18 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { authSourceError, checkAuth, isSubscriptionAuthSource, projectSettingsProblem, resolveClaudePath, sanitizedEnv } from '../src/auth';
-
-describe('resolveClaudePath', () => {
-  it('finds an executable named claude on PATH', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'bin-'));
-    const file = join(dir, 'claude');
-    writeFileSync(file, '#!/bin/sh\n');
-    chmodSync(file, 0o755);
-    expect(resolveClaudePath({ PATH: ['/nonexistent', dir].join(delimiter) })).toBe(file);
-    expect(resolveClaudePath({ PATH: '/nonexistent' })).toBeNull();
-  });
-});
+import { authSourceError, checkAuth, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv } from '../src/auth';
 
 describe('checkAuth', () => {
   const status = (s: object) => async () => JSON.stringify(s);
@@ -57,6 +46,10 @@ describe('subscription safety helpers', () => {
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '8000',
     };
     expect(sanitizedEnv(env)).toEqual({ PATH: '/bin', CLAUDE_CODE_MAX_OUTPUT_TOKENS: '8000' });
+  });
+
+  it('drops ELECTRON_RUN_AS_NODE from agent environments', () => {
+    expect(sanitizedEnv({ ELECTRON_RUN_AS_NODE: '1', HOME: '/h' })).toEqual({ HOME: '/h' });
   });
 
   it('accepts only subscription auth sources', () => {
