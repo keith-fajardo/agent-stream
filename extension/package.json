@@ -68,6 +68,10 @@
         {
           "id": "claudeStream.graphs",
           "name": "Graphs"
+        },
+        {
+          "id": "claudeStream.approvals",
+          "name": "Approvals"
         }
       ]
     },
@@ -81,6 +85,10 @@
         "view": "claudeStream.graphs",
         "contents": "No graphs yet.\n[New Graph](command:claudeStream.newGraph)\n[Import Graph](command:claudeStream.importGraph)",
         "when": "workbenchState != empty"
+      },
+      {
+        "view": "claudeStream.approvals",
+        "contents": "Nothing is waiting for approval."
       }
     ],
     "commands": [
@@ -131,6 +139,49 @@
         "command": "claudeStream.deleteGraph",
         "title": "Delete Graph",
         "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.runGraph",
+        "title": "Run Graph",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.stopRun",
+        "title": "Stop Run",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.editVariables",
+        "title": "Edit Variables",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.approveAll",
+        "title": "Approve All",
+        "category": "Claude Stream",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "claudeStream.approve",
+        "title": "Approve",
+        "category": "Claude Stream",
+        "icon": "$(check)"
+      },
+      {
+        "command": "claudeStream.deny",
+        "title": "Deny",
+        "category": "Claude Stream",
+        "icon": "$(close)"
+      },
+      {
+        "command": "claudeStream.revealApproval",
+        "title": "Show Step",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.showSidebar",
+        "title": "Show Sidebar",
+        "category": "Claude Stream"
       }
     ],
     "menus": {
@@ -144,6 +195,11 @@
           "command": "claudeStream.importGraph",
           "when": "view == claudeStream.graphs",
           "group": "navigation@2"
+        },
+        {
+          "command": "claudeStream.approveAll",
+          "when": "view == claudeStream.approvals",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -171,6 +227,30 @@
           "command": "claudeStream.deleteGraph",
           "when": "view == claudeStream.graphs && viewItem =~ /^graph/",
           "group": "4_delete@1"
+        },
+        {
+          "command": "claudeStream.approve",
+          "when": "view == claudeStream.approvals && viewItem == approval",
+          "group": "inline@1"
+        },
+        {
+          "command": "claudeStream.deny",
+          "when": "view == claudeStream.approvals && viewItem == approval",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeStream.approve",
+          "when": "false"
+        },
+        {
+          "command": "claudeStream.deny",
+          "when": "false"
+        },
+        {
+          "command": "claudeStream.revealApproval",
+          "when": "false"
         }
       ]
     }

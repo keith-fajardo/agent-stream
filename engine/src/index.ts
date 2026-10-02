@@ -6,3 +6,4 @@ export { checkAuth, projectSettingsProblem, sanitizedEnv } from './auth';
 export { valuesFileFor } from './variableValues';
 export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found } from './platform';
 export { envLookup } from './runPreview';
+export type { NodeOutcome } from './executors';

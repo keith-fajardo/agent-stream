@@ -1,11 +1,14 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import { authLabel, type AuthInfo, type HostCommand } from '@claude-stream/shared';
+import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { graphCommands } from './commands';
-import { CHECKING, EngineManager, type EngineEvents } from './engines';
+import { CHECKING, EngineManager, type EngineEvents, type Folder } from './engines';
 import { folderFor, workspaceFolders } from './folders';
 import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
 import { GraphsView } from './graphsView';
+import { ApprovalNotifier } from './notifications';
+import { runCommands } from './runCommands';
 import { readSettings } from './settings';
 import { statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
@@ -74,6 +77,32 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`claudeStream.${name}`, run));
   context.subscriptions.push(graphsTree, vscode.workspace.onDidChangeWorkspaceFolders(() => graphsView.refresh()));
+  const approvalsView = new ApprovalsView(() => manager.approvals());
+  const approvalsTree = vscode.window.createTreeView('claudeStream.approvals', { treeDataProvider: approvalsView });
+  const decideApproval = (folder: Folder, id: string, decision: 'approve' | 'deny') =>
+    manager.get(folder).broker.decide(id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
+  const notifier = new ApprovalNotifier({
+    pending: () => manager.approvals(),
+    isVisible: (folder, graphId) => panels.isVisible(folder.key, graphId),
+    ask: async (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
+    decide: decideApproval,
+    reveal: (folder, request) => void openAndSend(panels, folder, request.graphId, { type: 'revealNode', nodeId: request.nodeId }),
+  });
+  events.approvals = () => {
+    approvalsView.refresh();
+    approvalsTree.badge = approvalsBadge(manager.approvals().length);
+    notifier.update();
+  };
+  const run = runCommands({
+    engines: manager,
+    panels,
+    pickGraph: graph.pickGraph,
+    openAndSend: (t, msg) => openAndSend(panels, t.folder, t.graphId, msg),
+    info: (message) => void vscode.window.showInformationMessage(message),
+    showSidebar: () => void vscode.commands.executeCommand('workbench.view.extension.claudeStream'),
+  });
+  for (const [name, command] of Object.entries(run)) context.subscriptions.push(vscode.commands.registerCommand(`claudeStream.${name}`, command));
+  context.subscriptions.push(approvalsTree);
   events.confirmRun = (folder, graphId, fromNodeId, sourceRunId) => {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
     if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId });
