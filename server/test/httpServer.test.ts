@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -96,5 +97,35 @@ describe('http server', () => {
       });
       expect(status).toBe(403);
     }
+  });
+
+  it('survives a client that resets a rejected upgrade', async () => {
+    const { server, origin } = await start();
+    const raw = `GET /ws HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: http://evil.example\r\n\r\n`;
+    for (const afterData of [false, true]) {
+      const socket = connect(server.port, '127.0.0.1');
+      await new Promise((resolve) => socket.once('connect', resolve));
+      socket.on('error', () => {});
+      socket.write(raw);
+      if (afterData) await new Promise((resolve) => socket.once('data', resolve));
+      socket.resetAndDestroy();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect((await fetch(`${origin}/`)).status).toBe(401);
+    }
+  });
+
+  it('survives an invalid WebSocket frame', async () => {
+    const { server, origin, cookie } = await start();
+    const good = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, { origin, headers: { cookie } });
+    good.on('error', () => {});
+    await new Promise((resolve, reject) => {
+      good.once('open', resolve);
+      good.once('error', reject);
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (good as any)._socket.write(Buffer.from([0x81, 0x82, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfe]));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await fetch(`${origin}/`, { headers: { cookie } })).status).toBe(200);
+    good.terminate();
   });
 });

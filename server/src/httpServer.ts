@@ -114,7 +114,9 @@ export async function startHttpServer(o: HttpServerOptions): Promise<RunningServ
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  server.on('clientError', (_err, socket) => socket.destroy());
   server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => socket.destroy());
     const allowed =
       req.url === '/ws' &&
       req.headers.host === hostHeader() &&
@@ -142,6 +144,7 @@ export async function startHttpServer(o: HttpServerOptions): Promise<RunningServ
       }
       o.app.handle(client, parsed.msg).catch((e: unknown) => client.send({ type: 'error', message: e instanceof Error ? e.message : String(e) }));
     });
+    ws.on('error', () => ws.terminate());
     ws.on('close', disconnect);
   }
 
