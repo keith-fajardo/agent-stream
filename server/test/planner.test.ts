@@ -147,6 +147,56 @@ describe('Planner', () => {
     expect(last.text).toContain('reset');
   });
 
+  // What Claude Code 2.1.287 actually does for a missing session: one error result
+  // with no system/init message, then the SDK throws.
+  const missingSession = (sessionId?: string) =>
+    msg({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: [`No conversation found with session ID: ${sessionId}`],
+      num_turns: 0,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      session_id: sessionId,
+    });
+
+  it('resets a session that no longer exists, as the real CLI reports it', async () => {
+    let stale = false;
+    const s = setup(async function* (options) {
+      if (stale) {
+        yield missingSession(options.resume);
+        throw new Error(`Claude Code returned an error result: No conversation found with session ID: ${options.resume}`);
+      }
+      yield init();
+      yield done();
+    });
+    await s.planner.send(s.graphId, 'one');
+    expect(s.graphStore.get(s.graphId).plannerSessionId).toBe('sess-1');
+    stale = true;
+    await s.planner.send(s.graphId, 'two');
+    const last = s.chat().at(-1)!;
+    expect(last.role).toBe('error');
+    expect(last.text).toContain('No conversation found with session ID: sess-1');
+    expect(last.text).toContain('reset');
+    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
+    stale = false;
+    await s.planner.send(s.graphId, 'three');
+    expect(s.calls[2].options.resume).toBeUndefined();
+    expect(s.graphStore.get(s.graphId).plannerSessionId).toBe('sess-1');
+  });
+
+  it('shows the real error when a session fails before it starts', async () => {
+    const s = setup(async function* () {
+      yield missingSession('x');
+    });
+    await s.planner.send(s.graphId, 'hi');
+    expect(s.chat().map((e) => [e.role, e.text])).toEqual([
+      ['user', 'hi'],
+      ['error', 'No conversation found with session ID: x'],
+    ]);
+  });
+
   it('never rejects, even when the chat log cannot be written', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     let release!: () => void;

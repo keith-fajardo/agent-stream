@@ -9,6 +9,8 @@ import { createGraphMcpServer } from './plannerTools';
 import type { RunStore } from './runStore';
 import { blocksOf, realQuery, type QueryFn } from './sdk';
 
+const SESSION_RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
+
 export const PLANNER_APPEND = `You are the planner inside claude-stream, a local tool where the user and you co-create a workflow graph that is then executed step by step.
 
 How the graph works:
@@ -148,8 +150,21 @@ export class Planner extends EventEmitter {
           abortController.abort();
           return;
         }
-        if (m.type === 'result' && !sawInit) {
-          this.add(graphId, 'error', UNVERIFIED_AUTH);
+        if (message.type === 'result' && !sawInit) {
+          if (message.subtype !== 'success' || message.is_error) {
+            // The session failed before it started (e.g. resuming a session that no longer
+            // exists), so no model turn ran: show the real error, and drop a stale session
+            // so the next message starts fresh instead of failing the same way forever.
+            const detail = (message.subtype !== 'success' ? message.errors.join('\n') : message.result) || message.subtype;
+            if (options.resume) {
+              this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
+              this.add(graphId, 'error', `${detail}${SESSION_RESET_NOTE}`);
+            } else {
+              this.add(graphId, 'error', detail);
+            }
+          } else {
+            this.add(graphId, 'error', UNVERIFIED_AUTH);
+          }
           abortController.abort();
           return;
         }
@@ -170,7 +185,7 @@ export class Planner extends EventEmitter {
         const hadSession = !!this.d.graphStore.load(graphId).ok && !!this.d.graphStore.get(graphId).plannerSessionId;
         if (hadSession) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
         const message = e instanceof Error ? e.message : String(e);
-        this.add(graphId, 'error', hadSession ? `${message} (The previous planner session was reset; send your message again.)` : message);
+        this.add(graphId, 'error', hadSession ? `${message}${SESSION_RESET_NOTE}` : message);
       } catch (inner) {
         console.error('[claude-stream] planner error', e, inner);
       }
