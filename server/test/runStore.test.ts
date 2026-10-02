@@ -1,3 +1,5 @@
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { emptyGraph, type RunMeta } from '@claude-stream/shared';
 import { RunStore } from '../src/runStore';
@@ -66,5 +68,19 @@ describe('RunStore', () => {
       nodes: { n1: { status: 'interrupted', endedAt: 'now' }, n2: { status: 'interrupted', endedAt: 'now' } },
     });
     expect(store.get('20261002-110000-bbbb')?.status).toBe('succeeded');
+  });
+
+  it('skips torn JSONL lines when reading events', () => {
+    const paths = tmpProject();
+    const store = new RunStore(paths);
+    const runId = '20261002-100000-aaaa';
+    store.create(meta(runId));
+    store.appendEvent(runId, 'n1', { at: 't1', type: 'text', text: 'hi' });
+    store.appendEvent(runId, 'n1', { at: 't2', type: 'stdout', chunk: 'out' });
+    // Simulate a torn line from a crash mid-append
+    const eventsPath = join(paths.runsDir, runId, 'nodes', 'n1', 'events.jsonl');
+    appendFileSync(eventsPath, '{"at":"t3","type":"te');
+    // readEvents should return the two valid events and skip the truncated line
+    expect(store.readEvents(runId, 'n1').map((e) => e.type)).toEqual(['text', 'stdout']);
   });
 });

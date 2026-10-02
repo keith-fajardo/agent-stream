@@ -74,7 +74,14 @@ export class RunStore {
     return readFileSync(path, 'utf8')
       .split('\n')
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as NodeEvent);
+      .map((line) => {
+        try {
+          return JSON.parse(line) as NodeEvent;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((event): event is NodeEvent => event !== undefined);
   }
 
   writeOutput(runId: string, nodeId: string, text: string): void {
