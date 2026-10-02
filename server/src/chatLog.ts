@@ -1,6 +1,7 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChatEntry } from '@claude-stream/shared';
+import { readJsonLines } from './fsutil';
 import { isGraphId, type ProjectPaths } from './paths';
 
 export class ChatLog {
@@ -16,10 +17,7 @@ export class ChatLog {
   }
 
   read(graphId: string): ChatEntry[] {
-    if (!isGraphId(graphId) || !existsSync(this.file(graphId))) return [];
-    return readFileSync(this.file(graphId), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as ChatEntry);
+    if (!isGraphId(graphId)) return [];
+    return readJsonLines<ChatEntry>(this.file(graphId));
   }
 }

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { NodeEvent, RunMeta, RunSummary } from '@claude-stream/shared';
-import { writeFileAtomic } from './fsutil';
+import { readJsonLines, writeFileAtomic } from './fsutil';
 import type { ProjectPaths } from './paths';
 
 const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
@@ -69,19 +69,7 @@ export class RunStore {
 
   readEvents(runId: string, nodeId: string): NodeEvent[] {
     if (!this.validIds(runId, nodeId)) return [];
-    const path = join(this.nodeDir(runId, nodeId), 'events.jsonl');
-    if (!existsSync(path)) return [];
-    return readFileSync(path, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line) as NodeEvent;
-        } catch {
-          return undefined;
-        }
-      })
-      .filter((event): event is NodeEvent => event !== undefined);
+    return readJsonLines<NodeEvent>(join(this.nodeDir(runId, nodeId), 'events.jsonl'));
   }
 
   writeOutput(runId: string, nodeId: string, text: string): void {

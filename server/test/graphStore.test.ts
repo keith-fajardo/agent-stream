@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatLog } from '../src/chatLog';
@@ -89,6 +89,19 @@ describe('GraphStore', () => {
     expect(store.load('../../etc/passwd')).toEqual({ ok: false, error: 'invalid graph id "../../etc/passwd"' });
   });
 
+  it('skips unparseable lines in the op log', () => {
+    const paths = tmpProject();
+    const store = new GraphStore(paths, fixedClock());
+    const { id } = store.create('G');
+    store.apply(id, { type: 'setGoal', goal: 'one' }, 'user');
+    appendFileSync(join(paths.graphsDir, `${id}.ops.jsonl`), '<<<<<<< HEAD\n');
+    store.apply(id, { type: 'setGoal', goal: 'two' }, 'agent');
+    expect(store.readOps(id).map((r) => r.op)).toEqual([
+      { type: 'setGoal', goal: 'one' },
+      { type: 'setGoal', goal: 'two' },
+    ]);
+  });
+
   it('stores planner state without logging an op or emitting a change', () => {
     const paths = tmpProject();
     const store = new GraphStore(paths, fixedClock());
@@ -110,5 +123,14 @@ describe('ChatLog', () => {
     expect(log.read('g').map((e) => e.text)).toEqual(['hi', 'hello']);
     expect(log.read('other')).toEqual([]);
     expect(log.read('../x')).toEqual([]);
+  });
+
+  it('skips unparseable lines such as merge-conflict markers', () => {
+    const paths = tmpProject();
+    const log = new ChatLog(paths);
+    log.append('g', { at: 't1', role: 'user', text: 'hi' });
+    appendFileSync(join(paths.graphsDir, 'g.chat.jsonl'), '<<<<<<< HEAD\n');
+    log.append('g', { at: 't2', role: 'assistant', text: 'hello' });
+    expect(log.read('g').map((e) => e.text)).toEqual(['hi', 'hello']);
   });
 });

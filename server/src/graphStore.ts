@@ -14,7 +14,7 @@ import {
   type OpRecord,
 } from '@claude-stream/shared';
 import { systemClock, type Clock } from './clock';
-import { writeFileAtomic } from './fsutil';
+import { readJsonLines, writeFileAtomic } from './fsutil';
 import { isGraphId, type ProjectPaths } from './paths';
 
 export function slugify(name: string): string {
@@ -119,12 +119,7 @@ export class GraphStore extends EventEmitter {
 
   readOps(graphId: string): OpRecord[] {
     if (!isGraphId(graphId)) return [];
-    const path = this.opsFile(graphId);
-    if (!existsSync(path)) return [];
-    return readFileSync(path, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as OpRecord);
+    return readJsonLines<OpRecord>(this.opsFile(graphId));
   }
 
   private save(graph: Graph): void {
