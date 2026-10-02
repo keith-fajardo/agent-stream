@@ -12,6 +12,7 @@
     "claude-stream": "server/bin/claude-stream.mjs"
   },
   "scripts": {
+    "build": "npm run build -w web",
     "start": "node server/bin/claude-stream.mjs",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
