@@ -127,6 +127,27 @@ describe('agent executor', () => {
     expect(events.map((e) => e.type)).toEqual(['start', 'approval_requested', 'approval_decided']);
   });
 
+  it('denies reading the variable values file without asking', async () => {
+    const valuesFile = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+    const broker = new ApprovalBroker();
+    const results: unknown[] = [];
+    const { fn } = fake(async function* (options) {
+      yield init();
+      const hook = options.hooks!.PreToolUse![0].hooks[0];
+      for (const file_path of [valuesFile, 'a.sql']) {
+        const input = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path }, tool_use_id: 'tu8', session_id: 's1', transcript_path: '/t', cwd: '/proj' } as HookInput;
+        results.push(await hook(input, 'tu8', { signal: new AbortController().signal }));
+      }
+      yield success('ok');
+    });
+    const { c, events } = ctx();
+    expect((await createAgentExecutor({ claudePath: 'claude', broker, queryFn: fn, valuesFile })(c)).ok).toBe(true);
+    expect(results[0]).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('the variable values file') } });
+    expect(results[1]).toEqual({});
+    expect(broker.pending()).toEqual([]);
+    expect(events.map((e) => e.type)).toEqual(['start']);
+  });
+
   it('reports cancellation when the run is stopped', async () => {
     const ac = new AbortController();
     const { fn } = fake(async function* (options) {

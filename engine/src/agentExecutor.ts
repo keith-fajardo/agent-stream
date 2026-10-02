@@ -6,7 +6,14 @@ import type { NodeExecutor, NodeOutcome } from './executors';
 import { makeApprovalGate, READ_ONLY_TOOLS } from './gate';
 import { blocksOf, realQuery, toolResultText, type QueryFn } from './sdk';
 
-export type AgentExecutorDeps = { claudePath: string; broker: ApprovalBroker; queryFn?: QueryFn; env?: NodeJS.ProcessEnv };
+export type AgentExecutorDeps = {
+  claudePath: string;
+  broker: ApprovalBroker;
+  queryFn?: QueryFn;
+  env?: NodeJS.ProcessEnv;
+  /** The variable values file; agents are denied reading it. */
+  valuesFile?: string;
+};
 
 function usageOf(msg: SDKResultMessage): NodeUsage {
   return {
@@ -85,6 +92,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
       nodeId: ctx.node.id,
       nodeTitle: ctx.node.title,
       projectDir: ctx.cwd,
+      privateFiles: deps.valuesFile ? [deps.valuesFile] : [],
       signal: abortController.signal,
       emit: ctx.emit,
     });

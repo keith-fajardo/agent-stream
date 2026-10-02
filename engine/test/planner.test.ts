@@ -10,6 +10,7 @@ import type { QueryFn } from '../src/sdk';
 import { fixedClock, tmpProject } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
+const VALUES_FILE = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
 const init = (apiKeySource = 'none') => msg({ type: 'system', subtype: 'init', apiKeySource, session_id: 'sess-1' });
 const say = (...content: object[]) => msg({ type: 'assistant', parent_tool_use_id: null, message: { content }, session_id: 'sess-1' });
 const done = () =>
@@ -40,6 +41,7 @@ function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
     runStore,
     chatLog,
     projectDir: paths.root,
+    valuesFile: VALUES_FILE,
     claudePath: '/usr/local/bin/claude',
     requestRun: () => null,
     queryFn,
@@ -275,9 +277,14 @@ describe('Planner private values', () => {
     expect(matchers).toHaveLength(1);
     const run = (tool_name: string, tool_input: unknown) =>
       matchers[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: s.paths.root } as never, 't', { signal: new AbortController().signal });
-    expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toMatchObject({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('variables.local.json') },
+    expect(await run('Read', { file_path: VALUES_FILE })).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
+      },
     });
+    expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toEqual({});
     expect(await run('Read', { file_path: 'models/a.sql' })).toEqual({});
   });
 });

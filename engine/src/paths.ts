@@ -8,7 +8,8 @@ export function projectPaths(root: string): ProjectPaths {
   return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs') };
 }
 
-const GITIGNORE_LINES = ['runs/', 'variables.local.json'];
+/** Variable values live outside the project (see valuesFileFor), so only run records need ignoring. */
+const GITIGNORE_LINES = ['runs/'];
 
 export function ensureDataDirs(paths: ProjectPaths): void {
   mkdirSync(paths.graphsDir, { recursive: true });

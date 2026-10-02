@@ -1,9 +1,12 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
-import { tmpProject } from './helpers';
+import { tmpProject, tmpValuesFile } from './helpers';
 
 const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
@@ -13,8 +16,10 @@ const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max', email: 
 
 function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined) {
   const paths = tmpProject();
+  const valuesFile = tmpValuesFile();
   const app = createApp({
     projectDir: paths.root,
+    valuesFile,
     claudePath: 'claude',
     auth,
     maxParallel: 2,
@@ -30,7 +35,7 @@ function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant, env?:
     const of = <T extends ServerMessage['type']>(type: T) => msgs.filter((m): m is Extract<ServerMessage, { type: T }> => m.type === type);
     return { c, msgs, of };
   };
-  return { paths, app, client };
+  return { paths, valuesFile, app, client };
 }
 
 type TestClient = ReturnType<ReturnType<typeof setup>['client']>;
@@ -151,8 +156,60 @@ describe('app', () => {
       snapshot: emptyGraph('g', 'G', 't'),
       nodes: { n1: { status: 'running' } },
     });
-    const app = createApp({ projectDir: paths.root, claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
+    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
     expect(app.runStore.get('20261001-120000-abcd')).toMatchObject({ status: 'interrupted', nodes: { n1: { status: 'interrupted' } } });
+  });
+
+  it('keeps variable values in the given values file and writes none into the project', async () => {
+    const { app, client, paths, valuesFile } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'password' }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'password', value: 'hunter2' });
+    expect(JSON.parse(readFileSync(valuesFile, 'utf8'))).toEqual({ version: 1, graphs: { [g.id]: { password: 'hunter2' } } });
+    const files = (readdirSync(paths.root, { recursive: true }) as string[]).map((f) => join(paths.root, f)).filter((f) => statSync(f).isFile());
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((f) => f.endsWith('variables.local.json'))).toEqual([]);
+    expect(files.filter((f) => readFileSync(f, 'utf8').includes('hunter2'))).toEqual([]);
+  });
+
+  it('denies Claude the values file in planner turns and agent steps', async () => {
+    const paths = tmpProject();
+    const valuesFile = tmpValuesFile();
+    const sessions: Options[] = [];
+    const app = createApp({
+      projectDir: paths.root,
+      valuesFile,
+      claudePath: 'claude',
+      auth: signedIn,
+      maxParallel: 1,
+      queryFn: ({ options }) => {
+        sessions.push(options!);
+        return (async function* () {
+          yield { type: 'system', subtype: 'init', apiKeySource: 'none', session_id: 's' } as unknown as SDKMessage;
+          const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+          yield { type: 'result', subtype: 'success', is_error: false, result: 'ok', num_turns: 1, total_cost_usd: 0, usage, session_id: 's' } as unknown as SDKMessage;
+        })();
+      },
+    });
+    const sent: ServerMessage[] = [];
+    const c = { send: (m: ServerMessage) => void sent.push(m) };
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+    await app.handle(c, { type: 'chat', graphId: g.id, text: 'hi' });
+    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(false));
+    await app.handle(c, { type: 'previewRun', graphId: g.id });
+    const preview = sent.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
+    await app.handle(c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    await vi.waitFor(() => expect(app.runStore.list(g.id)[0]?.status).toBe('succeeded'));
+    expect(sessions.map((o) => o.permissionMode)).toEqual(['dontAsk', 'default']);
+    for (const o of sessions) {
+      const hook = o.hooks!.PreToolUse![0].hooks[0];
+      const read = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: valuesFile }, tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: paths.root } as HookInput;
+      expect(await hook(read, 't', { signal: new AbortController().signal })).toMatchObject({
+        hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('the variable values file') },
+      });
+    }
   });
 
   it('previews and starts a run with variable values filled in', async () => {

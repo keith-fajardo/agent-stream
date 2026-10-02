@@ -1,11 +1,26 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { chmodSync, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { MAX_VARIABLE_VALUE_CHARS } from '@claude-stream/shared';
 import { writeFileAtomic } from './fsutil';
-import type { ProjectPaths } from './paths';
 
-export const VALUES_FILE = 'variables.local.json';
+/**
+ * Where this machine keeps a project folder's variable values: outside the project, so Claude's
+ * Grep and Glob never search it (ruling R-7.4). Named by a hash of the folder's real path.
+ */
+export function valuesFileFor(projectDir: string, home: string = homedir()): string {
+  let canonical: string;
+  try {
+    canonical = realpathSync(projectDir);
+  } catch {
+    canonical = resolve(projectDir); // the folder doesn't exist (yet)
+  }
+  const hash = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  return join(home, '.claude-stream', 'values', `${hash}.json`);
+}
+
 type Values = Record<string, string>;
 type FileShape = { version: 1; graphs: Record<string, Values> };
 
@@ -21,31 +36,28 @@ export class VariableValues extends EventEmitter {
   /** Set when the file exists but can't be read; it is left untouched until a value is saved. */
   problem: string | undefined;
 
+  /** `file` is the full path of the values file (see valuesFileFor); its folder is created on the first save. */
   constructor(
-    private paths: ProjectPaths,
+    private readonly file: string,
     private platform: NodeJS.Platform = process.platform,
   ) {
     super();
-  }
-
-  private file(): string {
-    return join(this.paths.dataDir, VALUES_FILE);
   }
 
   private load(): FileShape {
     if (this.data) return this.data;
     const data: FileShape = { version: 1, graphs: Object.create(null) as Record<string, Values> };
     this.data = data;
-    if (!existsSync(this.file())) return data;
+    if (!existsSync(this.file)) return data;
     try {
-      const json = JSON.parse(readFileSync(this.file(), 'utf8')) as { graphs?: unknown };
+      const json = JSON.parse(readFileSync(this.file, 'utf8')) as { graphs?: unknown };
       if (typeof json !== 'object' || json === null || typeof json.graphs !== 'object' || json.graphs === null) throw new Error('unexpected format');
       for (const [graphId, values] of Object.entries(json.graphs as Record<string, unknown>)) {
         if (typeof values !== 'object' || values === null) continue;
         data.graphs[graphId] = plain(Object.fromEntries(Object.entries(values).filter(([, v]) => typeof v === 'string')) as Values);
       }
     } catch (e) {
-      this.problem = `${VALUES_FILE} could not be read (${(e as Error).message}); variable values are treated as empty until you save one.`;
+      this.problem = `The variable values file (${this.file}) could not be read (${(e as Error).message}); variable values are treated as empty until you save one.`;
     }
     return data;
   }
@@ -92,11 +104,12 @@ export class VariableValues extends EventEmitter {
     const next: FileShape = { version: 1, graphs: Object.assign(Object.create(null) as Record<string, Values>, current.graphs) };
     if (Object.keys(values).length) next.graphs[graphId] = values;
     else delete next.graphs[graphId];
-    writeFileAtomic(this.file(), `${JSON.stringify(next, null, 2)}\n`, 0o600);
+    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
+    writeFileAtomic(this.file, `${JSON.stringify(next, null, 2)}\n`, 0o600);
     this.data = next;
     if (this.platform !== 'win32') {
       try {
-        chmodSync(this.file(), 0o600);
+        chmodSync(this.file, 0o600);
       } catch {
         // the temp file was created 0600 already
       }

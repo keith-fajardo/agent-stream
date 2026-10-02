@@ -83,6 +83,8 @@ export type PlannerDeps = {
   runStore: RunStore;
   chatLog: ChatLog;
   projectDir: string;
+  /** The variable values file; the planner is denied reading it. */
+  valuesFile?: string;
   claudePath: string;
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
   queryFn?: QueryFn;
@@ -160,7 +162,7 @@ export class Planner extends EventEmitter {
               hooks: [
                 async (input) => {
                   if (input.hook_event_name !== 'PreToolUse') return {};
-                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input);
+                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input, this.d.valuesFile ? [this.d.valuesFile] : []);
                   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
                 },
               ],

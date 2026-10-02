@@ -33,6 +33,11 @@ export type Client = { send(msg: ServerMessage): void };
 
 export type AppDeps = {
   projectDir: string;
+  /**
+   * Where this machine keeps the project's variable values: `valuesFileFor(projectDir)`, outside
+   * the project. Required, so nothing (a test included) writes into the home folder by default.
+   */
+  valuesFile: string;
   claudePath: string;
   auth: AuthInfo;
   maxParallel: number;
@@ -54,13 +59,13 @@ export function createApp(d: AppDeps) {
   const runStore = new RunStore(paths);
   const platform = d.platform ?? process.platform;
   const env = d.env ?? envLookup(process.env, platform);
-  const values = new VariableValues(paths, platform);
+  const values = new VariableValues(d.valuesFile, platform);
   /** Why command steps can't run on this machine, if so (always null until the platform checks exist). */
   const commandShellProblem: string | null = null;
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
   const executors = d.executors ?? {
-    agent: createAgentExecutor({ claudePath: d.claudePath, broker, queryFn: d.queryFn }),
+    agent: createAgentExecutor({ claudePath: d.claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile }),
     command: createCommandExecutor(),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
@@ -86,7 +91,7 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, claudePath: d.claudePath, requestRun, queryFn: d.queryFn, clock });
+  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, claudePath: d.claudePath, requestRun, queryFn: d.queryFn, clock });
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op) => {

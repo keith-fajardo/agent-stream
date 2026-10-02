@@ -13,6 +13,8 @@ export type GateOptions = {
   nodeId: string;
   nodeTitle: string;
   projectDir: string;
+  /** Files Claude may never read, wherever they are (the variable values file). */
+  privateFiles: readonly string[];
   signal: AbortSignal;
   emit: (event: NodeEventBody) => void;
 };
@@ -73,7 +75,7 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
   async function preToolUse(input: HookInput, _toolUseID: string | undefined, options: { signal: AbortSignal }): Promise<HookJSONOutput> {
     try {
       if (input.hook_event_name !== 'PreToolUse') return {};
-      const private_ = privatePathDenial(o.projectDir, input.tool_name, input.tool_input);
+      const private_ = privatePathDenial(o.projectDir, input.tool_name, input.tool_input, o.privateFiles);
       if (private_) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: private_ } };
       if (READ_ONLY_TOOLS.has(input.tool_name)) return {};
       const d = await ask(input.tool_name, input.tool_input, options.signal);

@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CanUseTool, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody } from '@claude-stream/shared';
@@ -6,12 +7,13 @@ import { makeApprovalGate } from '../src/gate';
 
 const preToolUse = (tool_name: string, tool_input: unknown, tool_use_id = 'tu1') =>
   ({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id, session_id: 's', transcript_path: '/t', cwd: '/p' }) as HookInput;
+const valuesFile = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
 
 function setup() {
   const broker = new ApprovalBroker();
   const events: NodeEventBody[] = [];
   const ac = new AbortController();
-  const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: (e) => events.push(e) });
+  const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', privateFiles: [valuesFile], emit: (e) => events.push(e) });
   const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
   const canUse = (name: string, input: Record<string, unknown>, toolUseID: string) =>
     gate.canUseTool(name, input, { signal: ac.signal, toolUseID, requestId: 'req' } as Parameters<CanUseTool>[2]);
@@ -24,11 +26,17 @@ const decisionOf = (out: HookJSONOutput) =>
 describe('approval gate', () => {
   it('denies reading the private values file without asking, and lets other reads pass', async () => {
     const { broker, hook, events } = setup();
-    const out = await hook(preToolUse('Read', { file_path: '/p/.claude-stream/variables.local.json' }));
-    expect(decisionOf(out)).toMatchObject({ permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('variables.local.json') });
+    const out = await hook(preToolUse('Read', { file_path: valuesFile }));
+    expect(decisionOf(out)).toEqual({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
+    });
+    expect(decisionOf(await hook(preToolUse('Grep', { pattern: 'x', path: valuesFile })))?.permissionDecision).toBe('deny');
     expect(broker.pending()).toEqual([]);
     expect(events).toEqual([]);
     expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/graphs/a.json' }))).toEqual({});
+    expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/variables.local.json' }))).toEqual({});
   });
 
   it('lets read-only tools through without asking', async () => {
@@ -96,6 +104,7 @@ describe('approval gate', () => {
       nodeId: 'n1',
       nodeTitle: 'Step',
       projectDir: '/p',
+      privateFiles: [],
       signal: ac.signal,
       emit: () => {
         throw new Error('log service down');
@@ -115,7 +124,7 @@ describe('approval gate', () => {
       throw new Error('ws down');
     });
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', privateFiles: [], emit: () => {} });
     const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
     const out = hook(preToolUse('Bash', { command: 'ls' }));
     const decision = decisionOf(await out);
@@ -127,7 +136,7 @@ describe('approval gate', () => {
   it('cancels the approval when the SDK withdraws the request', async () => {
     const broker = new ApprovalBroker();
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', privateFiles: [], emit: () => {} });
     const sdkAc = new AbortController();
     const preToolUseFunc = gate.hooks.PreToolUse[0].hooks[0];
     const out = preToolUseFunc(preToolUse('Bash', { command: 'ls' }), 'tu', { signal: sdkAc.signal });
@@ -141,7 +150,7 @@ describe('approval gate', () => {
   it('cancels canUseTool when SDK signal aborts', async () => {
     const broker = new ApprovalBroker();
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', privateFiles: [], emit: () => {} });
     const sdkAc = new AbortController();
     const out = gate.canUseTool('Bash', { command: 'rm' }, { signal: sdkAc.signal, toolUseID: 'tu1', requestId: 'req' } as Parameters<CanUseTool>[2]);
     sdkAc.abort();

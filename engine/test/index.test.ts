@@ -7,5 +7,6 @@ describe('engine public API', () => {
     expect(typeof engine.checkAuth).toBe('function');
     expect(typeof engine.projectSettingsProblem).toBe('function');
     expect(typeof engine.sanitizedEnv).toBe('function');
+    expect(typeof engine.valuesFileFor).toBe('function');
   });
 });
