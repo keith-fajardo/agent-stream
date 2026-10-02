@@ -71,6 +71,24 @@ describe('graph commands', () => {
     expect(s.manager.get(s.folders[1]).listGraphs().map((g) => g.id)).toEqual(['g']);
   });
 
+  it('asks for a folder first when no folder is open, for New Graph and Import Graph', async () => {
+    const s = setup([]);
+    await s.commands.newGraph();
+    await s.commands.importGraph();
+    const message = "Open a folder first. Claude Stream keeps graphs in the folder's .claude-stream folder.";
+    expect(s.ui.error.mock.calls).toEqual([[message], [message]]);
+    expect(s.ui.inputBox).not.toHaveBeenCalled();
+    expect(s.ui.openFile).not.toHaveBeenCalled();
+  });
+
+  it('says nothing when the folder choice is cancelled', async () => {
+    const s = setup([folder('a'), folder('b')]);
+    s.ui.pickFolder.mockResolvedValue(undefined);
+    await s.commands.newGraph();
+    await s.commands.importGraph();
+    expect(s.ui.error).not.toHaveBeenCalled();
+  });
+
   it('opens a graph picked from every folder', async () => {
     const s = setup([folder('a'), folder('b')]);
     s.manager.get(s.folders[0]).createGraph('One');

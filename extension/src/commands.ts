@@ -26,6 +26,7 @@ export type CommandDeps = {
 };
 
 const blankName = (value: string) => (value.trim() ? undefined : 'A graph needs a name.');
+const NO_FOLDER = "Open a folder first. Claude Stream keeps graphs in the folder's .claude-stream folder.";
 
 /** Graph management (spec §5). Each runs from the sidebar, the tab's File menu (with its graph) or the Command Palette. */
 export function graphCommands(d: CommandDeps) {
@@ -51,7 +52,11 @@ export function graphCommands(d: CommandDeps) {
     const active = d.activeTarget();
     if (active) return active.folder;
     const folders = d.folders();
-    return folders.length <= 1 ? folders[0] : d.ui.pickFolder(folders);
+    if (folders.length === 0) {
+      d.ui.error(NO_FOLDER);
+      return undefined;
+    }
+    return folders.length === 1 ? folders[0] : d.ui.pickFolder(folders);
   }
 
   async function targetFor(target?: GraphTarget): Promise<GraphTarget | undefined> {
