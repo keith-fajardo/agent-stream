@@ -67,12 +67,12 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   const agentIds = graph.nodes.filter((n) => n.kind === 'agent').map((n) => n.id);
 
   // Variable values first; each may use env_var() but no other variable.
-  const context: Record<string, unknown> = {};
-  const shown: Record<string, string> = {};
+  const context: Record<string, unknown> = Object.create(null);
+  const shown: Record<string, string> = Object.create(null);
   const valueProblems = new Map<string, string>();
   const valueEnv = new Map<string, Set<string>>();
   for (const v of graph.variables) {
-    const raw = input.values[v.name] ?? '';
+    const raw = (Object.hasOwn(input.values, v.name) ? input.values[v.name] : '') ?? '';
     if (raw === '') continue;
     const seen = new Set<string>();
     valueEnv.set(v.name, seen);
@@ -113,7 +113,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
         continue;
       }
       usedVariables.add(name);
-      if (!(name in context)) ready = false; // not set, or its value has a problem: reported once below
+      if (!Object.hasOwn(context, name)) ready = false; // not set, or its value has a problem: reported once below
       for (const e of valueEnv.get(name) ?? []) seen.add(e);
     }
     let out: string | undefined;
@@ -144,7 +144,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   for (const name of [...usedVariables].sort()) {
     const problem = valueProblems.get(name);
     if (problem) problems.push(problem);
-    else if (!(name in context)) problems.push(`Set a value for ${name} (Variables menu).`);
+    else if (!Object.hasOwn(context, name)) problems.push(`Set a value for ${name} (Variables menu).`);
   }
   if (input.commandShellProblem && graph.nodes.some((n) => n.kind === 'command')) problems.push(input.commandShellProblem);
 
@@ -168,7 +168,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   });
   const variables = [...usedVariables]
     .sort()
-    .filter((name) => name in shown)
+    .filter((name) => Object.hasOwn(shown, name))
     .map((name) => ({ name, value: shown[name] }));
   const signature = createHash('sha256')
     .update(

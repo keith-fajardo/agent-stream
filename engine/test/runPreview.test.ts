@@ -74,6 +74,14 @@ describe('previewRun', () => {
     expect(fixed.preview.steps[0].text).toBe(`echo 'analytics' 'x'`);
   });
 
+  it('ignores names inherited from Object.prototype', () => {
+    const g = graphOf([variable('toString'), cmd('A', 'echo {{ toString }}')]);
+    const unset = previewRun({ graph: g, values: {}, env: env() });
+    expect(unset.preview.problems).toEqual(['Set a value for toString (Variables menu).']);
+    expect(unset.rendered).toBeUndefined();
+    expect(previewRun({ graph: g, values: { toString: 'x' }, env: env() }).preview.steps[0].text).toBe("echo 'x'");
+  });
+
   it('treats true and false as booleans', () => {
     const g = graphOf([variable('full'), cmd('A', 'dbt run{% if full %} --full-refresh{% endif %}')]);
     expect(previewRun({ graph: g, values: { full: 'false' }, env: env() }).preview.steps[0].text).toBe('dbt run');

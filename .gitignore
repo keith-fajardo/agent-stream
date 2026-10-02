@@ -5,3 +5,4 @@ web/dist/
 extension/dist/
 extension/.vscode-test/
 *.vsix
+.vitest/
