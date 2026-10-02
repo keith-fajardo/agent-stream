@@ -91,15 +91,20 @@ export class Planner extends EventEmitter {
     this.emit('entry', graphId, entry);
   }
 
+  /** Never rejects: failures become chat errors, or are logged when even that is impossible. */
   async send(graphId: string, text: string): Promise<void> {
     if (this.busy.has(graphId)) {
-      this.add(graphId, 'error', 'The planner is still working on your previous message.');
+      try {
+        this.add(graphId, 'error', 'The planner is still working on your previous message.');
+      } catch (e) {
+        console.error('[claude-stream] planner error', e);
+      }
       return;
     }
     this.busy.add(graphId);
-    this.emit('busy', graphId, true);
     const abortController = new AbortController();
     try {
+      this.emit('busy', graphId, true);
       this.add(graphId, 'user', text);
       const graph = this.d.graphStore.get(graphId);
       const ops = this.d.graphStore.readOps(graphId);
@@ -148,13 +153,21 @@ export class Planner extends EventEmitter {
       }
       this.d.graphStore.setPlannerState(graphId, { plannerSessionId: sessionId ?? graph.plannerSessionId, plannerOpCursor: cursor });
     } catch (e) {
-      const hadSession = !!this.d.graphStore.load(graphId).ok && !!this.d.graphStore.get(graphId).plannerSessionId;
-      if (hadSession) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
-      const message = e instanceof Error ? e.message : String(e);
-      this.add(graphId, 'error', hadSession ? `${message} (The previous planner session was reset; send your message again.)` : message);
+      try {
+        const hadSession = !!this.d.graphStore.load(graphId).ok && !!this.d.graphStore.get(graphId).plannerSessionId;
+        if (hadSession) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
+        const message = e instanceof Error ? e.message : String(e);
+        this.add(graphId, 'error', hadSession ? `${message} (The previous planner session was reset; send your message again.)` : message);
+      } catch (inner) {
+        console.error('[claude-stream] planner error', e, inner);
+      }
     } finally {
       this.busy.delete(graphId);
-      this.emit('busy', graphId, false);
+      try {
+        this.emit('busy', graphId, false);
+      } catch (e) {
+        console.error('[claude-stream] planner error', e);
+      }
     }
   }
 }

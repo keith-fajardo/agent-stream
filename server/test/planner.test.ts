@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
@@ -47,7 +47,7 @@ function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
   const busy: boolean[] = [];
   planner.on('busy', (_graphId: string, b: boolean) => busy.push(b));
   const chat = () => chatLog.read(graphId);
-  return { paths, graphStore, graphId, planner, calls, busy, chat };
+  return { paths, graphStore, chatLog, graphId, planner, calls, busy, chat };
 }
 
 describe('Planner', () => {
@@ -143,5 +143,28 @@ describe('Planner', () => {
     expect(last.role).toBe('error');
     expect(last.text).toContain('No conversation found');
     expect(last.text).toContain('reset');
+  });
+
+  it('never rejects, even when the chat log cannot be written', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const s = setup(async function* () {
+      yield init();
+      await gate;
+      yield done();
+    });
+    const first = s.planner.send(s.graphId, 'one');
+    s.chatLog.append = () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    await expect(s.planner.send(s.graphId, 'two')).resolves.toBeUndefined();
+    release();
+    await expect(first).resolves.toBeUndefined();
+    await expect(s.planner.send(s.graphId, 'three')).resolves.toBeUndefined();
+    expect(s.busy).toEqual([true, false, true, false]);
+    expect(s.planner.isBusy(s.graphId)).toBe(false);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 });

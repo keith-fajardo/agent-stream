@@ -124,7 +124,7 @@ export function createApp(d: AppDeps) {
         if (!d.auth.ok) return error(`Chat is disabled: ${d.auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        void planner.send(msg.graphId, msg.text);
+        planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[claude-stream] planner error', e));
         return;
       }
       case 'startRun': {

@@ -26,6 +26,7 @@ function intOption(value: string, name: string, min: number, max: number): numbe
 }
 
 async function main(): Promise<void> {
+  process.on('unhandledRejection', (e) => console.error('[claude-stream] unhandled rejection:', e));
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {

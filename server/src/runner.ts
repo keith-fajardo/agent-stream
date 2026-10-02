@@ -103,7 +103,7 @@ export class Runner extends EventEmitter {
     const done = new Promise<RunMeta>((resolve) => (resolveDone = resolve));
     const run: ActiveRun = { meta, order: topoOrder(graph), running: new Map(), waiting: new Map(), stopping: false, finished: false, resolveDone };
     this.runs.set(meta.id, run);
-    this.emit('run', meta);
+    this.safeEmit('run', meta);
     this.schedule(run);
     return { ok: true, run: meta, done };
   }
@@ -146,17 +146,18 @@ export class Runner extends EventEmitter {
     run.running.set(nodeId, controller);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
-    const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => ({
-      node: meta.snapshot.nodes.find((n) => n.id === parentId)!,
-      state: meta.nodes[parentId],
-      output: this.deps.runStore.readOutput(meta.id, parentId),
-      outputPath: this.deps.runStore.outputRelPath(meta.id, parentId),
-    }));
-    const prompt = node.kind === 'agent' ? buildNodePrompt(meta.snapshot, node, upstreamResults) : '';
     const executor = this.deps.executors[node.kind];
     Promise.resolve()
-      .then(() =>
-        executor({
+      .then(() => {
+        // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.
+        const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => ({
+          node: meta.snapshot.nodes.find((n) => n.id === parentId)!,
+          state: meta.nodes[parentId],
+          output: this.deps.runStore.readOutput(meta.id, parentId),
+          outputPath: this.deps.runStore.outputRelPath(meta.id, parentId),
+        }));
+        const prompt = node.kind === 'agent' ? buildNodePrompt(meta.snapshot, node, upstreamResults) : '';
+        return executor({
           runId: meta.id,
           graph: meta.snapshot,
           node,
@@ -164,16 +165,35 @@ export class Runner extends EventEmitter {
           cwd: this.deps.projectDir,
           signal: controller.signal,
           emit: (event) => this.emitEvent(run, nodeId, event),
-        }),
-      )
+        });
+      })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
-      .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt));
+      .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
+      .catch((e: unknown) => {
+        // Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection.
+        console.error('[claude-stream] internal error in run', meta.id, 'node', nodeId, e);
+        const status = meta.nodes[nodeId]?.status;
+        if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
+          run.running.delete(nodeId);
+          run.waiting.delete(nodeId);
+          this.setNode(run, nodeId, {
+            status: 'failed',
+            endedAt: this.clock(),
+            error: `claude-stream internal error: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+        this.schedule(run);
+      });
   }
 
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {
     run.running.delete(nodeId);
     run.waiting.delete(nodeId);
-    this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);
+    try {
+      this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);
+    } catch (e) {
+      console.error('[claude-stream] could not write output for run', run.meta.id, nodeId, e);
+    }
     this.emitEvent(run, nodeId, { type: 'result', ok: outcome.ok, durationMs, error: outcome.error, exitCode: outcome.exitCode, usage: outcome.usage });
     const status: NodeStatus = outcome.ok ? 'succeeded' : run.stopping ? 'cancelled' : 'failed';
     this.setNode(run, nodeId, {
@@ -189,8 +209,12 @@ export class Runner extends EventEmitter {
 
   private emitEvent(run: ActiveRun, nodeId: string, body: NodeEventBody): void {
     const event = { ...body, at: this.clock() } as NodeEvent;
-    this.deps.runStore.appendEvent(run.meta.id, nodeId, event);
-    this.emit('event', run.meta.id, nodeId, event);
+    try {
+      this.deps.runStore.appendEvent(run.meta.id, nodeId, event);
+    } catch (e) {
+      console.error('[claude-stream] could not log an event for run', run.meta.id, nodeId, e);
+    }
+    this.safeEmit('event', run.meta.id, nodeId, event);
     if (!run.running.has(nodeId)) return;
     if (body.type === 'approval_requested') {
       run.waiting.set(nodeId, (run.waiting.get(nodeId) ?? 0) + 1);
@@ -205,8 +229,8 @@ export class Runner extends EventEmitter {
   private setNode(run: ActiveRun, nodeId: string, patch: Partial<NodeRunState>): void {
     const state = { ...run.meta.nodes[nodeId], ...patch } as NodeRunState;
     run.meta.nodes[nodeId] = state;
-    this.deps.runStore.save(run.meta);
-    this.emit('node', run.meta.id, nodeId, state);
+    this.persist(run.meta);
+    this.safeEmit('node', run.meta.id, nodeId, state);
   }
 
   private finish(run: ActiveRun): void {
@@ -215,9 +239,27 @@ export class Runner extends EventEmitter {
     const statuses = Object.values(run.meta.nodes).map((s) => s.status);
     run.meta.status = run.stopping ? 'cancelled' : statuses.every((s) => DONE_OK.has(s)) ? 'succeeded' : 'failed';
     run.meta.endedAt = this.clock();
-    this.deps.runStore.save(run.meta);
+    this.persist(run.meta);
     this.runs.delete(run.meta.id);
-    this.emit('run', run.meta);
+    this.safeEmit('run', run.meta);
     run.resolveDone(run.meta);
+  }
+
+  /** Saving run.json can fail (disk full, permissions); the run itself must carry on. */
+  private persist(meta: RunMeta): void {
+    try {
+      this.deps.runStore.save(meta);
+    } catch (e) {
+      console.error('[claude-stream] could not save run', meta.id, e);
+    }
+  }
+
+  /** A throwing listener must not break the run that emitted the event. */
+  private safeEmit(event: string, ...args: unknown[]): void {
+    try {
+      this.emit(event, ...args);
+    } catch (e) {
+      console.error(`[claude-stream] a '${event}' listener failed`, e);
+    }
   }
 }

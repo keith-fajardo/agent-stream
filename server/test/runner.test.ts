@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyOp, emptyGraph, type Graph, type Op } from '@claude-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
@@ -205,5 +205,77 @@ describe('Runner', () => {
     expect(status()).toBe('running');
     fake.finish('n1');
     await r.done;
+  });
+});
+
+describe('Runner when the filesystem or a listener fails', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('finishes the run when a node output cannot be written', { timeout: 2000 }, async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { runner, fake, runStore } = setup();
+    runStore.writeOutput = () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    };
+    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    await tick();
+    fake.finish('n1');
+    await tick();
+    fake.finish('n2');
+    const done = await r.done;
+    expect(done.status).toBe('succeeded');
+    expect(done.nodes).toMatchObject({ n1: { status: 'succeeded' }, n2: { status: 'succeeded' } });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[claude-stream]'), expect.anything(), expect.anything(), expect.any(Error));
+  });
+
+  it('finishes the run when node events cannot be logged', { timeout: 2000 }, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { runner, fake, runStore } = setup();
+    runStore.appendEvent = () => {
+      throw new Error('EACCES: permission denied, open events.jsonl');
+    };
+    const live: string[] = [];
+    runner.on('event', (_runId: string, _nodeId: string, event: { type: string }) => live.push(event.type));
+    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    await tick();
+    expect(() => fake.contexts.get('n1')!.emit({ type: 'text', text: 'working' })).not.toThrow();
+    fake.finish('n1');
+    const done = await r.done;
+    expect(done.status).toBe('succeeded');
+    expect(live).toEqual(['text', 'result']);
+  });
+
+  it('finishes the run when a listener throws', { timeout: 2000 }, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { runner, fake } = setup();
+    runner.on('node', () => {
+      throw new Error('listener bug');
+    });
+    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    await tick();
+    fake.finish('n1');
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('fails the node and finishes the run when completing a node throws unexpectedly', { timeout: 2000 }, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const paths = tmpProject();
+    const broken: NodeExecutor = async () => undefined as unknown as NodeOutcome;
+    const runner = new Runner({
+      runStore: new RunStore(paths),
+      broker: new ApprovalBroker(),
+      executors: { agent: broken, command: broken },
+      projectDir: paths.root,
+      maxParallel: 3,
+      newRunId: () => `20261002-000000-${(seq++).toString(16).padStart(4, '0')}`,
+    });
+    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    const done = await r.done;
+    expect(done.status).toBe('failed');
+    expect(done.nodes.n1.status).toBe('failed');
+    expect(done.nodes.n1.error).toMatch(/^claude-stream internal error: /);
+    expect(done.nodes.n2.status).toBe('skipped');
   });
 });
