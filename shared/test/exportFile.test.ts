@@ -66,4 +66,12 @@ describe('export files', () => {
     const badVariable = { ...good, graph: { ...good.graph, variables: [{ name: 'env_var', description: '' }] } };
     expect(parse(JSON.stringify(badVariable))).toEqual({ ok: false, error: 'The graph in this file is invalid: invalid variable: "env_var" is a reserved word.' });
   });
+
+describe('export files with unsafe step ids', () => {
+  it.each(['__proto__', 'constructor', 'toString', 'con', 'LPT1'])('refuses %s', (id) => {
+    const good = toExportFile(sample(), T);
+    const file = { ...good, graph: { ...good.graph, nodes: [{ id, title: 'x', kind: 'agent', prompt: 'p' }], edges: [] } };
+    expect(parseExportFile(JSON.stringify(file), 'x', T)).toEqual({ ok: false, error: `The graph in this file is invalid: "${id}" can't be used as a step id.` });
+  });
+});
 });

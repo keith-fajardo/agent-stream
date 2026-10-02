@@ -93,4 +93,14 @@ describe('format', () => {
     expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'dev' })).ok).toBe(true);
     expect(parseClientMessage(JSON.stringify({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) })).ok).toBe(false);
   });
+
+describe('unsafe step ids', () => {
+  it.each(['__proto__', 'constructor', 'toString', 'con', 'LPT1'])('parseGraph rejects %s', (id) => {
+    const r = parseGraph({ id: 'g', name: 'G', nodes: [node(id)] });
+    expect(r).toEqual({ ok: false, error: `"${id}" can't be used as a step id.` });
+  });
+  it('still accepts normal ids', () => {
+    expect(parseGraph({ id: 'g', name: 'G', nodes: [node('n1'), node('build_old'), node('my-step')] }).ok).toBe(true);
+  });
+});
 });

@@ -2,6 +2,16 @@ import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun } from './types';
 
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const WINDOWS_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/** Why `id` can't be a step id, or null. Ids key plain objects and become folder names under runs/. */
+export function nodeIdProblem(id: string): string | null {
+  if (!NODE_ID_RE.test(id)) return `invalid node id "${id}"`;
+  if (id === '__proto__' || Object.prototype.hasOwnProperty.call(Object.prototype, id) || WINDOWS_DEVICE_RE.test(id)) {
+    return `"${id}" can't be used as a step id.`;
+  }
+  return null;
+}
 
 export function emptyGraph(id: string, name: string, now: string): Graph {
   return { id, name, goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
@@ -38,7 +48,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
   switch (op.type) {
     case 'addNode': {
       const id = op.node.id ?? nextNodeId(graph);
-      if (!NODE_ID_RE.test(id)) return fail(`invalid node id "${id}"`);
+      const idProblem = nodeIdProblem(id);
+      if (idProblem) return fail(idProblem);
       if (has(id)) return fail(`node ${id} already exists`);
       const title = op.node.title.trim();
       if (!title) return fail('a node needs a title');

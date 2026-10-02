@@ -240,4 +240,14 @@ describe('contentSignature', () => {
       expect(x.ok && x.graph.variables).toEqual([]);
     });
   });
+
+describe('addNode ids', () => {
+  it('rejects ids that are unsafe object keys and accepts normal ones', () => {
+    const g = emptyGraph('g', 'G', 't');
+    const add = (id: string) => applyOp(g, { type: 'addNode', node: { id, title: 'a', kind: 'agent', prompt: 'p' } }, 'user', 't');
+    expect(add('constructor')).toEqual({ ok: false, error: `"constructor" can't be used as a step id.` });
+    expect(add('a b')).toEqual({ ok: false, error: 'invalid node id "a b"' });
+    for (const id of ['n1', 'build_old', 'my-step']) expect(add(id).ok).toBe(true);
+  });
+});
 });

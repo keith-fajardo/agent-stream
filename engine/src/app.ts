@@ -106,6 +106,7 @@ export function createApp(d: AppDeps) {
   }
   function deleteGraph(id: string): { ok: true } | { ok: false; error: string } {
     if (runner.activeFor(id)) return { ok: false, error: 'Stop the run first.' };
+    if (planner.isBusy(id)) return { ok: false, error: "The planner is still working on this graph. Try again when it's done." };
     const r = graphStore.delete(id);
     if (!r.ok) return r;
     values.deleteGraph(id);

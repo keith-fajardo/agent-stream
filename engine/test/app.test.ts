@@ -349,4 +349,30 @@ describe('app', () => {
       expect(a.of('graphDeleted')).toEqual([{ type: 'graphDeleted', graphId: g.id }]);
     });
   });
+
+  it('refuses to delete a graph while the planner is working on it', async () => {
+    const paths = tmpProject();
+    const gate = { release: () => {} };
+    const app = createApp({
+      projectDir: paths.root,
+      valuesFile: tmpValuesFile(),
+      claudePath: 'claude',
+      auth: signedIn,
+      maxParallel: 1,
+      queryFn: () =>
+        (async function* () {
+          await new Promise<void>((resolve) => (gate.release = resolve));
+          yield { type: 'system', subtype: 'init', apiKeySource: 'none', session_id: 's' } as unknown as SDKMessage;
+        })(),
+    });
+    const c = { send: () => {} };
+    const g = app.graphStore.create('G');
+    await app.handle(c, { type: 'chat', graphId: g.id, text: 'hi' });
+    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(true));
+    expect(app.deleteGraph(g.id)).toEqual({ ok: false, error: "The planner is still working on this graph. Try again when it's done." });
+    expect(app.graphStore.load(g.id).ok).toBe(true);
+    gate.release();
+    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(false));
+    expect(app.deleteGraph(g.id)).toEqual({ ok: true });
+  });
 });

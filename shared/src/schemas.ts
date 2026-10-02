@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { topoOrder } from './graph';
+import { nodeIdProblem, topoOrder } from './graph';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 import type { ClientMessage, Graph, GraphResult } from './types';
 
@@ -41,6 +41,8 @@ export function parseGraph(json: unknown): GraphResult {
   const graph = r.data as Graph;
   const ids = new Set<string>();
   for (const n of graph.nodes) {
+    const idProblem = nodeIdProblem(n.id);
+    if (idProblem) return { ok: false, error: idProblem };
     if (ids.has(n.id)) return { ok: false, error: `duplicate node id ${n.id}` };
     ids.add(n.id);
   }
