@@ -1,0 +1,16 @@
+{
+  "name": "@claude-stream/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@claude-stream/shared": "*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}
