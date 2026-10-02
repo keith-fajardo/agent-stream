@@ -3,6 +3,7 @@ import { fmtDuration, statusLabel } from '@claude-stream/shared';
 import { send } from '../socket';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
+import { ApprovalCard } from './ApprovalsPanel';
 import { LogView } from './LogView';
 
 /** Logs of the selected step in the selected run, shown below the canvas while a step is selected. */
@@ -10,6 +11,7 @@ export function LogsPanel() {
   const graph = useStore((s) => s.graph);
   const selectedId = useStore((s) => s.selectedNodeId);
   const run = useStore((s) => s.run);
+  const approvals = useStore((s) => s.approvals);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   const state = node && run ? run.nodes[node.id] : undefined;
   const key = run && node ? logKey(run.id, node.id) : '';
@@ -37,6 +39,7 @@ export function LogsPanel() {
 
   if (!graph || !node) return null;
   const sourceRunId = run?.sourceRunId;
+  const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
   return (
     <section className="logs-panel" aria-label="Step logs">
       <header className="logs-head">
@@ -49,6 +52,13 @@ export function LogsPanel() {
           ✕
         </button>
       </header>
+      {waiting.length > 0 && (
+        <div className="logs-pinned">
+          {waiting.map((a) => (
+            <ApprovalCard key={a.id} request={a} />
+          ))}
+        </div>
+      )}
       <div
         className="logs-body"
         ref={body}

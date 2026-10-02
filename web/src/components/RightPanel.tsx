@@ -10,7 +10,7 @@ export function RightPanel() {
   const tab = useStore((s) => s.tab);
   const approvals = useStore((s) => s.approvals);
   return (
-    <aside className="right">
+    <aside className="side-panel">
       <nav className="tabs">
         {(Object.keys(LABELS) as Tab[]).map((t) => (
           <button

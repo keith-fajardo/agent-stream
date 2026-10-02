@@ -347,9 +347,12 @@ overlay (statuses, durations) and the logs to any past run.
   approval. Nodes without a position are placed by `@dagrejs/dagre` auto-layout
   (left-to-right); a "Tidy" button re-lays out everything.
 - **Logs panel:** under the canvas (about 35% of its height), shown while a step is selected.
+  A step waiting for approval shows "⏸ Needs approval" on its card; its pending approval
+  cards are pinned at the top of its logs panel (decision controls first, then the full
+  input), outside the scrolling log so following new lines never hides them.
 - **Right panel tabs:** **Chat** (planner conversation + input box), **Node** (editor for the
-  selected node), **Approvals** (pending queue with a count badge; the tab
-  turns attention-colored when non-empty).
+  selected node), **Approvals** (pending queue with a count badge and **Approve all (N)**, which approves
+  exactly the requests listed at that moment; the tab turns attention-colored when non-empty).
 - Live updates arrive over one WebSocket. The client keeps a single store fed by server
   events.
 

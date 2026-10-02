@@ -4,7 +4,7 @@ import { describeApprovalInput } from '../approvalView';
 import { send } from '../socket';
 import { dispatch, useStore } from '../store';
 
-function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
+export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
   const [note, setNote] = useState('');
   const view = describeApprovalInput(a.toolName, a.input);
   return (
@@ -14,6 +14,15 @@ function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
           {a.nodeId} · {a.nodeTitle}
         </button>{' '}
         wants to use <b>{a.toolName}</b>
+      </div>
+      <input placeholder="Note for the agent (optional, sent when you deny)" value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="approval-actions">
+        <button className="danger" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined })}>
+          Deny
+        </button>
+        <button className="primary" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'approve' })}>
+          Approve
+        </button>
       </div>
       {view.primary.map((b) => (
         <div key={b.label}>
@@ -32,15 +41,6 @@ function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
           <pre>{view.rest}</pre>
         </div>
       )}
-      <input placeholder="Note for the agent (optional, sent when you deny)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <div className="approval-actions">
-        <button className="danger" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined })}>
-          Deny
-        </button>
-        <button className="primary" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'approve' })}>
-          Approve
-        </button>
-      </div>
     </div>
   );
 }
@@ -48,8 +48,17 @@ function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
 export function ApprovalsPanel() {
   const approvals = useStore((s) => s.approvals);
   if (approvals.length === 0) return <p className="muted pad">Nothing is waiting for approval.</p>;
+  // Approves exactly the requests listed now; anything arriving later still waits for you.
+  const approveAll = () => {
+    for (const a of approvals) send({ type: 'decide', approvalId: a.id, decision: 'approve' });
+  };
   return (
     <div className="approvals">
+      <div className="approvals-head">
+        <button className="primary" onClick={approveAll}>
+          Approve all ({approvals.length})
+        </button>
+      </div>
       {approvals.map((a) => (
         <ApprovalCard key={a.id} request={a} />
       ))}

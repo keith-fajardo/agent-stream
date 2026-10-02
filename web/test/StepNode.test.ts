@@ -26,4 +26,9 @@ describe('StepNode', () => {
     expect(await renderCard({ status: 'waiting_approval' })).toContain('Waiting approval');
     expect(await renderCard({ status: 'queued' })).toContain('Queued');
   });
+
+  it('flags a step that is waiting for approval', async () => {
+    expect(await renderCard({ status: 'waiting_approval' }, true)).toContain('⏸ Needs approval');
+    expect(await renderCard({ status: 'running' }, false)).not.toContain('Needs approval');
+  });
 });

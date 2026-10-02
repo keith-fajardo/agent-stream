@@ -122,7 +122,7 @@ export function Canvas() {
       >
         <Background />
         <Controls />
-        <MiniMap pannable zoomable />
+        <MiniMap pannable zoomable position="top-right" />
       </ReactFlow>
     </div>
   );

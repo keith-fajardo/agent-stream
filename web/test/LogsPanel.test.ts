@@ -22,6 +22,15 @@ const run: RunMeta = {
   nodes: { n2: { status: 'failed', durationMs: 4200, error: 'exited with code 2' } },
 };
 const server = (msg: ServerMessage) => dispatch({ kind: 'server', msg });
+const approval = (id: string, nodeId: string, command: string) => ({
+  id,
+  runId: run.id,
+  nodeId,
+  nodeTitle: nodeId === 'n2' ? 'Build new' : 'Plan',
+  toolName: 'Bash',
+  input: { command },
+  createdAt: 't',
+});
 
 let container: HTMLDivElement;
 let root: Root;
@@ -30,6 +39,7 @@ const text = () => container.textContent ?? '';
 beforeEach(async () => {
   vi.mocked(send).mockClear();
   server({ type: 'graphOpened', graph, chat: [], chatBusy: false, runs: [], run });
+  server({ type: 'approvals', approvals: [] });
   dispatch({ kind: 'selectNode' });
   container = document.createElement('div');
   root = createRoot(container);
@@ -62,6 +72,19 @@ describe('LogsPanel', () => {
     await act(async () => dispatch({ kind: 'selectNode', id: 'n1' }));
     expect(text()).toContain("This step hasn't run in the selected run.");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("pins only the selected step's pending approvals above its logs", async () => {
+    server({ type: 'approvals', approvals: [approval('a1', 'n2', 'dbt build -s orders_v2'), approval('a2', 'n1', 'rm -rf target')] });
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    expect(text()).toContain('dbt build -s orders_v2');
+    expect(text()).not.toContain('rm -rf target');
+    // Pinned: outside the scrolling log, so following new log lines never hides it.
+    expect(container.querySelector('.logs-pinned')?.textContent).toContain('dbt build -s orders_v2');
+    expect(container.querySelector('.logs-body')?.textContent).not.toContain('dbt build -s orders_v2');
+    const approve = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Approve') as HTMLButtonElement;
+    await act(async () => approve.click());
+    expect(send).toHaveBeenCalledWith({ type: 'decide', approvalId: 'a1', decision: 'approve' });
   });
 
   it('closes when ✕ is clicked', async () => {

@@ -21,6 +21,7 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
         {status && <span className="status">{statusLabel(status)}</span>}
         {state?.durationMs !== undefined && <span>{fmtDuration(state.durationMs)}</span>}
       </div>
+      {waiting && <div className="needs-approval">⏸ Needs approval</div>}
       <Handle type="source" position={Position.Right} />
     </div>
   );
