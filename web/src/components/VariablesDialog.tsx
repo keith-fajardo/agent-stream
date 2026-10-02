@@ -3,7 +3,16 @@ import { variableNameProblem, type Op, type VariableDef } from '@claude-stream/s
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
-type Row = { key: number; original?: string; name: string; value: string; description: string; deleted: boolean };
+type Row = {
+  key: number;
+  original?: string;
+  originalValue: string;
+  originalDescription: string;
+  name: string;
+  value: string;
+  description: string;
+  deleted: boolean;
+};
 
 export function VariablesDialog() {
   const request = useStore((s) => s.variablesDialog);
@@ -16,11 +25,20 @@ export function VariablesDialog() {
 /** Edits every variable at once; Save sends only what changed (spec §7.3). Values never leave this machine. */
 function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values: Record<string, string>; focus?: string; addRow?: boolean }) {
   const nextKey = useRef(0);
-  const blank = (): Row => ({ key: nextKey.current++, name: '', value: '', description: '', deleted: false });
-  const [rows, setRows] = useState<Row[]>(() => {
-    const existing = p.variables.map((v) => ({ key: nextKey.current++, original: v.name, name: v.name, value: p.values[v.name] ?? '', description: v.description, deleted: false }));
-    return p.addRow ? [...existing, blank()] : existing;
-  });
+  const blank = (): Row => ({ key: nextKey.current++, originalValue: '', originalDescription: '', name: '', value: '', description: '', deleted: false });
+  const seed = (): Row[] =>
+    p.variables.map((v) => {
+      const value = p.values[v.name] ?? '';
+      return { key: nextKey.current++, original: v.name, originalValue: value, originalDescription: v.description, name: v.name, value, description: v.description, deleted: false };
+    });
+  const snapshotOf = () => JSON.stringify([p.variables.map((v) => [v.name, v.description]), p.values]);
+  const [rows, setRows] = useState<Row[]>(() => (p.addRow ? [...seed(), blank()] : seed()));
+  const [opened, setOpened] = useState(snapshotOf);
+  const changedMeanwhile = snapshotOf() !== opened;
+  const reload = () => {
+    setRows(seed());
+    setOpened(snapshotOf());
+  };
   const focusTarget = useRef<HTMLInputElement>(null);
   // Block body: an effect must never return what a DOM call returns (Chrome 154's scrollIntoView returns a Promise).
   useEffect(() => {
@@ -33,18 +51,23 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
     const others = live.filter((o) => o.key !== r.key).map((o) => ({ name: o.name, description: '' }));
     const problem = variableNameProblem(r.name, others);
     if (problem) errors.set(r.key, problem);
+    else if (r.name !== r.original && live.some((o) => o.key !== r.key && o.original === r.name))
+      errors.set(r.key, `Another variable is called "${r.name}" until you save. Rename that one first, then save again.`);
   }
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const close = () => dispatch({ kind: 'closeVariables' });
   const save = () => {
     const op = (o: Op) => send({ type: 'op', graphId: p.graphId, op: o });
-    const before = new Map(p.variables.map((v) => [v.name, v]));
-    for (const r of rows) if (r.deleted && r.original) op({ type: 'deleteVariable', name: r.original });
+    const current = new Set(p.variables.map((v) => v.name));
+    // A variable the planner renamed or deleted meanwhile no longer exists under its opened name: skip it.
+    const stillThere = (r: Row) => r.original !== undefined && current.has(r.original);
+    for (const r of rows) if (r.deleted && stillThere(r)) op({ type: 'deleteVariable', name: r.original });
     for (const r of live) {
-      if (r.original) {
+      if (r.original !== undefined) {
+        if (!stillThere(r)) continue;
         if (r.name !== r.original) op({ type: 'renameVariable', name: r.original, newName: r.name });
-        if (r.description.trim() !== (before.get(r.original)?.description ?? '')) op({ type: 'setVariableDescription', name: r.name, description: r.description.trim() });
-        if (r.value !== (p.values[r.original] ?? '')) send({ type: 'setVariableValue', graphId: p.graphId, name: r.name, value: r.value });
+        if (r.description.trim() !== r.originalDescription) op({ type: 'setVariableDescription', name: r.name, description: r.description.trim() });
+        if (r.value !== r.originalValue) send({ type: 'setVariableValue', graphId: p.graphId, name: r.name, value: r.value });
       } else {
         op(r.description.trim() ? { type: 'addVariable', name: r.name, description: r.description.trim() } : { type: 'addVariable', name: r.name });
         if (r.value !== '') send({ type: 'setVariableValue', graphId: p.graphId, name: r.name, value: r.value });
@@ -68,6 +91,11 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
           Use them in steps as {'{{ name }}'}. Values stay on this machine: they are never saved in the graph file or exported. A value can read an
           environment variable: {"{{ env_var('NAME', 'default') }}"}.
         </p>
+        {changedMeanwhile && (
+          <div className="banner">
+            The variables changed while you were editing; saving overwrites those changes. <button onClick={reload}>Reload</button>
+          </div>
+        )}
         <table>
           <thead>
             <tr>

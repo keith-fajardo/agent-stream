@@ -90,4 +90,84 @@ describe('VariablesDialog', () => {
     await act(async () => typeInto(inputs('Name')[1], 'schema'));
     expect(container.textContent).toContain('A variable named "schema" already exists.');
   });
+
+  describe('save safety', () => {
+    const two: Graph = { ...graph, variables: [{ name: 'a', description: '' }, { name: 'b', description: '' }] };
+    const reopen = async (g: Graph, values: Record<string, string> = {}) => {
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: values } }));
+    };
+    const ambiguity = (n: string) => `Another variable is called "${n}" until you save. Rename that one first, then save again.`;
+
+    it('blocks swapped renames', async () => {
+      await reopen(two);
+      await openDialog();
+      await act(async () => typeInto(inputs('Name')[0], 'b'));
+      await act(async () => typeInto(inputs('Name')[1], 'a'));
+      expect(container.textContent).toContain(ambiguity('b'));
+      expect(container.textContent).toContain(ambiguity('a'));
+      expect(button('Save').disabled).toBe(true);
+    });
+
+    it('blocks chained renames on the first row', async () => {
+      await reopen(two);
+      await openDialog();
+      await act(async () => typeInto(inputs('Name')[0], 'b'));
+      await act(async () => typeInto(inputs('Name')[1], 'c'));
+      expect(container.textContent).toContain(ambiguity('b'));
+      expect(container.textContent).not.toContain(ambiguity('c'));
+      expect(button('Save').disabled).toBe(true);
+    });
+
+    it('allows re-adding the name of a deleted variable', async () => {
+      await openDialog({ addRow: true });
+      await act(async () => (container.querySelector('button[aria-label="Delete schema"]') as HTMLButtonElement).click());
+      await act(async () => typeInto(inputs('Name')[0], 'schema'));
+      await act(async () => typeInto(inputs('Value')[0], 'x'));
+      await act(async () => button('Save').click());
+      expect(vi.mocked(send).mock.calls).toEqual([
+        [{ type: 'op', graphId: 'g', op: { type: 'deleteVariable', name: 'schema' } }],
+        [{ type: 'op', graphId: 'g', op: { type: 'addVariable', name: 'schema' } }],
+        [{ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x' }],
+      ]);
+    });
+
+    it('sends rename then value for the new name, without a description', async () => {
+      await openDialog();
+      await act(async () => typeInto(inputs('Name')[0], 'target'));
+      await act(async () => typeInto(inputs('Value')[0], 'prod'));
+      await act(async () => button('Save').click());
+      expect(vi.mocked(send).mock.calls).toEqual([
+        [{ type: 'op', graphId: 'g', op: { type: 'renameVariable', name: 'schema', newName: 'target' } }],
+        [{ type: 'setVariableValue', graphId: 'g', name: 'target', value: 'prod' }],
+      ]);
+    });
+
+    const plannerEdit = async () => {
+      await openDialog();
+      const changed: Graph = { ...graph, variables: [{ name: 'schema', description: 'Planner text' }] };
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: changed } }));
+    };
+
+    it('warns when the variables change while open and saves nothing untouched', async () => {
+      await plannerEdit();
+      expect(container.textContent).toContain('The variables changed while you were editing; saving overwrites those changes.');
+      await act(async () => button('Save').click());
+      expect(vi.mocked(send).mock.calls).toEqual([]);
+    });
+
+    it('Reload re-seeds the rows from the current graph', async () => {
+      await plannerEdit();
+      await act(async () => button('Reload').click());
+      expect(inputs('Description').map((i) => i.value)).toEqual(['Planner text']);
+      expect(container.textContent).not.toContain('The variables changed while');
+    });
+
+    it('sends nothing for a row the planner deleted meanwhile', async () => {
+      await openDialog();
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: { ...graph, variables: [] } } }));
+      await act(async () => typeInto(inputs('Value')[0], 'prod'));
+      await act(async () => button('Save').click());
+      expect(vi.mocked(send).mock.calls).toEqual([]);
+    });
+  });
 });
