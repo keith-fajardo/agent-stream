@@ -10,6 +10,7 @@ export const APPROVAL_HOOK_TIMEOUT_SEC = 24 * 60 * 60;
 export type GateOptions = {
   broker: ApprovalBroker;
   runId: string;
+  graphId: string;
   nodeId: string;
   nodeTitle: string;
   projectDir: string;
@@ -47,7 +48,7 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
       const combinedSignal = AbortSignal.any(signals);
 
       const { id, decision } = o.broker.request(
-        { runId: o.runId, nodeId: o.nodeId, nodeTitle: o.nodeTitle, toolName, input },
+        { runId: o.runId, graphId: o.graphId, nodeId: o.nodeId, nodeTitle: o.nodeTitle, toolName, input },
         combinedSignal,
       );
       try {

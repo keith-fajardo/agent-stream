@@ -75,6 +75,8 @@ function reduceServer(state: State, msg: ServerMessage): State {
   switch (msg.type) {
     case 'hello':
       return { ...state, connected: true, auth: msg.auth, project: msg.project, graphs: msg.graphs, approvals: msg.approvals };
+    case 'auth':
+      return { ...state, auth: msg.auth };
     case 'graphs':
       return { ...state, graphs: msg.graphs };
     case 'graphDeleted':

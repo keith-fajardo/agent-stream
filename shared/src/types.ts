@@ -160,6 +160,7 @@ export type NodeEvent = NodeEventBody & { at: string };
 export type ApprovalRequest = {
   id: string;
   runId: string;
+  graphId: string;
   nodeId: string;
   nodeTitle: string;
   toolName: string;
@@ -175,6 +176,7 @@ export type AuthInfo = { ok: boolean; method?: string; plan?: string; email?: st
 export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string } };
 
 export type ServerMessage =
+  | { type: 'auth'; auth: AuthInfo }
   | { type: 'hello'; auth: AuthInfo; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
   | { type: 'graphDeleted'; graphId: string }

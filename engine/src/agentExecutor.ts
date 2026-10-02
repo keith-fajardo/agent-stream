@@ -7,7 +7,7 @@ import { makeApprovalGate, READ_ONLY_TOOLS } from './gate';
 import { blocksOf, realQuery, toolResultText, type QueryFn } from './sdk';
 
 export type AgentExecutorDeps = {
-  claudePath: string;
+  claudePath: string | (() => string);
   broker: ApprovalBroker;
   queryFn?: QueryFn;
   env?: NodeJS.ProcessEnv;
@@ -89,6 +89,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
     const gate = makeApprovalGate({
       broker: deps.broker,
       runId: ctx.runId,
+      graphId: ctx.graph.id,
       nodeId: ctx.node.id,
       nodeTitle: ctx.node.title,
       projectDir: ctx.cwd,
@@ -98,7 +99,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
     });
     const options: Options = {
       cwd: ctx.cwd,
-      pathToClaudeCodeExecutable: deps.claudePath,
+      pathToClaudeCodeExecutable: typeof deps.claudePath === 'function' ? deps.claudePath() : deps.claudePath,
       env: sanitizedEnv(deps.env ?? process.env),
       permissionMode: 'default',
       settingSources: ['project'],

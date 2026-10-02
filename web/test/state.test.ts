@@ -103,4 +103,9 @@ describe('client state', () => {
     const gone = reduce(s, server({ type: 'graphDeleted', graphId: 'a' }));
     expect(gone).toMatchObject({ graph: undefined, selectedNodeId: undefined, toast: 'This graph was deleted.' });
   });
+
+  it('follows sign-in changes', () => {
+    const s = apply(server({ type: 'hello', auth: { ok: false, error: 'x' }, project: '/p', graphs: [], approvals: [] }));
+    expect(reduce(s, server({ type: 'auth', auth: { ok: true, plan: 'max' } })).auth).toEqual({ ok: true, plan: 'max' });
+  });
 });

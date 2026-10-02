@@ -121,8 +121,11 @@ describe('agent executor', () => {
       yield success('ok');
     });
     const { c, events } = ctx();
+    const seen: ApprovalRequest[] = [];
+    broker.on('changed', (pending: ApprovalRequest[]) => seen.push(...pending));
     const out = await createAgentExecutor({ claudePath: 'claude', broker, queryFn: fn })(c);
     expect(out.ok).toBe(true);
+    expect(seen[0].graphId).toBe(c.graph.id);
     expect(hookResult).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
     expect(events.map((e) => e.type)).toEqual(['start', 'approval_requested', 'approval_decided']);
   });

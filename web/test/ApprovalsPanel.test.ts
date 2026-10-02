@@ -11,7 +11,7 @@ const { ApprovalsPanel } = await import('../src/components/ApprovalsPanel');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const request = (id: string, command: string): ApprovalRequest => ({ id, runId: 'r', nodeId: 'n1', nodeTitle: 'Build', toolName: 'Bash', input: { command }, createdAt: 't' });
+const request = (id: string, command: string): ApprovalRequest => ({ id, runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Build', toolName: 'Bash', input: { command }, createdAt: 't' });
 
 describe('ApprovalsPanel', () => {
   it('approves exactly the listed requests with "Approve all"', async () => {

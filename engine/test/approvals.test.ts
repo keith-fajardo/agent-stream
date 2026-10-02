@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApprovalBroker } from '../src/approvals';
 import { fixedClock } from './helpers';
 
-const req = (runId = 'r1', nodeId = 'n1') => ({ runId, nodeId, nodeTitle: 'Step', toolName: 'Bash', input: { command: 'ls' } });
+const req = (runId = 'r1', nodeId = 'n1') => ({ runId, graphId: 'g', nodeId, nodeTitle: 'Step', toolName: 'Bash', input: { command: 'ls' } });
 
 describe('ApprovalBroker', () => {
   it('holds a request until it is decided', async () => {
@@ -10,7 +10,7 @@ describe('ApprovalBroker', () => {
     const sizes: number[] = [];
     broker.on('changed', (list: unknown[]) => sizes.push(list.length));
     const { id, decision } = broker.request(req());
-    expect(broker.pending()).toMatchObject([{ id, runId: 'r1', toolName: 'Bash', createdAt: '2026-10-02T00:00:01.000Z' }]);
+    expect(broker.pending()).toMatchObject([{ id, runId: 'r1', graphId: 'g', toolName: 'Bash', createdAt: '2026-10-02T00:00:01.000Z' }]);
     expect(broker.decide(id, { decision: 'approve' })).toBe(true);
     await expect(decision).resolves.toEqual({ decision: 'approve' });
     expect(broker.pending()).toEqual([]);

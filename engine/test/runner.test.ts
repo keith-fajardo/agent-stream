@@ -146,7 +146,7 @@ describe('Runner', () => {
     const { runner, broker } = setup();
     const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n3')]))));
     await tick();
-    const approval = broker.request({ runId: r.run.id, nodeId: 'n2', nodeTitle: 'b', toolName: 'Bash', input: {} });
+    const approval = broker.request({ runId: r.run.id, graphId: 'g', nodeId: 'n2', nodeTitle: 'b', toolName: 'Bash', input: {} });
     expect(runner.stop(r.run.id)).toBe(true);
     const done = await r.done;
     expect(done.status).toBe('cancelled');

@@ -25,6 +25,7 @@ const server = (msg: ServerMessage) => dispatch({ kind: 'server', msg });
 const approval = (id: string, nodeId: string, command: string) => ({
   id,
   runId: run.id,
+  graphId: graph.id,
   nodeId,
   nodeTitle: nodeId === 'n2' ? 'Build new' : 'Plan',
   toolName: 'Bash',

@@ -56,6 +56,8 @@ export type AppDeps = {
 export type App = ReturnType<typeof createApp>;
 
 export function createApp(d: AppDeps) {
+  let auth = d.auth;
+  let claudePath = d.claudePath;
   const clock = d.clock ?? systemClock;
   const paths = projectPaths(d.projectDir);
   ensureDataDirs(paths);
@@ -70,7 +72,7 @@ export function createApp(d: AppDeps) {
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
   const executors = d.executors ?? {
-    agent: createAgentExecutor({ claudePath: d.claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile }),
+    agent: createAgentExecutor({ claudePath: () => claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile }),
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
@@ -139,7 +141,7 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, claudePath: d.claudePath, requestRun, queryFn: d.queryFn, clock });
+  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, claudePath: () => claudePath, requestRun, queryFn: d.queryFn, clock });
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op) => {
@@ -173,9 +175,26 @@ export function createApp(d: AppDeps) {
     return { type: 'graphOpened', graph, chat: chatLog.read(graph.id), chatBusy: planner.isBusy(graph.id), runs, run, variableValues: values.get(graph.id) };
   }
 
+  /** Sign-in changed (Retry in the sidebar): update every check and tell the tabs. */
+  function setAuth(next: AuthInfo, nextClaudePath?: string): void {
+    auth = next;
+    if (nextClaudePath) claudePath = nextClaudePath;
+    broadcast({ type: 'auth', auth });
+  }
+
+  /** VS Code is closing: stop every run (ruling R4). */
+  function dispose(): void {
+    runner.stopAll();
+  }
+
+  function startupWarnings(): string[] {
+    values.get('');
+    return values.problem ? [values.problem] : [];
+  }
+
   function connect(client: Client): () => void {
     clients.add(client);
-    client.send({ type: 'hello', auth: d.auth, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
+    client.send({ type: 'hello', auth, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
     return () => {
       clients.delete(client);
     };
@@ -201,7 +220,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'chat': {
-        if (!d.auth.ok) return error(`Chat is disabled: ${d.auth.error}`);
+        if (!auth.ok) return error(`Chat is disabled: ${auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[claude-stream] planner error', e));
@@ -216,7 +235,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'startRun': {
-        if (!d.auth.ok) return error(`Runs are disabled: ${d.auth.error}`);
+        if (!auth.ok) return error(`Runs are disabled: ${auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
@@ -274,5 +293,8 @@ export function createApp(d: AppDeps) {
     deleteGraph,
     exportGraph: (id: string) => graphStore.exportGraph(id),
     importGraph,
+    setAuth,
+    dispose,
+    startupWarnings,
   };
 }

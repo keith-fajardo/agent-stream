@@ -85,7 +85,7 @@ export type PlannerDeps = {
   projectDir: string;
   /** The variable values file; the planner is denied reading it. */
   valuesFile?: string;
-  claudePath: string;
+  claudePath: string | (() => string);
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
   queryFn?: QueryFn;
   env?: NodeJS.ProcessEnv;
@@ -141,7 +141,7 @@ export class Planner extends EventEmitter {
       const prompt = userEditsPreamble(ops.slice(graph.plannerOpCursor ?? 0)) + text;
       const options: Options = {
         cwd: this.d.projectDir,
-        pathToClaudeCodeExecutable: this.d.claudePath,
+        pathToClaudeCodeExecutable: typeof this.d.claudePath === 'function' ? this.d.claudePath() : this.d.claudePath,
         env: sanitizedEnv(this.d.env ?? process.env),
         tools: ['Read', 'Glob', 'Grep'],
         allowedTools: ['Read', 'Glob', 'Grep', 'mcp__graph__*'],

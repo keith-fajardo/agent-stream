@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -127,7 +127,7 @@ describe('app', () => {
   it('passes approval decisions to the broker and broadcasts the queue', async () => {
     const { app, client } = setup();
     const a = client();
-    const req = app.broker.request({ runId: 'r', nodeId: 'n1', nodeTitle: 't', toolName: 'Bash', input: {} });
+    const req = app.broker.request({ runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 't', toolName: 'Bash', input: {} });
     expect(a.of('approvals').at(-1)?.approvals).toHaveLength(1);
     await app.handle(a.c, { type: 'decide', approvalId: req.id, decision: 'deny', note: 'not now' });
     await expect(req.decision).resolves.toEqual({ decision: 'deny', note: 'not now' });
@@ -396,5 +396,39 @@ describe('app', () => {
     await app.handle(c, { type: 'previewRun', graphId: g.id });
     const preview = msgs.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
     expect(preview.problems).toEqual(['Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.']);
+  });
+
+  describe('for the extension', () => {
+    it('changes sign-in state and the Claude Code path at runtime', async () => {
+      const { app, client } = setup({ ok: false, error: 'Not signed in.' });
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+      const sig = (await reviewed(app, a, g.id)).signature;
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
+      expect(a.of('error').at(-1)?.message).toBe('Runs are disabled: Not signed in.');
+      app.setAuth(signedIn, '/new/claude');
+      expect(a.of('auth')).toEqual([{ type: 'auth', auth: signedIn }]);
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
+      await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    });
+
+    it('stops every run on dispose', async () => {
+      const { app, client } = setup(signedIn, (ctx) => new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve({ ok: false, output: '', error: 'cancelled' }))));
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'x' } }, 'user');
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+      app.dispose();
+      await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('cancelled'));
+    });
+
+    it('reports an unreadable local values file once at startup', () => {
+      const paths = tmpProject();
+      const valuesFile = tmpValuesFile();
+      writeFileSync(valuesFile, '{');
+      const app = createApp({ projectDir: paths.root, valuesFile, claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} });
+      expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The variable values file \(.+\) could not be read/)]);
+    });
   });
 });
