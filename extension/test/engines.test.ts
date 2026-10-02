@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createApp, valuesFileFor, type App } from '@claude-stream/engine';
+import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@claude-stream/engine';
 import type { AuthInfo, ServerMessage } from '@claude-stream/shared';
 import { CHECKING, EngineManager, type EngineEvents, type Folder } from '../src/engines';
 
@@ -111,5 +111,49 @@ describe('EngineManager', () => {
     const spies = apps.map((app) => vi.spyOn(app, 'dispose'));
     manager.dispose();
     for (const spy of spies) expect(spy).toHaveBeenCalled();
+  });
+
+  it('passes Git Bash to the engine on Windows only', () => {
+    const make = (platform: NodeJS.Platform, found: Found) => {
+      const findGitBash = vi.fn(() => found);
+      const seen: AppDeps[] = [];
+      const manager = new EngineManager({
+        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2 }),
+        platform,
+        env: {},
+        home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+        events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn() },
+        findGitBash,
+        createApp: (deps) => {
+          seen.push(deps);
+          return createApp(deps);
+        },
+      });
+      manager.get(folder('w'));
+      return { findGitBash, seen };
+    };
+    const ok: Found = { ok: true, path: 'C:\\Git\\bin\\bash.exe' };
+    const win = make('win32', ok);
+    expect(win.findGitBash).toHaveBeenCalledWith({ env: {}, setting: 'X' });
+    expect(win.seen[0].gitBash).toEqual(ok);
+    const missing: Found = { ok: false, error: 'no bash' };
+    expect(make('win32', missing).seen[0].gitBash).toEqual(missing);
+    const mac = make('darwin', ok);
+    expect(mac.findGitBash).not.toHaveBeenCalled();
+    expect(mac.seen[0].gitBash).toBeUndefined();
+  });
+
+  it('drops a stale sign-in check that finishes after a newer one', async () => {
+    const { manager, events, checkAuth } = setup();
+    let release!: (a: AuthInfo) => void;
+    checkAuth.mockImplementationOnce(() => new Promise<AuthInfo>((r) => (release = r)));
+    const a = manager.checkSignIn();
+    const b = manager.checkSignIn();
+    expect(await b).toEqual(signedIn);
+    release({ ok: false, error: 'old' });
+    expect(await a).toEqual(signedIn);
+    expect(manager.auth).toEqual(signedIn);
+    expect(events.auth).toHaveBeenCalledTimes(1);
+    expect(events.auth).not.toHaveBeenCalledWith({ ok: false, error: 'old' });
   });
 });

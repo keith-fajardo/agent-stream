@@ -45,20 +45,34 @@ export class EngineManager {
   private engines = new Map<string, Entry>();
   auth: AuthInfo = CHECKING;
   private claudePath: string | undefined;
+  private checkSeq = 0;
+  private latest: Promise<AuthInfo> | undefined;
 
   constructor(private d: EngineManagerDeps) {}
 
   /** Finds Claude Code and runs `claude auth status`; every engine gets the result (and the path, ruling R6). */
   async checkSignIn(): Promise<AuthInfo> {
+    const seq = ++this.checkSeq;
+    const run = this.runCheck(seq);
+    this.latest = run;
+    return run;
+  }
+
+  /** A check that a newer one overtook is dropped: it returns the newer result and changes nothing. */
+  private async runCheck(seq: number): Promise<AuthInfo> {
     const settings = this.d.settings();
     const found = (this.d.findClaude ?? realFindClaude)({ platform: this.d.platform, env: this.d.env, home: this.d.home, setting: settings.claudePath });
+    let auth: AuthInfo;
+    let claudePath: string | undefined;
     if (found.ok) {
-      this.claudePath = found.path;
-      this.auth = await (this.d.checkAuth ?? realCheckAuth)(found.path);
+      claudePath = found.path;
+      auth = await (this.d.checkAuth ?? realCheckAuth)(found.path);
     } else {
-      this.claudePath = undefined;
-      this.auth = { ok: false, error: found.error };
+      auth = { ok: false, error: found.error };
     }
+    if (seq !== this.checkSeq) return this.latest ?? auth;
+    this.claudePath = claudePath;
+    this.auth = auth;
     for (const e of this.engines.values()) e.app.setAuth(this.folderAuth(e.folder), this.claudePath);
     this.d.events.auth(this.auth);
     return this.auth;
