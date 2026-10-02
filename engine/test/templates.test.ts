@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { Environment } from 'nunjucks';
+import { afterEach, describe, expect, it } from 'vitest';
 import { renameReferences, renderTemplate, shellQuote, templateErrorMessage, templateNames, type EnvLookup } from '../src/templates';
 
 const env: EnvLookup = (name) => ({ HOME: '/home/me', DBT_SCHEMA: 'analytics_dev' })[name];
@@ -195,6 +196,71 @@ describe('sandbox', () => {
   it('keeps True, False and None', () => {
     expect(text('{{ True }} {{ False }}')).toBe('true false');
     expect(text('{% if None %}x{% endif %}')).toBe('');
+  });
+});
+
+describe('sandbox without an outside name check', () => {
+  // Test-only payloads. The one side effect any of them could have is setting Object.prototype.polluted.
+  const mark = '"Object.prototype.polluted = 1"';
+  const callFunction = (object: string) => `{% set o = ${object} %}{{ o.getOwnPropertyDescriptor(o.getPrototypeOf(o), "constructor").value(${mark})() }}`;
+  const boundContext = '{% set valueOf = valueOf() %}'; // a {% set %} of its own name looks defined to templateNames
+  const internals = { e: new Environment([]) };
+  const attempts: [string, Record<string, unknown>][] = [
+    // a filter or test by an Object.prototype name
+    ['{{ "x" | constructor }}', {}],
+    ['{{ "x" | toString }}', {}],
+    ['{{ 1 is constructor }}', {}],
+    ['{{ [1] | select("constructor") | join }}', {}],
+    // Context and Environment internals through a bare name
+    ['{{ valueOf().env }}', {}],
+    [`${boundContext}{{ valueOf.env }}`, {}],
+    [`${boundContext}{{ valueOf.ctx }}`, {}],
+    [`${boundContext}{{ valueOf.lookup("range") }}`, {}],
+    [`${boundContext}{{ valueOf.getVariables() }}`, {}],
+    // ... or through member access
+    ['{{ e.getFilter("upper") }}', internals],
+    ['{{ e.globals }}', internals],
+    // the Function constructor through any of the above
+    [callFunction('valueOf().env.getFilter("constructor")'), {}],
+    [boundContext + callFunction('valueOf.env.getFilter("constructor")'), {}],
+    [boundContext + callFunction('valueOf.lookup("constructor")'), {}],
+    [callFunction('e.getFilter("constructor")'), internals],
+  ];
+  const expectNoPollution = () => {
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty('polluted')).toBe(false);
+  };
+  afterEach(() => {
+    delete (Object.prototype as Record<string, unknown>).polluted; // so one failure doesn't fail the rest
+  });
+
+  it.each(attempts)('text: %s', (src, context) => {
+    expect(() => text(src, context)).toThrow();
+    expectNoPollution();
+  });
+
+  it.each(attempts)('command: %s', (src, context) => {
+    expect(() => command(src, context)).toThrow();
+    expectNoPollution();
+  });
+
+  it.each(['constructor', '__proto__', 'toString'])('finds no filter or test named %s', (name) => {
+    expect(error(() => text(`{{ "x" | ${name} }}`))).toContain(`filter not found: ${name}`);
+    expect(error(() => command(`{{ "x" | ${name} }}`))).toContain(`filter not found: ${name}`);
+    expect(error(() => text(`{{ "x" is ${name} }}`))).toContain(`test not found: ${name}`);
+    expect(error(() => command(`{{ "x" is ${name} }}`))).toContain(`test not found: ${name}`);
+  });
+
+  it('refuses a bare name that is neither in the context nor a global', () => {
+    expect(error(() => text('{{ nope }}'))).toBe('unknown variable `nope`');
+    expect(error(() => command('echo {{ toString() }}'))).toBe('unknown variable `toString`');
+  });
+
+  it('keeps own properties, array indices and allowlisted string methods', () => {
+    const context = { v: 'x,y', items: ['first', 'a b'], a: { b: 'own' } };
+    expect(text('{{ v.split(",")[1] }} {{ v.length }} {{ items[0] }} {{ items.length }} {{ a.b }} {{ items.join("+") }}', context)).toBe('y 3 first 2 own first+a b');
+    expect(command('echo {{ v.split(",")[0] }} {{ items[1] }} {{ a.b }}', context)).toBe(`echo 'x' 'a b' 'own'`);
+    expect(text('{% for i in items %}{{ loop.index }}{% endfor %}{% set c = cycler("p", "q") %}{{ c.next() }}{{ c.next() }}', context)).toBe('12pq');
   });
 });
 

@@ -3,11 +3,14 @@ import * as nunjucksModule from 'nunjucks';
 
 type Token = { type: string; value: string; lineno: number; colno: number };
 type AstNode = { typename: string; fields: string[]; value?: unknown; [field: string]: unknown };
+type NunjucksFrame = { lookup(name: string): unknown };
+type NunjucksContext = { lookup(name: string): unknown; getVariables(): object; env: { globals: object } };
 type Runtime = {
   memberLookup(obj: unknown, val: unknown): unknown;
-  contextOrFrameLookup(context: unknown, frame: unknown, name: string): unknown;
+  contextOrFrameLookup(context: NunjucksContext, frame: NunjucksFrame, name: string): unknown;
   markSafe(value: unknown): unknown;
 };
+type Registries = { filters: object; tests: object; globals: object };
 type NunjucksInternals = {
   runtime: Runtime;
   lib: { escape(s: string): string };
@@ -18,9 +21,11 @@ type NunjucksInternals = {
 // Nunjucks is CommonJS; this works whether the bundler hands us the module or its default export.
 const nunjucks = ((nunjucksModule as { default?: unknown }).default ?? nunjucksModule) as typeof nunjucksModule & NunjucksInternals;
 
-// Nunjucks is not a sandbox: block the JavaScript escape hatches (`range.constructor(...)`, `__proto__`, ...).
-// installJinjaCompat() is deliberately not used: its dict helpers (`{}.get(...)`, `.update(...)`) bypass these
-// lookups and allow prototype pollution. True/False/None are provided as globals instead.
+// Nunjucks is not a sandbox. Templates may only reach data: names in the render context or the template globals,
+// own properties of plain objects and arrays, and the methods listed below. Everything else (Object.prototype
+// members, functions' properties, Nunjucks' own Context and Environment) resolves to undefined, which
+// throwOnUndefined reports. installJinjaCompat() is deliberately not used: its dict helpers (`{}.get(...)`,
+// `.update(...)`) bypass these lookups and allow prototype pollution. True/False/None are provided as globals instead.
 const BLOCKED_NAMES: ReadonlySet<string> = new Set([
   'constructor',
   '__proto__',
@@ -32,16 +37,45 @@ const BLOCKED_NAMES: ReadonlySet<string> = new Set([
   'caller',
   'arguments',
 ]);
+/** The only methods a template may call on a string. Case changes are filters: `| upper`, `| lower`. */
+const STRING_METHODS: ReadonlySet<string> = new Set(['split', 'trim', 'startsWith', 'endsWith', 'replace', 'includes', 'slice', 'indexOf']);
+/** The only methods a template may call on an array. */
+const ARRAY_METHODS: ReadonlySet<string> = new Set(['join', 'slice', 'indexOf', 'includes']);
+
+function isPlainObject(obj: object): boolean {
+  const proto = Object.getPrototypeOf(obj);
+  return proto === Object.prototype || proto === null;
+}
+
+function memberAllowed(obj: unknown, key: string | number): boolean {
+  if (typeof obj === 'string') return key === 'length' || (typeof key === 'string' && STRING_METHODS.has(key));
+  if (Array.isArray(obj)) {
+    if (key === 'length') return true;
+    if (typeof key === 'string' && ARRAY_METHODS.has(key)) return true;
+    return /^(0|[1-9]\d*)$/.test(String(key)) && Object.hasOwn(obj, key);
+  }
+  return typeof obj === 'object' && obj !== null && isPlainObject(obj) && Object.hasOwn(obj, key);
+}
+
 const runtime = nunjucks.runtime;
 const memberLookup = runtime.memberLookup;
-const contextOrFrameLookup = runtime.contextOrFrameLookup;
 runtime.memberLookup = function (this: unknown, obj: unknown, key: unknown, ...rest: unknown[]) {
   if (typeof key !== 'string' && typeof key !== 'number') return undefined;
-  return BLOCKED_NAMES.has(String(key)) ? undefined : (memberLookup as (...a: unknown[]) => unknown).call(this, obj, key, ...rest);
+  return memberAllowed(obj, key) ? (memberLookup as (...a: unknown[]) => unknown).call(this, obj, key, ...rest) : undefined;
 };
-runtime.contextOrFrameLookup = function (this: unknown, context: unknown, frame: unknown, name: string) {
-  return BLOCKED_NAMES.has(name) ? undefined : contextOrFrameLookup.call(this, context, frame, name);
+// A bare name is a loop or {% set %} variable (frames have no prototype), or an own entry of the render context or
+// the globals. Context.lookup alone would also find Object.prototype members such as `valueOf`.
+runtime.contextOrFrameLookup = function (context: NunjucksContext, frame: NunjucksFrame, name: string) {
+  if (BLOCKED_NAMES.has(name)) return undefined;
+  const value = frame.lookup(name);
+  if (value !== undefined) return value;
+  return Object.hasOwn(context.getVariables(), name) || Object.hasOwn(context.env.globals, name) ? context.lookup(name) : undefined;
 };
+
+/** A registry without a prototype: `getFilter('constructor')` then reports "filter not found" instead of returning Object. */
+function withoutPrototype<T extends object>(registry: T): T {
+  return Object.assign(Object.create(null) as T, registry);
+}
 
 // Command rendering: with autoescape on, Nunjucks sends every `{{ }}` output through lib.escape (unless it is
 // marked safe). During a command render that hook records the value and returns a placeholder; the placeholders
@@ -284,10 +318,23 @@ function quotePlaceholders(rendered: string, r: ActiveRender): string {
   return out;
 }
 
+/**
+ * Renders a template. Safe to call on an untrusted template: it first refuses every bare name that is not in
+ * `o.context` (own entries only) or a template global, so no caller can skip that check, and the lookups above
+ * keep the template away from JavaScript and Nunjucks internals even if a name gets past it.
+ */
 export function renderTemplate(src: string, o: RenderOptions): string {
+  const names = templateNames(src);
+  if (!names.ok) throw new Error(names.error);
+  const unknown = names.names.find((name) => !Object.hasOwn(o.context, name));
+  if (unknown !== undefined) throw new Error(`unknown variable \`${unknown}\``);
   const command = o.mode === 'command';
   // No loaders: {% include %}, {% import %} and {% extends %} can't read files.
   const env = new nunjucks.Environment([], { autoescape: command, throwOnUndefined: true });
+  const registries = env as unknown as Registries;
+  registries.filters = withoutPrototype(registries.filters);
+  registries.tests = withoutPrototype(registries.tests);
+  registries.globals = withoutPrototype(registries.globals);
   env.addFilter('unquoted', (value: unknown) => (command && value !== undefined && value !== null ? nunjucks.runtime.markSafe(String(value)) : value));
   if (command) {
     env.addFilter('safe', () => {
