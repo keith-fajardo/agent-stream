@@ -1,6 +1,7 @@
 import type { CanUseTool, HookCallbackMatcher, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { Decision, NodeEventBody } from '@claude-stream/shared';
 import type { ApprovalBroker } from './approvals';
+import { privatePathDenial } from './privatePaths';
 
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep']);
 /** Approvals wait for the user indefinitely; a day is the practical upper bound. */
@@ -11,6 +12,7 @@ export type GateOptions = {
   runId: string;
   nodeId: string;
   nodeTitle: string;
+  projectDir: string;
   signal: AbortSignal;
   emit: (event: NodeEventBody) => void;
 };
@@ -70,7 +72,10 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
 
   async function preToolUse(input: HookInput, _toolUseID: string | undefined, options: { signal: AbortSignal }): Promise<HookJSONOutput> {
     try {
-      if (input.hook_event_name !== 'PreToolUse' || READ_ONLY_TOOLS.has(input.tool_name)) return {};
+      if (input.hook_event_name !== 'PreToolUse') return {};
+      const private_ = privatePathDenial(o.projectDir, input.tool_name, input.tool_input);
+      if (private_) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: private_ } };
+      if (READ_ONLY_TOOLS.has(input.tool_name)) return {};
       const d = await ask(input.tool_name, input.tool_input, options.signal);
       if (d.decision === 'approve') {
         approvedToolUseIds.add(input.tool_use_id);

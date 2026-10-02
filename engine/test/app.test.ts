@@ -11,13 +11,14 @@ const instant: NodeExecutor = async (ctx) => {
 };
 const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max', email: 'me@example.com' };
 
-function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant) {
+function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined) {
   const paths = tmpProject();
   const app = createApp({
     projectDir: paths.root,
     claudePath: 'claude',
     auth,
     maxParallel: 2,
+    env,
     executors: { agent: instant, command },
     queryFn: async function* () {},
   });
@@ -201,5 +202,56 @@ describe('app', () => {
     expect(app.values.get(g.id)).toEqual({ target: 'dev' });
     await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'deleteVariable', name: 'target' } });
     expect(app.values.get(g.id)).toEqual({});
+  });
+
+  it('refuses to start when the preview has problems, even with its own signature', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'model' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'echo {{ model }}' } }, 'user');
+    const preview = await reviewed(app, a, g.id);
+    expect(preview.problems.length).toBeGreaterThan(0);
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    expect(a.of('error').at(-1)?.message).toContain('Set a value for model (Variables menu).');
+    expect(a.of('run')).toEqual([]);
+  });
+
+  it('refuses to start when an environment variable changed after review', async () => {
+    const envMap: Record<string, string> = { T: 'a' };
+    const { app, client } = setup(signedIn, instant, (name) => envMap[name]);
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: "echo {{ env_var('T') }}" } }, 'user');
+    const preview = await reviewed(app, a, g.id);
+    envMap.T = 'b';
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    expect(a.of('error').at(-1)?.message).toBe('Something changed since you reviewed this run (a step, a variable or an environment variable). Review it again.');
+    expect(a.of('run')).toEqual([]);
+  });
+
+  it('re-executes a reused step when its variable value changed', async () => {
+    const commands: string[] = [];
+    const { app, client } = setup(signedIn, async (ctx) => {
+      commands.push(ctx.node.command ?? '');
+      return { ok: true, output: 'o' };
+    });
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'model' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'c', kind: 'command', command: 'echo {{ model }}' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'summarize' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'model', value: 'a' });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const firstId = a.of('run').at(-1)!.run.id;
+    expect(commands).toEqual(["echo 'a'"]);
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'model', value: 'b' });
+    const extra = { fromNodeId: 'n2', sourceRunId: firstId };
+    const preview = await reviewed(app, a, g.id, extra);
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: preview.signature, ...extra });
+    await vi.waitFor(() => expect(a.of('run').filter((m) => m.run.id !== firstId).at(-1)?.run.status).toBe('succeeded'));
+    expect(commands).toEqual(["echo 'a'", "echo 'b'"]);
   });
 });

@@ -36,7 +36,7 @@ export type RunnerDeps = {
   newRunId?: () => string;
 };
 
-export type StartRunInput = { graph: Graph; rendered?: RenderedRun; sourceRunId?: string; fromNodeId?: string };
+export type StartRunInput = { graph: Graph; rendered: RenderedRun; sourceRunId?: string; fromNodeId?: string };
 export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string };
 
 type ActiveRun = {
@@ -85,6 +85,9 @@ export class Runner extends EventEmitter {
     if (input.fromNodeId && !graph.nodes.some((n) => n.id === input.fromNodeId)) {
       return { ok: false, error: `node ${input.fromNodeId} does not exist` };
     }
+    for (const n of graph.nodes) {
+      if (input.rendered.nodes[n.id] === undefined) return { ok: false, error: `The run has no reviewed text for step ${n.id}.` };
+    }
     let source: RunMeta | undefined;
     if (input.sourceRunId) {
       source = this.deps.runStore.get(input.sourceRunId);
@@ -93,7 +96,7 @@ export class Runner extends EventEmitter {
     const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered) : new Set<string>();
 
     const meta: RunMeta = { id: this.makeRunId(), graphId: graph.id, status: 'running', startedAt: this.clock(), snapshot: graph, nodes: {} };
-    if (input.rendered) meta.rendered = structuredClone(input.rendered);
+    meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
     if (input.fromNodeId) meta.fromNodeId = input.fromNodeId;
     for (const n of graph.nodes) {
@@ -273,6 +276,6 @@ export class Runner extends EventEmitter {
 function executionNode(meta: RunMeta, id: string): GraphNode {
   const node = meta.snapshot.nodes.find((n) => n.id === id)!;
   const text = meta.rendered?.nodes[id];
-  if (text === undefined) return node;
+  if (text === undefined) throw new Error(`no reviewed text for step ${id}`);
   return node.kind === 'command' ? { ...node, command: text } : { ...node, prompt: text };
 }

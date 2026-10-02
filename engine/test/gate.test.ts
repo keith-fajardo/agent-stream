@@ -11,7 +11,7 @@ function setup() {
   const broker = new ApprovalBroker();
   const events: NodeEventBody[] = [];
   const ac = new AbortController();
-  const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: (e) => events.push(e) });
+  const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: (e) => events.push(e) });
   const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
   const canUse = (name: string, input: Record<string, unknown>, toolUseID: string) =>
     gate.canUseTool(name, input, { signal: ac.signal, toolUseID, requestId: 'req' } as Parameters<CanUseTool>[2]);
@@ -22,6 +22,15 @@ const decisionOf = (out: HookJSONOutput) =>
   (out as { hookSpecificOutput?: { hookEventName?: string; permissionDecision?: string; permissionDecisionReason?: string } }).hookSpecificOutput;
 
 describe('approval gate', () => {
+  it('denies reading the private values file without asking, and lets other reads pass', async () => {
+    const { broker, hook, events } = setup();
+    const out = await hook(preToolUse('Read', { file_path: '/p/.claude-stream/variables.local.json' }));
+    expect(decisionOf(out)).toMatchObject({ permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('variables.local.json') });
+    expect(broker.pending()).toEqual([]);
+    expect(events).toEqual([]);
+    expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/graphs/a.json' }))).toEqual({});
+  });
+
   it('lets read-only tools through without asking', async () => {
     const { broker, hook, events } = setup();
     expect(await hook(preToolUse('Read', { file_path: 'a.sql' }))).toEqual({});
@@ -86,6 +95,7 @@ describe('approval gate', () => {
       runId: 'r1',
       nodeId: 'n1',
       nodeTitle: 'Step',
+      projectDir: '/p',
       signal: ac.signal,
       emit: () => {
         throw new Error('log service down');
@@ -105,7 +115,7 @@ describe('approval gate', () => {
       throw new Error('ws down');
     });
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
     const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
     const out = hook(preToolUse('Bash', { command: 'ls' }));
     const decision = decisionOf(await out);
@@ -117,7 +127,7 @@ describe('approval gate', () => {
   it('cancels the approval when the SDK withdraws the request', async () => {
     const broker = new ApprovalBroker();
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
     const sdkAc = new AbortController();
     const preToolUseFunc = gate.hooks.PreToolUse[0].hooks[0];
     const out = preToolUseFunc(preToolUse('Bash', { command: 'ls' }), 'tu', { signal: sdkAc.signal });
@@ -131,7 +141,7 @@ describe('approval gate', () => {
   it('cancels canUseTool when SDK signal aborts', async () => {
     const broker = new ApprovalBroker();
     const ac = new AbortController();
-    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', emit: () => {} });
     const sdkAc = new AbortController();
     const out = gate.canUseTool('Bash', { command: 'rm' }, { signal: sdkAc.signal, toolUseID: 'tu1', requestId: 'req' } as Parameters<CanUseTool>[2]);
     sdkAc.abort();

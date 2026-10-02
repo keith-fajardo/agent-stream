@@ -263,3 +263,21 @@ describe('describeOp for variables', () => {
     expect(describeOp({ type: 'deleteVariable', name: 'schema' })).toBe('deleted variable schema');
   });
 });
+
+describe('Planner private values', () => {
+  it('denies reading the variable values file through a PreToolUse hook', async () => {
+    const s = setup(async function* () {
+      yield init();
+      yield done();
+    });
+    await s.planner.send(s.graphId, 'hi');
+    const matchers = s.calls[0].options.hooks?.PreToolUse ?? [];
+    expect(matchers).toHaveLength(1);
+    const run = (tool_name: string, tool_input: unknown) =>
+      matchers[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: s.paths.root } as never, 't', { signal: new AbortController().signal });
+    expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toMatchObject({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('variables.local.json') },
+    });
+    expect(await run('Read', { file_path: 'models/a.sql' })).toEqual({});
+  });
+});

@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type Graph, type Op, type RenderedRun } from '@claude-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
 import { tmpProject } from './helpers';
+
+/** The reviewed text a run needs: every step's prompt or command as written. */
+const asRendered = (graph: Graph): RenderedRun => ({
+  goal: graph.goal,
+  instructions: graph.instructions,
+  nodes: Object.fromEntries(graph.nodes.map((n) => [n.id, n.prompt ?? n.command ?? ''])),
+});
+const withRendered = (graph: Graph, extra: { sourceRunId?: string; fromNodeId?: string } = {}) => ({ graph, rendered: asRendered(graph), ...extra });
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -84,7 +92,7 @@ describe('Runner', () => {
     const { runner, fake, runStore } = setup();
     const statuses: string[] = [];
     runner.on('node', (_runId: string, nodeId: string, state: { status: string }) => statuses.push(`${nodeId}:${state.status}`));
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), link('n1', 'n2')]))));
     expect(r.run.nodes.n2.status).toBe('queued');
     await tick();
     expect(fake.started).toEqual(['n1']);
@@ -105,7 +113,7 @@ describe('Runner', () => {
 
   it('runs independent nodes in parallel up to maxParallel', async () => {
     const { runner, fake } = setup(2);
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), agent('c'), agent('d')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), agent('d')]))));
     await tick();
     expect(fake.started).toEqual(['n1', 'n2']);
     fake.finish('n1');
@@ -121,7 +129,7 @@ describe('Runner', () => {
 
   it('skips descendants of a failed node but finishes independent branches', async () => {
     const { runner, fake, runStore } = setup();
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2')]))));
     await tick();
     fake.finish('n1', { ok: false, output: 'partial', error: 'boom' });
     fake.finish('n3');
@@ -136,7 +144,7 @@ describe('Runner', () => {
 
   it('stops running and pending nodes and cancels their approvals', async () => {
     const { runner, broker } = setup();
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n3')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n3')]))));
     await tick();
     const approval = broker.request({ runId: r.run.id, nodeId: 'n2', nodeTitle: 'b', toolName: 'Bash', input: {} });
     expect(runner.stop(r.run.id)).toBe(true);
@@ -149,7 +157,7 @@ describe('Runner', () => {
 
   it('stopAll stops every active run', async () => {
     const { runner } = setup();
-    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
     await tick();
     runner.stopAll();
     expect((await r.done).status).toBe('cancelled');
@@ -158,7 +166,7 @@ describe('Runner', () => {
   it('re-runs from a node, reusing unchanged upstream results', async () => {
     const { runner, fake, runStore } = setup();
     const g = graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
-    const first = started(runner.start({ graph: g }));
+    const first = started(runner.start(withRendered(g)));
     await tick();
     fake.finish('n1');
     await tick();
@@ -167,7 +175,7 @@ describe('Runner', () => {
     fake.finish('n3');
     await first.done;
     fake.started.length = 0;
-    const second = started(runner.start({ graph: g, sourceRunId: first.run.id, fromNodeId: 'n2' }));
+    const second = started(runner.start(withRendered(g, { sourceRunId: first.run.id, fromNodeId: 'n2' })));
     expect(second.run.nodes.n1.status).toBe('reused');
     expect(second.run.sourceRunId).toBe(first.run.id);
     expect(runStore.readOutput(second.run.id, 'n1')).toBe('out-n1');
@@ -183,17 +191,26 @@ describe('Runner', () => {
   it('refuses runs that cannot start', () => {
     const { runner } = setup();
     const draft = graphOf([{ type: 'addNode', node: { title: 'x', kind: 'agent', prompt: '' } }]);
-    expect(runner.start({ graph: draft })).toEqual({ ok: false, error: 'n1 "x": an agent node needs a prompt.' });
+    expect(runner.start(withRendered(draft))).toEqual({ ok: false, error: 'n1 "x": an agent node needs a prompt.' });
     const g = graphOf([agent('a')]);
-    expect(runner.start({ graph: g, fromNodeId: 'n9' })).toEqual({ ok: false, error: 'node n9 does not exist' });
-    expect(runner.start({ graph: g, sourceRunId: '20990101-000000-ffff' })).toEqual({ ok: false, error: 'run 20990101-000000-ffff not found' });
-    expect(runner.start({ graph: g }).ok).toBe(true);
-    expect(runner.start({ graph: g })).toEqual({ ok: false, error: 'A run is already in progress for this graph.' });
+    expect(runner.start(withRendered(g, { fromNodeId: 'n9' }))).toEqual({ ok: false, error: 'node n9 does not exist' });
+    expect(runner.start(withRendered(g, { sourceRunId: '20990101-000000-ffff' }))).toEqual({ ok: false, error: 'run 20990101-000000-ffff not found' });
+    expect(runner.start(withRendered(g)).ok).toBe(true);
+    expect(runner.start(withRendered(g))).toEqual({ ok: false, error: 'A run is already in progress for this graph.' });
+  });
+
+  it('refuses a run whose reviewed text misses a step, and creates no run', () => {
+    const { runner, runStore } = setup();
+    const g = graphOf([agent('a'), agent('b')]);
+    const rendered = { goal: g.goal, instructions: g.instructions, nodes: { n1: 'do a' } };
+    expect(runner.start({ graph: g, rendered })).toEqual({ ok: false, error: 'The run has no reviewed text for step n2.' });
+    expect(runStore.list('g')).toEqual([]);
+    expect(runner.activeFor('g')).toBeUndefined();
   });
 
   it('marks a node waiting while any of its approvals is pending', async () => {
     const { runner, fake } = setup();
-    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
     await tick();
     const { emit } = fake.contexts.get('n1')!;
     const status = () => runner.get(r.run.id)!.nodes.n1.status;
@@ -220,7 +237,7 @@ describe('Runner when the filesystem or a listener fails', () => {
     runStore.writeOutput = () => {
       throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
     };
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), link('n1', 'n2')]))));
     await tick();
     fake.finish('n1');
     await tick();
@@ -239,7 +256,7 @@ describe('Runner when the filesystem or a listener fails', () => {
     };
     const live: string[] = [];
     runner.on('event', (_runId: string, _nodeId: string, event: { type: string }) => live.push(event.type));
-    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
     await tick();
     expect(() => fake.contexts.get('n1')!.emit({ type: 'text', text: 'working' })).not.toThrow();
     fake.finish('n1');
@@ -254,7 +271,7 @@ describe('Runner when the filesystem or a listener fails', () => {
     runner.on('node', () => {
       throw new Error('listener bug');
     });
-    const r = started(runner.start({ graph: graphOf([agent('a')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
     await tick();
     fake.finish('n1');
     expect((await r.done).status).toBe('succeeded');
@@ -272,7 +289,7 @@ describe('Runner when the filesystem or a listener fails', () => {
       maxParallel: 3,
       newRunId: () => `20261002-000000-${(seq++).toString(16).padStart(4, '0')}`,
     });
-    const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), link('n1', 'n2')]))));
     const done = await r.done;
     expect(done.status).toBe('failed');
     expect(done.nodes.n1.status).toBe('failed');

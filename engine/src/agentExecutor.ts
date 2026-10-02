@@ -84,6 +84,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
       runId: ctx.runId,
       nodeId: ctx.node.id,
       nodeTitle: ctx.node.title,
+      projectDir: ctx.cwd,
       signal: abortController.signal,
       emit: ctx.emit,
     });

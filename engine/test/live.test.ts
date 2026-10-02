@@ -55,7 +55,10 @@ describe.skipIf(!live)('live: real Claude on the subscription', () => {
       graph = r.graph;
     }
 
-    const started = runner.start({ graph });
+    const started = runner.start({
+      graph,
+      rendered: { goal: graph.goal, instructions: graph.instructions, nodes: Object.fromEntries(graph.nodes.map((n) => [n.id, n.prompt ?? n.command ?? ''])) },
+    });
     if (!started.ok) throw new Error(started.error);
     const run = await started.done;
     expect(run.status, JSON.stringify(run.nodes, null, 2)).toBe('succeeded');

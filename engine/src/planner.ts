@@ -5,6 +5,7 @@ import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sani
 import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
+import { privatePathDenial } from './privatePaths';
 import { createGraphMcpServer } from './plannerTools';
 import type { RunStore } from './runStore';
 import { blocksOf, realQuery, type QueryFn } from './sdk';
@@ -153,6 +154,19 @@ export class Planner extends EventEmitter {
           }),
         },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: PLANNER_APPEND },
+        hooks: {
+          PreToolUse: [
+            {
+              hooks: [
+                async (input) => {
+                  if (input.hook_event_name !== 'PreToolUse') return {};
+                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input);
+                  return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
+                },
+              ],
+            },
+          ],
+        },
         abortController,
       };
       if (graph.plannerSessionId) options.resume = graph.plannerSessionId;
