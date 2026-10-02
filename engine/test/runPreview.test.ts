@@ -48,6 +48,16 @@ describe('previewRun', () => {
     expect(out.rendered).toBeUndefined();
   });
 
+  it('leaves out the text of a step it could not fill in, unlike an empty command', () => {
+    const g = graphOf([variable('schema'), cmd('A', 'echo {{ schema }}'), agent('B', 'Use {{ schema }}'), cmd('C', '')]);
+    const steps = previewRun({ graph: g, values: {}, env: env() }).preview.steps;
+    expect(steps.map((s) => [s.id, 'text' in s ? s.text : 'no text'])).toEqual([
+      ['n1', 'no text'],
+      ['n2', 'no text'],
+      ['n3', ''],
+    ]);
+  });
+
   it('names unknown variables and hints at dbt Jinja', () => {
     const g = graphOf([cmd('A', `dbt run -s {{ ref('orders') }} {{ oops }}`)]);
     expect(previewRun({ graph: g, values: {}, env: env() }).preview.problems).toEqual([

@@ -4,6 +4,12 @@ import { dispatch, useStore } from '../store';
 
 let requestCounter = 0;
 
+/** A step's command or prompt, or a note while the engine can't fill it in yet. */
+function StepText({ text, className }: { text?: string; className?: string }) {
+  if (text === undefined) return <p className="muted">Shown here once every variable it uses has a value.</p>;
+  return <pre className={className}>{text}</pre>;
+}
+
 /** Shows exactly what will run, as the engine rendered it (spec §7.6); Start sends the preview's signature. */
 export function RunConfirmDialog() {
   const confirm = useStore((s) => s.confirm);
@@ -65,7 +71,7 @@ export function RunConfirmDialog() {
                     <div>
                       {s.id} · {s.title}
                     </div>
-                    <pre className="mono">{s.text}</pre>
+                    <StepText className="mono" text={s.text} />
                   </div>
                 ))}
               </>
@@ -79,7 +85,7 @@ export function RunConfirmDialog() {
                     <summary>
                       {s.id} · {s.title}
                     </summary>
-                    <pre>{s.text}</pre>
+                    <StepText text={s.text} />
                   </details>
                 ))}
               </div>

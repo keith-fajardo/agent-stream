@@ -61,6 +61,20 @@ describe('RunConfirmDialog', () => {
     expect(getState().confirm).toBeUndefined();
   });
 
+  it('says when a step will be shown instead of an empty box, but shows an empty command as one', async () => {
+    const steps: RunPreview['steps'] = [
+      { id: 'n1', title: 'Build', kind: 'command', reused: false },
+      { id: 'n2', title: 'Check', kind: 'agent', reused: false },
+      { id: 'n3', title: 'Blank', kind: 'command', text: '', reused: false },
+    ];
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ problems: ['Set a value for model (Variables menu).'], steps }), requestId: lastRequestId() } }));
+    const note = 'Shown here once every variable it uses has a value.';
+    expect([...container.querySelectorAll('p.muted')].map((p) => p.textContent)).toEqual([note, note]);
+    expect(container.querySelector('details p.muted')?.textContent).toBe(note);
+    expect([...container.querySelectorAll('pre')].map((p) => p.textContent)).toEqual(['']);
+  });
+
   it('lists problems first and blocks Start, and shows warnings', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
     await act(async () =>

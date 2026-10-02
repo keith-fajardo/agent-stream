@@ -108,7 +108,8 @@ export type NodeRunState = {
 /** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
 export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
 
-export type PreviewStep = { id: string; title: string; kind: NodeKind; text: string; reused: boolean };
+/** `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no value, or it has a problem). */
+export type PreviewStep = { id: string; title: string; kind: NodeKind; text?: string; reused: boolean };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
 export type RunPreview = {

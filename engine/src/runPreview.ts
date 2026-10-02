@@ -164,7 +164,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   const ids = order.length === graph.nodes.length ? order : graph.nodes.map((n) => n.id);
   const steps: PreviewStep[] = ids.map((id) => {
     const n = graph.nodes.find((x) => x.id === id)!;
-    return { id, title: n.title, kind: n.kind, text: nodes[id] ?? '', reused: reused.has(id) };
+    return { id, title: n.title, kind: n.kind, ...(Object.hasOwn(nodes, id) ? { text: nodes[id] } : {}), reused: reused.has(id) };
   });
   const variables = [...usedVariables]
     .sort()
