@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
@@ -24,7 +24,8 @@ export function slugify(name: string): string {
 
 /** Single source of truth for graphs. Every change goes through `apply`. */
 export class GraphStore extends EventEmitter {
-  private cache = new Map<string, Graph>();
+  /** Parsed graphs keyed by id, valid only while the file's mtime and size are unchanged. */
+  private cache = new Map<string, { graph: Graph; mtimeMs: number; size: number }>();
 
   constructor(
     private paths: ProjectPaths,
@@ -53,11 +54,17 @@ export class GraphStore extends EventEmitter {
   }
 
   load(id: string): GraphResult {
-    const cached = this.cache.get(id);
-    if (cached) return { ok: true, graph: cached };
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     const path = this.file(id);
-    if (!existsSync(path)) return { ok: false, error: `graph "${id}" not found` };
+    const stat = statSync(path, { throwIfNoEntry: false });
+    if (!stat) {
+      this.cache.delete(id);
+      return { ok: false, error: `graph "${id}" not found` };
+    }
+    const cached = this.cache.get(id);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return { ok: true, graph: cached.graph };
+    // The file changed on disk (hand edit, git checkout, ...) or was never loaded: re-read it.
+    this.cache.delete(id);
     let json: unknown;
     try {
       json = JSON.parse(readFileSync(path, 'utf8'));
@@ -67,7 +74,7 @@ export class GraphStore extends EventEmitter {
     const r = parseGraph(json);
     if (!r.ok) return r;
     const graph = { ...r.graph, id };
-    this.cache.set(id, graph);
+    this.cache.set(id, { graph, mtimeMs: stat.mtimeMs, size: stat.size });
     return { ok: true, graph };
   }
 
@@ -121,7 +128,9 @@ export class GraphStore extends EventEmitter {
   }
 
   private save(graph: Graph): void {
-    writeFileAtomic(this.file(graph.id), `${JSON.stringify(graph, null, 2)}\n`);
-    this.cache.set(graph.id, graph);
+    const path = this.file(graph.id);
+    writeFileAtomic(path, `${JSON.stringify(graph, null, 2)}\n`);
+    const { mtimeMs, size } = statSync(path);
+    this.cache.set(graph.id, { graph, mtimeMs, size });
   }
 }

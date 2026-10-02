@@ -60,6 +60,30 @@ describe('GraphStore', () => {
     expect(readFileSync(broken, 'utf8')).toBe('{ "id": "broken", "name": ');
   });
 
+  it('sees external edits to a graph file after it was loaded', () => {
+    const paths = tmpProject();
+    const store = new GraphStore(paths, fixedClock());
+    const { id } = store.create('G');
+    expect(store.get(id).goal).toBe('');
+    const file = join(paths.graphsDir, `${id}.json`);
+    const edited = { ...JSON.parse(readFileSync(file, 'utf8')), goal: 'edited by hand outside claude-stream' };
+    writeFileSync(file, `${JSON.stringify(edited, null, 2)}\n`);
+    expect(store.get(id).goal).toBe('edited by hand outside claude-stream');
+  });
+
+  it('reports a graph file broken after it was loaded and never overwrites it', () => {
+    const paths = tmpProject();
+    const store = new GraphStore(paths, fixedClock());
+    const { id } = store.create('G');
+    expect(store.load(id).ok).toBe(true);
+    const file = join(paths.graphsDir, `${id}.json`);
+    const conflicted = '<<<<<<< HEAD\n{ "id": "g" }\n=======\n';
+    writeFileSync(file, conflicted);
+    expect(store.list().find((g) => g.id === id)?.error).toContain('invalid JSON');
+    expect(store.apply(id, { type: 'setGoal', goal: 'x' }, 'user').ok).toBe(false);
+    expect(readFileSync(file, 'utf8')).toBe(conflicted);
+  });
+
   it('rejects graph ids that could escape the graphs folder', () => {
     const store = new GraphStore(tmpProject(), fixedClock());
     expect(store.load('../../etc/passwd')).toEqual({ ok: false, error: 'invalid graph id "../../etc/passwd"' });
