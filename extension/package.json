@@ -33,7 +33,11 @@
           "description": "How many steps of a run may run at the same time."
         }
       }
-    }
+    },
+    "commands": [
+      { "command": "claudeStream.retrySignIn", "title": "Retry Sign-in Check", "category": "Claude Stream", "icon": "$(refresh)" },
+      { "command": "claudeStream.signInDetails", "title": "Show Sign-in Details", "category": "Claude Stream" }
+    ]
   },
   "scripts": {
     "build": "node build.mjs",
