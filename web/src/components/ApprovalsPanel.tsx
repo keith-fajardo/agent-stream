@@ -1,42 +1,12 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { ApprovalRequest } from '@claude-stream/shared';
+import { describeApprovalInput } from '../approvalView';
 import { send } from '../socket';
 import { dispatch, useStore } from '../store';
 
 function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
   const [note, setNote] = useState('');
-  const input = (a.input ?? {}) as Record<string, unknown>;
-  const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : undefined);
-  let body: ReactNode;
-  if (a.toolName === 'Bash') {
-    body = (
-      <>
-        {str('description') && <p>{str('description')}</p>}
-        <pre className="mono">{str('command')}</pre>
-      </>
-    );
-  } else if (a.toolName === 'Edit') {
-    body = (
-      <>
-        <p>
-          <code>{str('file_path')}</code>
-        </p>
-        <pre className="diff del">{str('old_string')}</pre>
-        <pre className="diff add">{str('new_string')}</pre>
-      </>
-    );
-  } else if (a.toolName === 'Write') {
-    body = (
-      <>
-        <p>
-          <code>{str('file_path')}</code>
-        </p>
-        <pre className="diff add">{str('content')}</pre>
-      </>
-    );
-  } else {
-    body = <pre>{JSON.stringify(a.input, null, 2)}</pre>;
-  }
+  const view = describeApprovalInput(a.toolName, a.input);
   return (
     <div className="approval-card">
       <div>
@@ -45,7 +15,23 @@ function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
         </button>{' '}
         wants to use <b>{a.toolName}</b>
       </div>
-      {body}
+      {view.primary.map((b) => (
+        <div key={b.label}>
+          <div className="approval-label">{b.label}</div>
+          <pre className={b.tone ? `diff ${b.tone}` : 'mono'}>{b.text}</pre>
+        </div>
+      ))}
+      {view.warnings.map((w) => (
+        <p key={w} className="approval-warning">
+          ⚠ {w}
+        </p>
+      ))}
+      {view.rest !== undefined && (
+        <div>
+          <div className="approval-label">Other input</div>
+          <pre>{view.rest}</pre>
+        </div>
+      )}
       <input placeholder="Note for the agent (optional, sent when you deny)" value={note} onChange={(e) => setNote(e.target.value)} />
       <div className="approval-actions">
         <button className="danger" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined })}>
