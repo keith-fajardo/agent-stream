@@ -9,7 +9,8 @@
 Four requests from using v1:
 
 1. A **main menu** listing all graphs, instead of the top-bar dropdown and "+ New".
-2. A **cleaner top bar**: the goal input does not belong there.
+2. A **cleaner top bar**: the goal input does not belong there. Add a classic **menu bar**
+   (File, Edit, Run, View).
 3. **Export/import** a graph as a file, so a teammate can recreate it (without packaging it as a skill).
 4. **Instructions & context** for the agents at the graph level, beyond the one-line goal.
 
@@ -23,6 +24,7 @@ import it into their own project and run it.
 | Topic | Decision |
 |---|---|
 | Main menu | A **home screen** (start page) listing graphs; the editor has "← All graphs". |
+| Menu bar | **File · Edit · Run · View** in the top bar on every screen, alongside the home screen. |
 | Goal + instructions | A **Graph tab** in the right panel (Chat · Node · Approvals · Graph). |
 | Fields | Two: **Goal** (one line, as today) and **Instructions & context** (free text). |
 | Export contents | **Definition only**: name, goal, instructions, steps, connections, layout. No planner session, chat, op log or runs. |
@@ -63,12 +65,32 @@ broken-graph        Can't be read: invalid JSON …      ⋯
 - Opening a graph sets the URL hash to `#/graph/<id>`; reload and browser back/forward
   respect it. `#/` (or no hash) shows the home screen. An unknown or unreadable id in the
   hash shows the home screen with a toast.
-- **Top bar:** `← All graphs · <graph name> · Run/Stop · run picker · account`. The goal
-  input is removed from the top bar.
+- **Top bar:** `claude-stream  File Edit Run View · ← All graphs · <graph name> ·
+  Run/Stop · run picker · account`. The goal input is removed from the top bar.
 - If the open graph is deleted (e.g. from another tab), the editor returns to the home
   screen with a toast.
 
-### 3.3 Graph tab
+### 3.3 Menu bar
+
+Shown in the top bar on every screen. Menus open on click; while one is open, hovering
+another menu title switches to it; Esc or a click outside closes it. Items that don't
+apply right now are shown disabled (not hidden). No keyboard shortcuts in this version.
+
+| Menu | Items | Enabled when |
+|---|---|---|
+| **File** | New graph… · Open… (goes to the home screen) · Import… · Export… · Rename… · Duplicate · Delete… | New/Open/Import: always. Others: a graph is open |
+| **Edit** | Add step · Delete selected step · Tidy layout | A graph is open (Delete: a step is selected) |
+| **Run** | Run… · Stop · Re-run from selected step… · Approve all (N) | Run: a graph is open, signed in, no active run. Stop: a run is active. Re-run: a step is selected and the graph has a previous run. Approve all: N > 0 |
+| **View** | Logs panel (for the selected step) · Minimap ✓ · Chat · Node · Approvals · Graph | Logs panel: a step is selected. Minimap: toggle, remembered in the browser |
+
+- Every item reuses the same action as its existing button or ⋯ entry (one code path):
+  e.g. File › Delete… opens the same confirmation dialog as the home screen, Run › Run…
+  opens the same run confirmation dialog, Run › Approve all is the Approvals tab button.
+- **New graph…** and **Rename…** use a small in-app dialog with a name field (no browser
+  `prompt()`), shared with the home screen's inline actions where possible.
+- On the home screen only File's always-enabled items are active; the rest are disabled.
+
+### 3.4 Graph tab
 
 Right panel tabs become **Chat · Node · Approvals · Graph**.
 
@@ -195,7 +217,10 @@ Instructions & context
   - Reducer: home/editor view from hash, `graphDeleted`.
   - Component tests: home screen (rows, last run, ⋯ actions, delete confirmation, import
     size limit); Graph tab (save only changed fields, export request).
-- **Visual check** in headless Chrome with screenshots: home screen, editor top bar, Graph tab.
+- Component tests for the menu bar: open/close/hover-switch, disabled states for a
+  representative item per menu, and that items dispatch the same actions as their buttons.
+- **Visual check** in headless Chrome with screenshots: home screen, editor top bar with an
+  open menu, Graph tab.
 
 ## 9. Out of scope
 
