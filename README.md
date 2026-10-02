@@ -56,4 +56,5 @@ npm run build                              # web UI + extension bundle
 npm run test:integration -w extension      # real VS Code (downloads it once)
 node extension/scripts/screenshots.mjs     # screenshots for a visual check
 CLAUDE_STREAM_LIVE=1 npm test -w engine -- live   # real Claude, small plan usage
+CLAUDE_STREAM_LIVE=1 npm run test:integration -w extension   # also runs one agent step through the bundle
 ```

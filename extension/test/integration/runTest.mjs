@@ -33,4 +33,6 @@ await runTests({
   extensionDevelopmentPath,
   extensionTestsPath: join(extensionDevelopmentPath, 'test', 'integration', 'suite.cjs'),
   launchArgs: [workspace, '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust'],
+  // Opts in to the agent-step check, which uses the Claude plan.
+  extensionTestsEnv: { CLAUDE_STREAM_LIVE: process.env.CLAUDE_STREAM_LIVE },
 });

@@ -15,7 +15,32 @@ async function waitFor(check, what, ms = 30_000) {
   }
 }
 
+// Runs one agent step through the packaged bundle: the Agent SDK launches the user's Claude Code. Uses a little of the plan.
+async function checkAgentStep(app) {
+  const graph = app.createGraph('Live agent check');
+  const msgs = [];
+  const client = { send: (m) => msgs.push(m) };
+  const disconnect = app.connect(client);
+  try {
+    const prompt = 'Reply with exactly the word pong and nothing else. Do not use any tools.';
+    await app.handle(client, { type: 'op', graphId: graph.id, op: { type: 'addNode', node: { title: 'Pong', kind: 'agent', prompt } } });
+    await app.handle(client, { type: 'previewRun', graphId: graph.id });
+    const preview = msgs.find((m) => m.type === 'runPreview' && m.preview.graphId === graph.id).preview;
+    assert.deepEqual(preview.problems, []);
+    await app.handle(client, { type: 'startRun', graphId: graph.id, reviewed: preview.signature });
+    const finished = () => msgs.filter((m) => m.type === 'run' && m.run.graphId === graph.id).map((m) => m.run).find((r) => r.status !== 'running');
+    const run = await waitFor(finished, 'the agent run to finish', 180_000);
+    assert.equal(run.status, 'succeeded', JSON.stringify(run.nodes));
+    assert.match(app.runStore.readOutput(run.id, 'n1'), /pong/i);
+  } finally {
+    disconnect();
+    app.deleteGraph(graph.id);
+  }
+}
+
 exports.run = async function run() {
+  const live = process.env.CLAUDE_STREAM_LIVE === '1';
+  if (!live) console.log('Skipping the agent-step check (set CLAUDE_STREAM_LIVE=1)');
   const ext = vscode.extensions.getExtension('claude-stream-local.claude-stream');
   assert.ok(ext, 'the extension is installed');
   const api = await ext.activate();
@@ -71,4 +96,6 @@ exports.run = async function run() {
     app.values.deleteGraph('demo');
     fs.rmSync(valuesFile, { force: true });
   }
+
+  if (live) await checkAgentStep(app);
 };
