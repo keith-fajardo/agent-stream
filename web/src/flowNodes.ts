@@ -27,10 +27,12 @@ export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
     const isDragging = dragging.has(n.id);
     const position = isDragging && prev ? prev.position : (pendingMoves.get(n.id) ?? serverPos);
     return {
+      // Keep what React Flow put on the node (measured size etc.); unmeasured nodes render hidden.
+      ...prev,
       id: n.id,
       type: 'step',
       position,
-      ...(isDragging ? { dragging: prev?.dragging } : {}),
+      dragging: isDragging ? prev?.dragging : undefined,
       selected: selectionChanged || !prev ? n.id === selectedId : prev.selected,
       data: {
         node: n,

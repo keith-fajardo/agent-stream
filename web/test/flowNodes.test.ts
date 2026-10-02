@@ -51,6 +51,16 @@ describe('buildFlowNodes', () => {
     expect(buildFlowNodes({ ...base, graph, current, selectionChanged: true, selectedId: 'n1' }).map((n) => n.selected)).toEqual([true, false]);
   });
 
+  it('keeps React Flow measurements across rebuilds and clears a finished drag', () => {
+    const graph = graphOf([add('n1', { x: 10, y: 20 })]);
+    const current = [
+      { id: 'n1', type: 'step', position: { x: 10, y: 20 }, measured: { width: 220, height: 70 }, dragging: true, data: { node: graph.nodes[0]!, waiting: false } },
+    ] as StepFlowNode[];
+    const [n] = buildFlowNodes({ ...base, graph, current });
+    expect(n!.measured).toEqual({ width: 220, height: 70 });
+    expect(n!.dragging).toBeUndefined();
+  });
+
   it('drops nodes that are no longer in the graph', () => {
     const two = graphOf([add('n1', { x: 0, y: 0 }), add('n2', { x: 0, y: 100 })]);
     const current = buildFlowNodes({ ...base, graph: two });
