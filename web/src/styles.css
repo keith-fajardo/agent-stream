@@ -83,7 +83,6 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .tabs { display: flex; border-bottom: 1px solid var(--border); }
 .tabs button { flex: 1; border: none; border-radius: 0; background: none; padding: 8px; }
 .tabs button.active { border-bottom: 2px solid var(--accent); font-weight: 600; }
-.tabs button.attention { color: var(--warn); font-weight: 600; }
 .tab-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 
 .chat { display: flex; flex-direction: column; height: 100%; }
@@ -112,13 +111,11 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .ev.approval.approve, .ev.final.ok { color: var(--ok); }
 .stream.stderr { color: var(--danger); }
 
-.approvals { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .approval-card { border: 1px solid var(--warn); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .diff.del { background: rgba(180, 35, 24, 0.08); }
 .diff.add { background: rgba(46, 125, 50, 0.08); }
 .approval-label { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .approval-warning { margin: 0; padding: 6px 8px; border-radius: 6px; color: var(--danger); background: rgba(180, 35, 24, 0.1); font-weight: 600; }
-.approvals-head { display: flex; justify-content: flex-end; }
 .needs-approval { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--warn); }
 .approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
 

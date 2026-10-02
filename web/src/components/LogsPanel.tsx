@@ -3,7 +3,7 @@ import { fmtDuration, statusLabel } from '@claude-stream/shared';
 import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
-import { ApprovalCard } from './ApprovalsPanel';
+import { ApprovalCard } from './ApprovalCard';
 import { LogView } from './LogView';
 
 /** Logs of the selected step in the selected run, shown below the canvas while a step is selected. */

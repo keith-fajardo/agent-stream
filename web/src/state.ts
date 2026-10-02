@@ -11,7 +11,7 @@ import type {
   RunSummary,
 } from '@claude-stream/shared';
 
-export type Tab = 'chat' | 'node' | 'approvals';
+export type Tab = 'chat' | 'node' | 'graph';
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
 
 export type State = {
