@@ -171,4 +171,17 @@ describe('contentSignature', () => {
     expect(contentSignature(edited.graph)).not.toBe(contentSignature(g));
     expect(contentSignature(regoaled.graph)).not.toBe(contentSignature(g));
   });
+
+  it('starts graphs without instructions and sets them with an op', () => {
+    expect(emptyGraph('g', 'G', T).instructions).toBe('');
+    const g = build([agent('a')]);
+    const r = applyOp(g, { type: 'setInstructions', instructions: 'Use target dev.' }, 'user', T2);
+    expect(r.ok && r.graph.instructions).toBe('Use target dev.');
+  });
+
+  it('counts the instructions as run content', () => {
+    const g = build([agent('a')]);
+    const r = applyOp(g, { type: 'setInstructions', instructions: 'Never touch prod.' }, 'user', T2);
+    expect(r.ok && contentSignature(r.graph)).not.toBe(contentSignature(g));
+  });
 });

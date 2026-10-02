@@ -3,7 +3,7 @@ import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op 
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function emptyGraph(id: string, name: string, now: string): Graph {
-  return { id, name, goal: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
+  return { id, name, goal: '', instructions: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
 }
 
 export function edgeId(from: string, to: string): string {
@@ -82,6 +82,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string): GraphResu
     }
     case 'setGoal':
       return done({ goal: op.goal });
+    case 'setInstructions':
+      return done({ instructions: op.instructions });
     case 'moveNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
       return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? { ...n, position: op.position } : n)) });
@@ -140,6 +142,7 @@ export function topoOrder(graph: Graph): string[] {
 export function contentSignature(g: Graph): string {
   return JSON.stringify({
     goal: g.goal,
+    instructions: g.instructions,
     nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]),
     edges: g.edges.map((e) => e.id).sort(),
   });

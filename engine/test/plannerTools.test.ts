@@ -32,7 +32,7 @@ function setup() {
 describe('planner graph tools', () => {
   it('exposes the documented tools', () => {
     expect(setup().tools.map((t) => t.name)).toEqual([
-      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'request_run', 'get_run',
+      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'request_run', 'get_run',
     ]);
   });
 
@@ -76,6 +76,7 @@ describe('planner graph tools', () => {
     await s.call('add_node', { kind: 'agent', title: 'Check', prompt: 'check', after: ['n1'] });
     expect(JSON.parse((await s.call('get_graph')).text)).toEqual({
       goal: '',
+      instructions: '',
       nodes: [
         { id: 'n1', title: 'Build', kind: 'command', command: 'dbt build', createdBy: 'agent', updatedBy: 'agent' },
         { id: 'n2', title: 'Check', kind: 'agent', prompt: 'check', createdBy: 'agent', updatedBy: 'agent' },
@@ -112,5 +113,13 @@ describe('planner graph tools', () => {
     expect(text).toContain('error: exited with code 2');
     expect(text).toContain('Compilation Error in model orders');
     expect(await s.call('get_run', { runId: '20990101-000000-ffff' })).toEqual({ text: 'Run 20990101-000000-ffff not found.', isError: true });
+  });
+
+  it('sets the instructions as the agent and shows them in get_graph', async () => {
+    const s = setup();
+    expect(await s.call('set_instructions', { instructions: 'Use target dev.' })).toEqual({ text: 'Instructions updated.', isError: false });
+    expect(s.graphStore.get(s.graphId).instructions).toBe('Use target dev.');
+    expect(JSON.parse((await s.call('get_graph')).text).instructions).toBe('Use target dev.');
+    expect(s.graphStore.readOps(s.graphId).at(-1)).toMatchObject({ by: 'agent', op: { type: 'setInstructions' } });
   });
 });

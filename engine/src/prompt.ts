@@ -24,6 +24,7 @@ function heading(u: UpstreamResult): string {
 export function buildNodePrompt(graph: Graph, node: GraphNode, upstream: UpstreamResult[]): string {
   const parts: string[] = [];
   if (graph.goal.trim()) parts.push(`# Workflow goal\n${graph.goal.trim()}`);
+  if (graph.instructions?.trim()) parts.push(`# Instructions & context\n${graph.instructions.trim()}`);
   parts.push(`# Your step: ${node.title}\n${(node.prompt ?? '').trim()}`);
   if (upstream.length > 0) {
     const sections = upstream.map((u) => {

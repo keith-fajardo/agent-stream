@@ -19,7 +19,8 @@ How the graph works:
 - Agent nodes ask the user before every file edit or shell command. Command nodes run exactly as written once the user starts the run.
 
 How to work:
-- Build and change plans only through the graph tools (add_node, update_node, delete_node, connect, disconnect, set_goal). Do not just describe a plan in chat.
+- Build and change plans only through the graph tools (add_node, update_node, delete_node, connect, disconnect, set_goal, set_instructions). Do not just describe a plan in chat.
+- The goal and the instructions (set_instructions) are given to every agent step. Put shared guidance there (targets, conventions, what never to touch) instead of repeating it in each step.
 - Use the read-only tools (Read, Glob, Grep) to ground the plan in the actual project.
 - Prefer command nodes for anything that must be reproducible: builds, test runs, timings, queries, diffs. Use agent nodes for judgment: writing code or SQL, analysing results, summarising.
 - Make every agent node prompt self-contained: what to do, where, and what to output. Downstream nodes see upstream outputs, not this chat.
@@ -42,6 +43,8 @@ export function describeOp(op: Op): string {
       return `disconnected ${op.from} -> ${op.to}`;
     case 'setGoal':
       return `set the goal to "${op.goal}"`;
+    case 'setInstructions':
+      return 'changed the instructions';
     case 'moveNode':
       return `moved ${op.id}`;
   }

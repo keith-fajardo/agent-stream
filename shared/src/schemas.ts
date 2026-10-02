@@ -24,6 +24,7 @@ const graphSchema = z.object({
   id: z.string(),
   name: z.string(),
   goal: z.string().default(''),
+  instructions: z.string().default(''),
   nodes: z.array(graphNodeSchema).default([]),
   edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
   nodeSeq: z.number().int().nonnegative().default(0),
@@ -77,6 +78,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('connect'), from: z.string(), to: z.string() }),
   z.object({ type: z.literal('disconnect'), from: z.string(), to: z.string() }),
   z.object({ type: z.literal('setGoal'), goal: z.string() }),
+  z.object({ type: z.literal('setInstructions'), instructions: z.string() }),
   z.object({ type: z.literal('moveNode'), id: z.string(), position }),
 ]);
 

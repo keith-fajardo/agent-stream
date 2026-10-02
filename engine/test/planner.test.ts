@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
-import { Planner, PLANNER_APPEND } from '../src/planner';
+import { Planner, PLANNER_APPEND, describeOp } from '../src/planner';
 import { RunStore } from '../src/runStore';
 import type { QueryFn } from '../src/sdk';
 import { fixedClock, tmpProject } from './helpers';
@@ -246,5 +246,11 @@ describe('Planner', () => {
       ['error', 'The Claude session did not report how it authenticated.'],
     ]);
     expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
+  });
+});
+
+describe('describeOp for instructions', () => {
+  it('reports an instructions change without quoting it', () => {
+    expect(describeOp({ type: 'setInstructions', instructions: 'long text' })).toBe('changed the instructions');
   });
 });

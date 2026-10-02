@@ -21,6 +21,8 @@ export type Graph = {
   id: string;
   name: string;
   goal: string;
+  /** Longer guidance every agent step and the planner receive after the goal. */
+  instructions: string;
   nodes: GraphNode[];
   edges: Edge[];
   /** Highest node number ever issued, so ids are never reused. */
@@ -56,6 +58,7 @@ export type Op =
   | { type: 'connect'; from: string; to: string }
   | { type: 'disconnect'; from: string; to: string }
   | { type: 'setGoal'; goal: string }
+  | { type: 'setInstructions'; instructions: string }
   | { type: 'moveNode'; id: string; position: Position };
 
 export type OpRecord = { at: string; by: Actor; op: Op };

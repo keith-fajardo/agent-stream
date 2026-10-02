@@ -9,7 +9,7 @@ describe('parseGraph', () => {
   it('fills defaults for a minimal file', () => {
     expect(parseGraph({ id: 'g', name: 'G' })).toEqual({
       ok: true,
-      graph: { id: 'g', name: 'G', goal: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: '' },
+      graph: { id: 'g', name: 'G', goal: '', instructions: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: '' },
     });
   });
 
@@ -72,5 +72,10 @@ describe('format', () => {
     expect(
       (['queued', 'running', 'waiting_approval', 'succeeded', 'failed', 'not_run', 'cancelled', 'reused', 'interrupted'] as const).map(statusLabel),
     ).toEqual(['Queued', 'Running', 'Waiting approval', 'Succeeded', 'Failed', 'Not run', 'Cancelled', 'Reused', 'Interrupted']);
+  });
+
+  it('loads graph files written before instructions existed', () => {
+    const r = parseGraph({ id: 'g', name: 'G' });
+    expect(r.ok && r.graph.instructions).toBe('');
   });
 });

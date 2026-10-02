@@ -9,7 +9,7 @@ export type PlannerToolDeps = {
   graphStore: GraphStore;
   runStore: RunStore;
   graphId: string;
-  /** Opens the run confirmation dialog in the browser; returns an error message or null. */
+  /** Opens the run confirmation dialog in the graph's tab; returns an error message or null. */
   requestRun: (fromNodeId?: string) => string | null;
 };
 
@@ -24,6 +24,7 @@ const RUN_EXCERPT_CHARS = 2000;
 export function summarizeGraph(graph: Graph) {
   return {
     goal: graph.goal,
+    instructions: graph.instructions,
     nodes: graph.nodes.map(({ id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy }) => ({
       id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy,
     })),
@@ -89,8 +90,14 @@ export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
       outcome(apply({ type: 'setGoal', goal }), 'Goal updated.'),
     ),
     tool(
+      'set_instructions',
+      'Set the instructions & context: longer guidance every agent step receives after the goal (targets, conventions, what never to touch).',
+      { instructions: z.string() },
+      async ({ instructions }) => outcome(apply({ type: 'setInstructions', instructions }), 'Instructions updated.'),
+    ),
+    tool(
       'request_run',
-      "Ask the user to start a run. This opens a confirmation dialog in the user's browser; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
+      "Ask the user to start a run. This opens a confirmation dialog in claude-stream; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
       { fromNodeId: z.string().optional() },
       async ({ fromNodeId }) => {
         const error = d.requestRun(fromNodeId);

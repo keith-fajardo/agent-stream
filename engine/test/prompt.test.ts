@@ -64,4 +64,16 @@ Full output: .claude-stream/runs/r/nodes/n2/output.md
     expect(commandPart).toContain('(command `dbt run`, exit 1)');
     expect(prompt.length).toBeLessThan(2 * MAX_UPSTREAM_CHARS + 2_000);
   });
+
+  it('puts the instructions between the goal and the step', () => {
+    const g = { ...graph('Prove parity'), instructions: 'Use target dev.\nNever touch prod.' };
+    expect(buildNodePrompt(g, node('n1', 'agent', { title: 'Plan', prompt: 'Plan it.' }), [])).toBe(
+      '# Workflow goal\nProve parity\n\n# Instructions & context\nUse target dev.\nNever touch prod.\n\n# Your step: Plan\nPlan it.\n',
+    );
+  });
+
+  it('leaves out blank instructions', () => {
+    const g = { ...graph('Prove parity'), instructions: '   ' };
+    expect(buildNodePrompt(g, node('n1', 'agent', { title: 'Plan', prompt: 'Plan it.' }), [])).not.toContain('Instructions');
+  });
 });
