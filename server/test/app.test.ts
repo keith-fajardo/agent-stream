@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
+import { contentSignature, emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
@@ -71,7 +71,7 @@ describe('app', () => {
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-    await app.handle(a.c, { type: 'startRun', graphId: g.id });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: contentSignature(app.graphStore.get(g.id)) });
     await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
     const runId = a.of('run')[0].run.id;
     expect(a.of('run')[0].run.status).toBe('running');
@@ -86,12 +86,25 @@ describe('app', () => {
     expect(a.of('graphOpened')[0]).toMatchObject({ graph: { id: g.id }, chat: [], chatBusy: false, runs: [{ id: runId }], run: { id: runId } });
   });
 
+  it('refuses to start a run when the graph changed after the user reviewed it', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'command', command: 'echo reviewed' } }, 'user');
+    const reviewed = contentSignature(app.graphStore.get(g.id));
+    app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { command: 'echo swapped' } }, 'agent');
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed });
+    expect(a.of('error').map((m) => m.message)).toEqual(['The graph changed after you reviewed it. Review the run again.']);
+    expect(a.of('run')).toEqual([]);
+    expect(app.runStore.list(g.id)).toEqual([]);
+  });
+
   it('disables runs and chat when not signed in to a subscription', async () => {
     const { app, client } = setup({ ok: false, error: 'Not signed in.' });
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-    await app.handle(a.c, { type: 'startRun', graphId: g.id });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: contentSignature(app.graphStore.get(g.id)) });
     await app.handle(a.c, { type: 'chat', graphId: g.id, text: 'hi' });
     expect(a.of('error').map((m) => m.message)).toEqual(['Runs are disabled: Not signed in.', 'Chat is disabled: Not signed in.']);
     expect(a.of('run')).toEqual([]);

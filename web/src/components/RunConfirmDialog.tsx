@@ -1,3 +1,4 @@
+import { contentSignature } from '@claude-stream/shared';
 import { describeRunPlan } from '../runPlan';
 import { send } from '../socket';
 import { dispatch, useStore } from '../store';
@@ -10,7 +11,7 @@ export function RunConfirmDialog() {
   const plan = describeRunPlan(graph, confirm, run);
   const close = () => dispatch({ kind: 'closeConfirm' });
   const start = () => {
-    send({ type: 'startRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
+    send({ type: 'startRun', graphId: graph.id, reviewed: contentSignature(graph), fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
     close();
   };
   return (

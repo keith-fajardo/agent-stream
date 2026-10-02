@@ -48,6 +48,12 @@ describe('parseClientMessage', () => {
     expect(parseClientMessage(JSON.stringify({ type: 'decide', approvalId: 'a', decision: 'maybe' })).ok).toBe(false);
     expect(parseClientMessage(JSON.stringify({ type: 'op', graphId: 'g', op: { type: 'moveNode', id: 'n1' } })).ok).toBe(false);
   });
+
+  it('requires startRun to say which graph content the user reviewed', () => {
+    expect(parseClientMessage(JSON.stringify({ type: 'startRun', graphId: 'g' })).ok).toBe(false);
+    const msg = { type: 'startRun', graphId: 'g', reviewed: 'sig' };
+    expect(parseClientMessage(JSON.stringify(msg))).toEqual({ ok: true, msg });
+  });
 });
 
 describe('format', () => {

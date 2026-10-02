@@ -164,7 +164,8 @@ export type ClientMessage =
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
   | { type: 'chat'; graphId: string; text: string }
-  | { type: 'startRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
+  /** `reviewed` is contentSignature() of the graph the user confirmed; the server refuses a run if it changed since. */
+  | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'stopRun'; runId: string }
   | { type: 'selectRun'; runId: string }
   | { type: 'getNodeLogs'; runId: string; nodeId: string }

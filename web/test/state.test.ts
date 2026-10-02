@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyGraph, type Graph, type RunMeta, type ServerMessage } from '@claude-stream/shared';
-import { contentSignature, initialState, logKey, reduce, type Action, type State } from '../src/state';
+import { initialState, logKey, reduce, type Action, type State } from '../src/state';
 
 const T = 't';
 const graph = (id: string, nodes: string[] = []): Graph => ({
@@ -83,13 +83,5 @@ describe('client state', () => {
     const errored = reduce(s, server({ type: 'error', message: 'boom' }));
     expect(errored.toast).toBe('boom');
     expect(reduce(errored, { kind: 'dismissToast' }).toast).toBeUndefined();
-  });
-
-  it('changes the content signature for edits but not for layout', () => {
-    const g = graph('a', ['n1']);
-    const moved = { ...g, nodes: [{ ...g.nodes[0], position: { x: 5, y: 5 } }] };
-    const edited = { ...g, nodes: [{ ...g.nodes[0], prompt: 'other' }] };
-    expect(contentSignature(moved)).toBe(contentSignature(g));
-    expect(contentSignature(edited)).not.toBe(contentSignature(g));
   });
 });

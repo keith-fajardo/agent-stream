@@ -46,14 +46,7 @@ export type Action =
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
-/** What a run depends on; positions are layout, not content. */
-export function contentSignature(g: Graph): string {
-  return JSON.stringify({
-    goal: g.goal,
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]),
-    edges: g.edges.map((e) => e.id).sort(),
-  });
-}
+export { contentSignature } from '@claude-stream/shared';
 
 export function reduce(state: State, action: Action): State {
   switch (action.kind) {

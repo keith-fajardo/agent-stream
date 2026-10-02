@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOp,
+  contentSignature,
   descendants,
   emptyGraph,
   nextNodeId,
@@ -156,5 +157,18 @@ describe('reusableNodeIds', () => {
     const r = applyOp(wide, link('n1', 'n3'), 'user', T2);
     if (!r.ok) throw new Error(r.error);
     expect([...reusableNodeIds(r.graph, { snapshot: wide, nodes: allOk(wide) }, 'n2')]).toEqual(['n1']);
+  });
+});
+
+describe('contentSignature', () => {
+  it('changes for edits but not for layout', () => {
+    const g = build([agent('a'), cmd('b', 'echo hi'), link('n1', 'n2')]);
+    const moved = applyOp(g, { type: 'moveNode', id: 'n1', position: { x: 5, y: 5 } }, 'user', T2);
+    const edited = applyOp(g, { type: 'updateNode', id: 'n2', patch: { command: 'echo bye' } }, 'user', T2);
+    const regoaled = applyOp(g, { type: 'setGoal', goal: 'other' }, 'user', T2);
+    if (!moved.ok || !edited.ok || !regoaled.ok) throw new Error('op failed');
+    expect(contentSignature(moved.graph)).toBe(contentSignature(g));
+    expect(contentSignature(edited.graph)).not.toBe(contentSignature(g));
+    expect(contentSignature(regoaled.graph)).not.toBe(contentSignature(g));
   });
 });

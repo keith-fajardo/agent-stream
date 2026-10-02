@@ -136,6 +136,15 @@ export function topoOrder(graph: Graph): string[] {
   return order;
 }
 
+/** What a run depends on; positions are layout, not content. */
+export function contentSignature(g: Graph): string {
+  return JSON.stringify({
+    goal: g.goal,
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]),
+    edges: g.edges.map((e) => e.id).sort(),
+  });
+}
+
 export function validateRunnable(graph: Graph): string[] {
   const problems: string[] = [];
   if (graph.nodes.length === 0) problems.push('The graph has no nodes.');

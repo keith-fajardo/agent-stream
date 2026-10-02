@@ -1,4 +1,5 @@
 import {
+  contentSignature,
   validateRunnable,
   type ApprovalRequest,
   type AuthInfo,
@@ -131,6 +132,8 @@ export function createApp(d: AppDeps) {
         if (!d.auth.ok) return error(`Runs are disabled: ${d.auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
+        // Run only what the user saw in the confirmation dialog; the planner may have edited since.
+        if (contentSignature(r.graph) !== msg.reviewed) return error('The graph changed after you reviewed it. Review the run again.');
         const started = runner.start({ graph: r.graph, sourceRunId: msg.sourceRunId, fromNodeId: msg.fromNodeId });
         if (!started.ok) return error(started.error);
         return;
