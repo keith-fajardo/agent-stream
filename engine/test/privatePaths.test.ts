@@ -8,6 +8,16 @@ const reason = "Variable values are private to this machine; claude-stream doesn
 
 const runReason = "Run records contain variable values; claude-stream doesn't let Claude read .claude-stream/runs/*/run.json or events.jsonl.";
 
+describe('privatePathDenial for searches of run folders', () => {
+  it('denies Grep over the runs folder but allows output.md and Glob', () => {
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '.claude-stream/runs' })).toBe(runReason);
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '.claude-stream/runs/20261002-000000-abcd' })).toBe(runReason);
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '.claude-stream/runs/20261002-000000-abcd/nodes/n1/output.md' })).toBeNull();
+    expect(privatePathDenial(root, 'Glob', { pattern: '*', path: '.claude-stream/runs' })).toBeNull();
+    expect(privatePathDenial(root, 'Grep', { pattern: 'x', path: '.claude-stream/runsx' })).toBeNull();
+  });
+});
+
 describe('privatePathDenial', () => {
   it('denies run records with rendered values, but not outputs', () => {
     const run = join(root, '.claude-stream', 'runs', '20261002-000000-abcd');

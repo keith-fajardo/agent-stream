@@ -12,7 +12,10 @@ export function privatePathDenial(projectDir: string, toolName: string, input: u
   const norm = (x: string) => (process.platform === 'win32' ? x.toLowerCase() : x);
   const full = norm(resolve(projectDir, p));
   if (full === norm(join(projectDir, '.claude-stream', 'variables.local.json'))) return REASON;
-  const runs = norm(join(projectDir, '.claude-stream', 'runs')) + sep;
+  const runsDir = norm(join(projectDir, '.claude-stream', 'runs'));
+  // A searched directory can override ripgrep's ignore rules, so Grep may not aim at the runs tree (output.md files are fine).
+  if (toolName === 'Grep' && (full === runsDir || full.startsWith(runsDir + sep)) && basename(full) !== 'output.md') return RUN_REASON;
+  const runs = runsDir + sep;
   if (full.startsWith(runs) && ['run.json', 'events.jsonl'].includes(basename(full))) return RUN_REASON;
   return null;
 }
