@@ -32,7 +32,7 @@ async function waitFor(condition: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-describe('command executor', () => {
+describe.skipIf(process.platform === 'win32')('command executor', () => {
   it('runs in the project folder and captures stdout', async () => {
     const cwd = tmp();
     const { c, events } = ctx('echo hello && pwd', { cwd });

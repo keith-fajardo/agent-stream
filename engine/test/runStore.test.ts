@@ -42,7 +42,7 @@ describe('RunStore', () => {
     expect(store.readOutput(a, 'n2')).toBe('');
     store.copyOutput(a, b, 'n1');
     expect(store.readOutput(b, 'n1')).toBe('result text');
-    expect(store.outputRelPath(a, 'n1')).toBe(`.claude-stream/runs/${a}/nodes/n1/output.md`);
+    expect(store.outputRelPath(a, 'n1')).toBe(join('.claude-stream', 'runs', a, 'nodes', 'n1', 'output.md'));
   });
 
   it('refuses ids that could escape the runs folder', () => {
