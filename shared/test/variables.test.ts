@@ -20,4 +20,11 @@ describe('variable names', () => {
   it('caps values at 10,000 characters', () => {
     expect(MAX_VARIABLE_VALUE_CHARS).toBe(10_000);
   });
+
+  it('reserves names the template engine blocks, and only those', () => {
+    for (const n of ['constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', 'caller', 'arguments']) {
+      expect(variableNameProblem(n)).toBe(`"${n}" is a reserved word.`);
+    }
+    expect(variableNameProblem('toString')).toBeNull();
+  });
 });

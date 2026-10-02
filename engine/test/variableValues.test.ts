@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { VariableValues } from '../src/variableValues';
@@ -67,5 +67,36 @@ describe('VariableValues', () => {
     values.set('g', 'schema', 'dev');
     expect(values.problem).toBeUndefined();
     expect(new VariableValues(paths).get('g')).toEqual({ schema: 'dev' });
+  });
+
+  it('keeps values unchanged and emits nothing when a save fails', () => {
+    if (process.platform === 'win32') return;
+    const paths = tmpProject();
+    const values = new VariableValues(paths);
+    values.set('g', 'a', '1');
+    const changed = vi.fn();
+    values.on('changed', changed);
+    chmodSync(paths.dataDir, 0o500);
+    try {
+      expect(() => values.set('g', 'b', 'secret')).toThrow();
+    } finally {
+      chmodSync(paths.dataDir, 0o700);
+    }
+    expect(values.get('g')).toEqual({ a: '1' });
+    expect(changed).not.toHaveBeenCalled();
+    values.set('g', 'b', '2');
+    expect(values.get('g')).toEqual({ a: '1', b: '2' });
+    expect(changed).toHaveBeenCalledWith('g', { a: '1', b: '2' });
+  });
+
+  it('treats names that exist only on Object.prototype as unset', () => {
+    const values = new VariableValues(tmpProject());
+    const changed = vi.fn();
+    values.on('changed', changed);
+    values.rename('g', 'toString', 'x');
+    values.delete('g', 'constructor');
+    values.deleteGraph('toString');
+    expect(changed).not.toHaveBeenCalled();
+    expect(values.get('g')).toEqual({});
   });
 });

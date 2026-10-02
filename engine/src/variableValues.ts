@@ -6,7 +6,11 @@ import { writeFileAtomic } from './fsutil';
 import type { ProjectPaths } from './paths';
 
 export const VALUES_FILE = 'variables.local.json';
-type FileShape = { version: 1; graphs: Record<string, Record<string, string>> };
+type Values = Record<string, string>;
+type FileShape = { version: 1; graphs: Record<string, Values> };
+
+/** A copy with no prototype, so no variable name can reach Object.prototype. */
+const plain = (src: Record<string, string> = {}): Values => Object.assign(Object.create(null) as Values, src);
 
 /**
  * Variable values for this machine only (spec §7.1): never in the graph file, an export or the
@@ -30,7 +34,7 @@ export class VariableValues extends EventEmitter {
 
   private load(): FileShape {
     if (this.data) return this.data;
-    const data: FileShape = { version: 1, graphs: {} };
+    const data: FileShape = { version: 1, graphs: Object.create(null) as Record<string, Values> };
     this.data = data;
     if (!existsSync(this.file())) return data;
     try {
@@ -38,7 +42,7 @@ export class VariableValues extends EventEmitter {
       if (typeof json !== 'object' || json === null || typeof json.graphs !== 'object' || json.graphs === null) throw new Error('unexpected format');
       for (const [graphId, values] of Object.entries(json.graphs as Record<string, unknown>)) {
         if (typeof values !== 'object' || values === null) continue;
-        data.graphs[graphId] = Object.fromEntries(Object.entries(values).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+        data.graphs[graphId] = plain(Object.fromEntries(Object.entries(values).filter(([, v]) => typeof v === 'string')) as Values);
       }
     } catch (e) {
       this.problem = `${VALUES_FILE} could not be read (${(e as Error).message}); variable values are treated as empty until you save one.`;
@@ -47,7 +51,8 @@ export class VariableValues extends EventEmitter {
   }
 
   get(graphId: string): Record<string, string> {
-    return { ...(this.load().graphs[graphId] ?? {}) };
+    const graphs = this.load().graphs;
+    return plain(Object.hasOwn(graphs, graphId) ? graphs[graphId] : {});
   }
 
   set(graphId: string, name: string, value: string): void {
@@ -60,7 +65,7 @@ export class VariableValues extends EventEmitter {
 
   rename(graphId: string, from: string, to: string): void {
     const values = this.get(graphId);
-    if (!(from in values)) return;
+    if (!Object.hasOwn(values, from)) return;
     values[to] = values[from];
     delete values[from];
     this.write(graphId, values);
@@ -68,7 +73,7 @@ export class VariableValues extends EventEmitter {
 
   delete(graphId: string, name: string): void {
     const values = this.get(graphId);
-    if (!(name in values)) return;
+    if (!Object.hasOwn(values, name)) return;
     delete values[name];
     this.write(graphId, values);
   }
@@ -79,16 +84,24 @@ export class VariableValues extends EventEmitter {
   }
 
   deleteGraph(graphId: string): void {
-    if (graphId in this.load().graphs) this.write(graphId, {});
+    if (Object.hasOwn(this.load().graphs, graphId)) this.write(graphId, {});
   }
 
-  private write(graphId: string, values: Record<string, string>): void {
-    const data = this.load();
-    if (Object.keys(values).length) data.graphs[graphId] = values;
-    else delete data.graphs[graphId];
-    writeFileAtomic(this.file(), `${JSON.stringify(data, null, 2)}\n`, 0o600);
-    if (this.platform !== 'win32') chmodSync(this.file(), 0o600);
+  private write(graphId: string, values: Values): void {
+    const current = this.load();
+    const next: FileShape = { version: 1, graphs: Object.assign(Object.create(null) as Record<string, Values>, current.graphs) };
+    if (Object.keys(values).length) next.graphs[graphId] = values;
+    else delete next.graphs[graphId];
+    writeFileAtomic(this.file(), `${JSON.stringify(next, null, 2)}\n`, 0o600);
+    this.data = next;
+    if (this.platform !== 'win32') {
+      try {
+        chmodSync(this.file(), 0o600);
+      } catch {
+        // the temp file was created 0600 already
+      }
+    }
     this.problem = undefined;
-    this.emit('changed', graphId, { ...values });
+    this.emit('changed', graphId, plain(values));
   }
 }

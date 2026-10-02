@@ -6,6 +6,9 @@ export const MAX_VARIABLE_VALUE_CHARS = 10_000;
 const RESERVED = new Set([
   'env_var', 'true', 'false', 'none', 'True', 'False', 'None', 'and', 'or', 'not', 'in', 'is', 'if', 'else', 'elif',
   'endif', 'for', 'endfor', 'set', 'raw', 'endraw', 'loop', 'super', 'self',
+  // Blocked by the template engine's lookups, so such a variable could never be read.
+  'constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__',
+  'caller', 'arguments',
 ]);
 /** Step ids are kept free for output values ({{ n1.model }}). */
 const STEP_ID_RE = /^n\d+$/;
