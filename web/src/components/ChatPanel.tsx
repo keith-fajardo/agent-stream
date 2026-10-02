@@ -9,7 +9,11 @@ export function ChatPanel() {
   const auth = useStore((s) => s.auth);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [chat.length, busy]);
+  // Block body on purpose: Chrome 154+ returns a Promise from scrollIntoView(), and an
+  // effect must not return anything but a cleanup function.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'end' });
+  }, [chat.length, busy]);
   const canType = !!graph && !!auth?.ok;
   const submit = () => {
     const t = text.trim();
