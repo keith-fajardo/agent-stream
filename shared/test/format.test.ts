@@ -19,7 +19,7 @@ describe('approval text', () => {
   const request = (toolName: string, input: unknown): ApprovalRequest => ({ id: 'a', runId: 'r', graphId: 'g', nodeId: 'n2', nodeTitle: 'Build new', toolName, input, createdAt: 't' });
 
   it('summarises a request in one line', () => {
-    expect(approvalSummary('Bash', { command: 'dbt build -s orders_v2\n--target dev' })).toBe('Bash: dbt build -s orders_v2');
+    expect(approvalSummary('Bash', { command: 'dbt build -s orders_v2\n--target dev' })).toBe('Bash: dbt build -s orders_v2 … (+1 more line)');
     expect(approvalSummary('PowerShell', { command: 'Get-ChildItem' })).toBe('PowerShell: Get-ChildItem');
     expect(approvalSummary('Edit', { file_path: 'models/orders_v2.sql' })).toBe('Edit: models/orders_v2.sql');
     expect(approvalSummary('WebFetch', { url: 'x' })).toBe('WebFetch');
@@ -31,5 +31,16 @@ describe('approval text', () => {
     expect(approvalSentence(request('Edit', { file_path: 'a.sql' }))).toBe('n2 Build new wants to edit a.sql');
     expect(approvalSentence(request('Write', { file_path: 'a.sql' }))).toBe('n2 Build new wants to write a.sql');
     expect(approvalSentence(request('WebFetch', {}))).toBe('n2 Build new wants to use WebFetch');
+  });
+
+  it('does not hide the later lines of a multi-line command', () => {
+    const shown = (command: string) => approvalSummary('Bash', { command });
+    expect(shown('dbt build\nrm -rf ~')).toContain('dbt build');
+    expect(shown('dbt build\nrm -rf ~')).toContain('(+1 more line)');
+    expect(shown('\n\nls')).toBe('Bash: ls');
+    expect(shown('a\r\nb\r\nc')).toBe('Bash: a … (+2 more lines)');
+    expect(shown(`${'x'.repeat(500)}\nb`).endsWith('… (+1 more line)')).toBe(true);
+    expect(shown('   ')).toBe('Bash: (empty command)');
+    expect(approvalSentence(request('Bash', { command: 'dbt build\nrm -rf ~' }))).toBe('n2 Build new wants to run: dbt build … (+1 more line)');
   });
 });

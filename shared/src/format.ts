@@ -45,9 +45,13 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+/** The first non-empty line, capped, with a note when more lines follow, so nothing is hidden silently. */
 const firstLine = (text: string, max = 80) => {
-  const line = text.split('\n')[0];
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  const lines = text.split(/\r\n|\n|\r/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '(empty command)';
+  const shown = lines[0].length > max ? `${lines[0].slice(0, max - 1)}…` : lines[0];
+  const more = lines.length - 1;
+  return more ? `${shown} … (+${more} more line${more === 1 ? '' : 's'})` : shown;
 };
 const fieldsOf = (input: unknown) => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {});
 

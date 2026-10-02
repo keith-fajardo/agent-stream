@@ -21,6 +21,7 @@ export function runCommands(d: RunCommandDeps) {
     const panel = d.panels.active();
     return panel ? { folder: panel.folder, graphId: panel.graphId } : d.pickGraph();
   };
+  const isItem = (item: unknown): item is ApprovalTarget => !!item && typeof item === 'object' && 'folder' in item && 'request' in item;
   const decide = (item: ApprovalTarget, decision: 'approve' | 'deny') =>
     d.engines.get(item.folder).broker.decide(item.request.id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
 
@@ -42,16 +43,17 @@ export function runCommands(d: RunCommandDeps) {
       if (t) await d.openAndSend(t, { type: 'openVariables' });
     },
     approve(item: ApprovalTarget): void {
-      decide(item, 'approve');
+      if (isItem(item)) decide(item, 'approve');
     },
     deny(item: ApprovalTarget): void {
-      decide(item, 'deny');
+      if (isItem(item)) decide(item, 'deny');
     },
     /** Approves every request listed now, in every graph; anything arriving later still waits. */
     approveAll(): void {
       for (const item of d.engines.approvals()) decide(item, 'approve');
     },
     async revealApproval(item: ApprovalTarget): Promise<void> {
+      if (!isItem(item)) return;
       await d.openAndSend({ folder: item.folder, graphId: item.request.graphId }, { type: 'revealNode', nodeId: item.request.nodeId });
     },
     showSidebar(): void {

@@ -43,7 +43,7 @@ function setup() {
     showSidebar,
   });
   const activate = () => panels.add(new GraphPanel(f, g.id, { post() {}, reveal() {}, close() {}, visible: () => true, active: () => true }));
-  return { f, app, g, cmds, sent, info, showSidebar, activate };
+  return { manager, f, app, g, cmds, sent, info, showSidebar, activate };
 }
 
 describe('run commands', () => {
@@ -87,6 +87,32 @@ describe('run commands', () => {
     expect(await two.decision).toEqual({ decision: 'approve' });
     s.cmds.approveAll();
     expect(await three.decision).toEqual({ decision: 'approve' });
+  });
+
+  it('does nothing when an approval command gets no item', async () => {
+    const s = setup();
+    const req = s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: 'Bash', input: {} });
+    expect(() => s.cmds.approve(undefined as never)).not.toThrow();
+    expect(() => s.cmds.deny({} as never)).not.toThrow();
+    await expect(s.cmds.revealApproval(undefined as never)).resolves.toBeUndefined();
+    expect(s.app.broker.pending().map((p) => p.id)).toEqual([req.id]);
+    expect(s.sent).toEqual([]);
+  });
+
+  it('keeps two folders with the same graph id apart', async () => {
+    const s = setup();
+    const other = folder('b');
+    const appB = s.manager.get(other);
+    const ask = (app: typeof s.app) => app.broker.request({ runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'b', toolName: 'Bash', input: {} });
+    const inA = ask(s.app);
+    const inB = ask(appB);
+    s.cmds.approve({ folder: s.f, request: s.app.broker.pending()[0] });
+    expect(await inA.decision).toEqual({ decision: 'approve' });
+    expect(appB.broker.pending().map((p) => p.id)).toEqual([inB.id]);
+    const again = ask(s.app);
+    s.cmds.approveAll();
+    expect(await again.decision).toEqual({ decision: 'approve' });
+    expect(await inB.decision).toEqual({ decision: 'approve' });
   });
 
   it('shows the sidebar', () => {
