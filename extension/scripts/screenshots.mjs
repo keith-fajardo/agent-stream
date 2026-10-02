@@ -47,28 +47,42 @@ function sampleWorkspace() {
   return ws;
 }
 
-function devtools(url) {
+/** Minimal DevTools client: one socket, optional sessionId per call, and an event hook. */
+function devtools(url, onEvent = () => {}) {
   const ws = new WebSocket(url);
   let id = 0;
   const pending = new Map();
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data));
+    if (m.id === undefined) return onEvent(m);
     pending.get(m.id)?.(m);
     pending.delete(m.id);
   };
   const open = new Promise((r) => (ws.onopen = r));
   return {
-    async call(method, params = {}) {
+    async call(method, params = {}, sessionId) {
       await open;
       const i = ++id;
-      ws.send(JSON.stringify({ id: i, method, params }));
+      ws.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }));
       return new Promise((r) => pending.set(i, r));
     },
     close: () => ws.close(),
   };
 }
 
-/** Clicks in the graph tab's page; VS Code nests our page in an inner iframe of the webview frame. */
+/** Polls `check` every 250 ms until it returns something truthy, for at most 30 s. */
+async function until(check, what) {
+  const end = Date.now() + 30_000;
+  for (;;) {
+    let value;
+    try { value = await check(); } catch { value = undefined; }
+    if (value) return value;
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await sleep(250);
+  }
+}
+
+/** Reaches into the graph tab's page: VS Code nests our page in an inner iframe of the webview frame. */
 const inTab = (js) => `(() => { const f = document.querySelector('iframe'); const d = (f && f.contentDocument) || document; ${js} })()`;
 
 async function shoot(theme, label) {
@@ -82,36 +96,66 @@ async function shoot(theme, label) {
   mkdirSync(join(userData, 'User'), { recursive: true });
   writeFileSync(join(userData, 'User', 'settings.json'), JSON.stringify({ 'workbench.colorTheme': theme, 'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false }));
   const port = 9300 + Math.floor(Math.random() * 500);
-  const child = spawn(executable, [ws, join(ws, '.claude-stream', 'graphs', 'dbt-parity.json'), `--extensionDevelopmentPath=${extensionPath}`, `--user-data-dir=${userData}`, '--disable-extensions', `--remote-debugging-port=${port}`, '--skip-welcome', '--skip-release-notes'], { stdio: 'ignore' });
+  const child = spawn(executable, [ws, `--extensionDevelopmentPath=${extensionPath}`, `--user-data-dir=${userData}`, '--disable-extensions', `--remote-debugging-port=${port}`, '--skip-welcome', '--skip-release-notes'], { stdio: 'ignore' });
   try {
-    await sleep(10_000);
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    const page = targets.find((t) => t.type === 'page' && !String(t.url).startsWith('vscode-webview'));
-    const tab = targets.find((t) => String(t.url).includes('vscode-webview'));
-    if (!page) throw new Error(`no workbench page among ${targets.map((t) => `${t.type} ${t.url}`).join(', ')}`);
-    const workbench = devtools(page.webSocketDebuggerUrl);
-    const webview = tab ? devtools(tab.webSocketDebuggerUrl) : undefined;
+    const targets = await until(async () => {
+      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      return list.some((t) => t.type === 'page') && list;
+    }, 'the workbench page');
+    const page = targets.find((t) => t.type === 'page');
+    const sessions = [];
+    const workbench = devtools(page.webSocketDebuggerUrl, (m) => {
+      if (m.method !== 'Target.attachedToTarget') return;
+      sessions.push(m.params);
+      // Frames nest (workbench > webview host > our page), so keep auto-attaching inside each one.
+      if (m.params.targetInfo.type === 'iframe') workbench.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, m.params.sessionId);
+    });
+    // Flattened auto-attach hands us the webview frames as sessions on the same socket.
+    await workbench.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    const dom = async (js) => (await workbench.call('Runtime.evaluate', { expression: js, returnByValue: true })).result?.result?.value;
     const save = async (name) => {
       const r = await workbench.call('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(outDir, `${label}-${name}.png`), Buffer.from(r.result.data, 'base64'));
     };
-    const click = async (js) => {
-      if (!webview) throw new Error('could not find the graph tab target; take the remaining screenshots by hand');
-      await webview.call('Runtime.evaluate', { expression: inTab(js) });
-      await sleep(800);
+
+    // Wait for the extension: the status bar shows the plan (or the signed-out text) once the sign-in check ends.
+    await until(() => dom(`[...document.querySelectorAll('.statusbar-item')].some((e) => /Claude (?!Stream)\\S|not signed in/i.test(e.textContent))`), 'the status bar to show the Claude plan');
+    // Open the sidebar from the activity bar.
+    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Claude Stream'))?.click()`);
+    await until(() => dom(`/Graphs/.test(document.querySelector('.sidebar')?.textContent ?? '') && /dbt parity orders/.test(document.querySelector('.sidebar')?.textContent ?? '')`), 'the Graphs view to list the graph');
+    // Open the graph like a user: through the Explorer tree (Ctrl+Shift+E first).
+    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Explorer'))?.click()`);
+    await until(() => dom(`(() => { const row = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => r.textContent.includes('dbt-parity.json')); if (row) { row.click(); return true; } const dir = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => /claude-stream|graphs/.test(r.textContent) && r.getAttribute('aria-expanded') === 'false'); dir?.click(); return false; })()`), 'dbt-parity.json in the Explorer');
+    await until(() => dom(`!!document.querySelector('.tab[aria-label*="dbt-parity"] , .tab[data-resource-name*="dbt-parity"]') && !!document.querySelector('.webview')`), 'the graph tab');
+    // Show the sidebar again (the Explorer replaced it), and dismiss the notice about --disable-extensions.
+    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Claude Stream'))?.click(); document.querySelectorAll('.notifications-toasts .codicon-notifications-clear, .notifications-toasts .codicon-close').forEach((e) => e.click())`);
+    // Reach the tab's page and wait for the top bar.
+    const evalTab = async (js) => {
+      // The url of a frame is blank when it attaches, so try every frame until the page answers.
+      for (const t of sessions.filter((x) => x.targetInfo.type === 'iframe').reverse()) {
+        const v = (await workbench.call('Runtime.evaluate', { expression: inTab(js), returnByValue: true }, t.sessionId)).result?.result?.value;
+        if (v) return v;
+      }
+      return undefined;
     };
+    await until(() => evalTab(`return d.querySelectorAll('.menu > button').length > 0`), `the graph tab page to show its top bar (attached: ${sessions.map((s) => `${s.targetInfo.type} ${s.targetInfo.url.slice(0, 60)}`).join('; ') || 'none'})`);
+    const click = async (js, waitFor) => {
+      await evalTab(js);
+      if (waitFor) await until(() => evalTab(`return ${waitFor}`), 'the page to react');
+    };
+    await until(() => evalTab(`return !!d.querySelector('.react-flow__node')`), 'the canvas to draw its steps');
+    const has = (sel, text) => `[...d.querySelectorAll('${sel}')].some((b) => b.textContent.includes('${text}'))`;
+    const btn = (sel, text) => `[...d.querySelectorAll('${sel}')].find((b) => b.textContent.includes('${text}'))`;
     await save('graph-tab');
-    await click(`[...d.querySelectorAll('.menu > button')].find((b) => b.textContent === 'File').click();`);
+    await click(`${btn('.menu > button', 'File')}.click();`, has('.menu-items button', 'Export'));
     await save('file-menu');
-    await click(`d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); [...d.querySelectorAll('.menu > button')].find((b) => b.textContent === 'Variables').click();`);
+    await click(`d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); ${btn('.menu > button', 'Variables')}.click();`, has('.menu-items button', 'Edit variables'));
     await save('variables-menu');
-    await click(`[...d.querySelectorAll('.menu-items button')].find((b) => b.textContent.includes('Edit variables')).click();`);
+    await click(`${btn('.menu-items button', 'Edit variables')}.click();`, `!!d.querySelector('[role=dialog], dialog, .dialog')`);
     await save('variables-dialog');
-    await click(`[...d.querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(); [...d.querySelectorAll('button')].find((b) => b.textContent.includes('Run')).click();`);
-    await sleep(1500);
+    await click(`${btn('button', 'Cancel')}.click(); ${btn('button', '▶ Run')}.click();`, has('*', 'Set a value for model'));
     await save('run-dialog');
     workbench.close();
-    webview?.close();
   } finally {
     child.kill();
     rmSync(file, { force: true });

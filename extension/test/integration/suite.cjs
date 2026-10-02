@@ -29,6 +29,13 @@ exports.run = async function run() {
   const panel = await waitFor(() => api.panels.get(folder.key, 'demo'), 'the graph tab');
   await waitFor(() => panel.isLoaded, 'the tab to load its graph');
 
+  // A plain open (Explorer click, Quick Open) uses the graph tab too: the custom editor is the default.
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await waitFor(() => !api.panels.get(folder.key, 'demo'), 'the graph tab to close');
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(wf.uri, '.claude-stream', 'graphs', 'demo.json'));
+  const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'a plain open to show the graph tab');
+  await waitFor(() => reopened.isLoaded, 'the reopened tab to load its graph');
+
   if (!api.engines.auth.ok) {
     console.warn(`Skipping the run check: ${api.engines.auth.error}`);
     return;
