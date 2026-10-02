@@ -1,5 +1,6 @@
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from './components/Canvas';
+import { LogsPanel } from './components/LogsPanel';
 import { RightPanel } from './components/RightPanel';
 import { RunConfirmDialog } from './components/RunConfirmDialog';
 import { Toast } from './components/Toast';
@@ -13,9 +14,12 @@ export function App() {
       <TopBar />
       {auth && !auth.ok && <div className="banner">{auth.error} Restart claude-stream once this is fixed.</div>}
       <main className="main">
-        <ReactFlowProvider>
-          <Canvas />
-        </ReactFlowProvider>
+        <div className="workspace">
+          <ReactFlowProvider>
+            <Canvas />
+          </ReactFlowProvider>
+          <LogsPanel />
+        </div>
         <RightPanel />
       </main>
       <RunConfirmDialog />

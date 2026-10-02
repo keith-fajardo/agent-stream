@@ -330,9 +330,11 @@ API-equivalent cost estimate).
 **Command node events:** start (exact command, cwd), stdout chunk, stderr chunk, exit
 (code, signal, duration).
 
-**UI:** selecting a node opens the **Node** tab with two sub-tabs. **Edit** has title,
-kind, prompt/command, and timeout. **Logs** is the event timeline for the selected run,
-streaming live while it runs. The run selector in the top bar switches the canvas
+**UI:** selecting a node opens its **logs panel** below the canvas: the step's status,
+duration and error, then the event timeline for the selected run, streaming live (and
+following new lines) while it runs. The right panel switches to the **Node** tab, which
+edits title, kind, prompt/command, and timeout. ✕ or clicking empty canvas closes the
+logs panel. The run selector in the top bar switches the canvas
 overlay (statuses, durations) and the logs to any past run.
 
 ## 9. UI
@@ -344,8 +346,9 @@ overlay (statuses, durations) and the logs to any past run.
   status color, duration once finished, "by agent" marker, pulse while waiting for
   approval. Nodes without a position are placed by `@dagrejs/dagre` auto-layout
   (left-to-right); a "Tidy" button re-lays out everything.
-- **Right panel tabs:** **Chat** (planner conversation + input box), **Node** (Edit /
-  Logs for the selected node), **Approvals** (pending queue with a count badge; the tab
+- **Logs panel:** under the canvas (about 35% of its height), shown while a step is selected.
+- **Right panel tabs:** **Chat** (planner conversation + input box), **Node** (editor for the
+  selected node), **Approvals** (pending queue with a count badge; the tab
   turns attention-colored when non-empty).
 - Live updates arrive over one WebSocket. The client keeps a single store fed by server
   events.

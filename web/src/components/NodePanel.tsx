@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import { fmtDuration, statusLabel, type GraphNode, type NodeKind, type NodePatch } from '@claude-stream/shared';
+import type { GraphNode, NodeKind, NodePatch } from '@claude-stream/shared';
 import { send } from '../socket';
-import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
-import { LogView } from './LogView';
 
 type Draft = { title: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
 
@@ -19,20 +17,11 @@ const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b
 export function NodePanel() {
   const graph = useStore((s) => s.graph);
   const selectedId = useStore((s) => s.selectedNodeId);
-  const [view, setView] = useState<'edit' | 'logs'>('edit');
   const node = graph?.nodes.find((n) => n.id === selectedId);
   if (!graph || !node) return <p className="muted pad">Select a step on the canvas, or double-click empty canvas to add one.</p>;
   return (
     <div className="node-panel">
-      <div className="subtabs">
-        <button className={view === 'edit' ? 'active' : ''} onClick={() => setView('edit')}>
-          Edit
-        </button>
-        <button className={view === 'logs' ? 'active' : ''} onClick={() => setView('logs')}>
-          Logs
-        </button>
-      </div>
-      {view === 'edit' ? <NodeEditor key={node.id} graphId={graph.id} node={node} /> : <NodeLogs node={node} />}
+      <NodeEditor key={node.id} graphId={graph.id} node={node} />
     </div>
   );
 }
@@ -135,39 +124,5 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
         </button>
       </div>
     </>
-  );
-}
-
-function NodeLogs({ node }: { node: GraphNode }) {
-  const run = useStore((s) => s.run);
-  const state = run?.nodes[node.id];
-  const key = run ? logKey(run.id, node.id) : '';
-  const events = useStore((s) => (key ? s.logs[key] : undefined));
-  const runId = run?.id;
-  const hasState = state !== undefined;
-  const loaded = events !== undefined;
-  useEffect(() => {
-    if (runId && hasState && !loaded) send({ type: 'getNodeLogs', runId, nodeId: node.id });
-  }, [runId, node.id, hasState, loaded]);
-
-  if (!run || !state) return <p className="muted">This step has no logs in the selected run.</p>;
-  const sourceRunId = run.sourceRunId;
-  return (
-    <div className="logs">
-      <div className="log-status">
-        Run {run.id} · <b>{statusLabel(state.status)}</b>
-        {state.durationMs !== undefined && ` · ${fmtDuration(state.durationMs)}`}
-        {state.error && <div className="error">{state.error}</div>}
-        {state.status === 'reused' && sourceRunId && (
-          <div>
-            Reused from run {sourceRunId}.{' '}
-            <button className="link" onClick={() => send({ type: 'selectRun', runId: sourceRunId })}>
-              Open that run
-            </button>
-          </div>
-        )}
-      </div>
-      {events ? <LogView events={events} /> : <p className="muted">Loading…</p>}
-    </div>
   );
 }

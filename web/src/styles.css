@@ -54,7 +54,13 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .banner { padding: 8px 12px; background: rgba(180, 35, 24, 0.1); color: var(--danger); border-bottom: 1px solid var(--border); }
 .main { flex: 1; display: flex; min-height: 0; }
 
-.canvas { flex: 1; position: relative; min-width: 0; }
+.workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.canvas { flex: 1; position: relative; min-width: 0; min-height: 0; }
+.logs-panel { height: 35%; min-height: 160px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
+.logs-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.logs-head .link { color: var(--muted); text-decoration: none; font-size: 14px; }
+.logs-body { flex: 1; overflow: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.logs-body .error { color: var(--danger); }
 .canvas-toolbar { position: absolute; z-index: 5; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; }
 .stale { font-size: 12px; color: var(--warn); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--muted); }
@@ -91,15 +97,12 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .chat-input textarea { min-height: 60px; }
 
 .node-panel { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-.subtabs { display: flex; gap: 6px; }
-.subtabs button.active { border-color: var(--accent); color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: 12px; color: var(--muted); }
 .notice { font-size: 12px; color: var(--warn); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.logs { display: flex; flex-direction: column; gap: 8px; }
-.log-status .error, .ev.error, .ev.final.error, .ev.result.error { color: var(--danger); }
+.ev.error, .ev.final.error, .ev.result.error { color: var(--danger); }
 .logview { display: flex; flex-direction: column; gap: 6px; }
 .ev { font-size: 13px; }
 .ev .t { color: var(--muted); font-size: 11px; margin-right: 6px; }
