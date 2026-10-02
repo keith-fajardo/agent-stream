@@ -25,6 +25,7 @@ export function summarizeGraph(graph: Graph) {
   return {
     goal: graph.goal,
     instructions: graph.instructions,
+    variables: graph.variables.map(({ name, description }) => ({ name, description })),
     nodes: graph.nodes.map(({ id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy }) => ({
       id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy,
     })),
@@ -94,6 +95,19 @@ export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
       'Set the instructions & context: longer guidance every agent step receives after the goal (targets, conventions, what never to touch).',
       { instructions: z.string() },
       async ({ instructions }) => outcome(apply({ type: 'setInstructions', instructions }), 'Instructions updated.'),
+    ),
+    tool(
+      'set_variable',
+      'Define a variable steps can use as {{ name }} (Jinja), or change its description. The user sets its value on their machine; you never see values.',
+      { name: z.string(), description: z.string().optional() },
+      async ({ name, description }) => {
+        const exists = d.graphStore.get(d.graphId).variables.some((v) => v.name === name);
+        if (exists) return outcome(apply({ type: 'setVariableDescription', name, description: description ?? '' }), `Updated variable ${name}.`);
+        return outcome(apply({ type: 'addVariable', name, description }), `Added variable ${name}. Ask the user to set its value (Variables menu).`);
+      },
+    ),
+    tool('delete_variable', 'Remove a variable definition. Steps still using it fail the run check until updated.', { name: z.string() }, async ({ name }) =>
+      outcome(apply({ type: 'deleteVariable', name }), `Deleted variable ${name}.`),
     ),
     tool(
       'request_run',

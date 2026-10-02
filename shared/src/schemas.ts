@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { topoOrder } from './graph';
+import { variableNameProblem } from './variables';
 import type { ClientMessage, Graph, GraphResult } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
@@ -25,6 +26,7 @@ const graphSchema = z.object({
   name: z.string(),
   goal: z.string().default(''),
   instructions: z.string().default(''),
+  variables: z.array(z.object({ name: z.string(), description: z.string().default('') })).default([]),
   nodes: z.array(graphNodeSchema).default([]),
   edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
   nodeSeq: z.number().int().nonnegative().default(0),
@@ -48,6 +50,10 @@ export function parseGraph(json: unknown): GraphResult {
     const key = `${e.from}->${e.to}`;
     if (seen.has(key)) return { ok: false, error: `duplicate edge ${e.from} -> ${e.to}` };
     seen.add(key);
+  }
+  for (let i = 0; i < graph.variables.length; i++) {
+    const problem = variableNameProblem(graph.variables[i].name, graph.variables.slice(0, i));
+    if (problem) return { ok: false, error: `invalid variable: ${problem}` };
   }
   if (topoOrder(graph).length !== graph.nodes.length) return { ok: false, error: 'the graph has a cycle' };
   return { ok: true, graph };
@@ -79,6 +85,10 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('disconnect'), from: z.string(), to: z.string() }),
   z.object({ type: z.literal('setGoal'), goal: z.string() }),
   z.object({ type: z.literal('setInstructions'), instructions: z.string() }),
+  z.object({ type: z.literal('addVariable'), name: z.string(), description: z.string().optional() }),
+  z.object({ type: z.literal('renameVariable'), name: z.string(), newName: z.string() }),
+  z.object({ type: z.literal('setVariableDescription'), name: z.string(), description: z.string() }),
+  z.object({ type: z.literal('deleteVariable'), name: z.string() }),
   z.object({ type: z.literal('moveNode'), id: z.string(), position }),
 ]);
 

@@ -19,7 +19,7 @@ How the graph works:
 - Agent nodes ask the user before every file edit or shell command. Command nodes run exactly as written once the user starts the run.
 
 How to work:
-- Build and change plans only through the graph tools (add_node, update_node, delete_node, connect, disconnect, set_goal, set_instructions). Do not just describe a plan in chat.
+- Build and change plans only through the graph tools (add_node, update_node, delete_node, connect, disconnect, set_goal, set_instructions, set_variable, delete_variable). Do not just describe a plan in chat.
 - The goal and the instructions (set_instructions) are given to every agent step. Put shared guidance there (targets, conventions, what never to touch) instead of repeating it in each step.
 - Use the read-only tools (Read, Glob, Grep) to ground the plan in the actual project.
 - Prefer command nodes for anything that must be reproducible: builds, test runs, timings, queries, diffs. Use agent nodes for judgment: writing code or SQL, analysing results, summarising.
@@ -27,7 +27,14 @@ How to work:
 - Command nodes never receive upstream output as input. If a command needs something an agent produced, have the agent write it to a file and have the command read that file.
 - The user edits the same graph. Respect their edits; you will be told what they changed since your last turn.
 - You cannot start runs. Use request_run to ask the user, and get_run to read results when debugging.
-- Keep chat replies short; the graph is the plan.`;
+- Keep chat replies short; the graph is the plan.
+
+Variables and templates:
+- Steps, the goal and the instructions are Jinja templates. {{ name }} inserts a graph variable; define it with set_variable. The user sets values on their own machine; you never see them, and they are never exported.
+- {{ env_var('NAME', 'default') }} reads an environment variable on the user's machine.
+- In command steps every {{ ... }} value is shell-quoted automatically. Write {{ flags | unquoted }} only for a value that must expand to several arguments, and keep {{ }} outside quoted strings.
+- Values "true" and "false" are booleans, so {% if full_refresh %}--full-refresh{% endif %} works.
+- dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so claude-stream leaves it alone.`;
 
 export function describeOp(op: Op): string {
   switch (op.type) {
@@ -45,6 +52,14 @@ export function describeOp(op: Op): string {
       return `set the goal to "${op.goal}"`;
     case 'setInstructions':
       return 'changed the instructions';
+    case 'addVariable':
+      return `added variable ${op.name}`;
+    case 'renameVariable':
+      return `renamed variable ${op.name} to ${op.newName}`;
+    case 'setVariableDescription':
+      return `changed the description of variable ${op.name}`;
+    case 'deleteVariable':
+      return `deleted variable ${op.name}`;
     case 'moveNode':
       return `moved ${op.id}`;
   }

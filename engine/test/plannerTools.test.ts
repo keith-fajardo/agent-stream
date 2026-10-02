@@ -32,7 +32,7 @@ function setup() {
 describe('planner graph tools', () => {
   it('exposes the documented tools', () => {
     expect(setup().tools.map((t) => t.name)).toEqual([
-      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'request_run', 'get_run',
+      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run',
     ]);
   });
 
@@ -77,6 +77,7 @@ describe('planner graph tools', () => {
     expect(JSON.parse((await s.call('get_graph')).text)).toEqual({
       goal: '',
       instructions: '',
+      variables: [],
       nodes: [
         { id: 'n1', title: 'Build', kind: 'command', command: 'dbt build', createdBy: 'agent', updatedBy: 'agent' },
         { id: 'n2', title: 'Check', kind: 'agent', prompt: 'check', createdBy: 'agent', updatedBy: 'agent' },
@@ -121,5 +122,18 @@ describe('planner graph tools', () => {
     expect(s.graphStore.get(s.graphId).instructions).toBe('Use target dev.');
     expect(JSON.parse((await s.call('get_graph')).text).instructions).toBe('Use target dev.');
     expect(s.graphStore.readOps(s.graphId).at(-1)).toMatchObject({ by: 'agent', op: { type: 'setInstructions' } });
+  });
+
+  it('defines, describes and deletes variables, and get_graph lists names and descriptions only', async () => {
+    const s = setup();
+    expect(await s.call('set_variable', { name: 'schema', description: 'Target schema' })).toEqual({
+      text: 'Added variable schema. Ask the user to set its value (Variables menu).',
+      isError: false,
+    });
+    expect(await s.call('set_variable', { name: 'schema', description: 'Where to build' })).toEqual({ text: 'Updated variable schema.', isError: false });
+    expect(JSON.parse((await s.call('get_graph')).text).variables).toEqual([{ name: 'schema', description: 'Where to build' }]);
+    expect((await s.call('set_variable', { name: 'env_var' })).isError).toBe(true);
+    expect(await s.call('delete_variable', { name: 'schema' })).toEqual({ text: 'Deleted variable schema.', isError: false });
+    expect(s.graphStore.get(s.graphId).variables).toEqual([]);
   });
 });

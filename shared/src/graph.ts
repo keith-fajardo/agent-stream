@@ -1,9 +1,10 @@
+import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op } from './types';
 
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function emptyGraph(id: string, name: string, now: string): Graph {
-  return { id, name, goal: '', instructions: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
+  return { id, name, goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
 }
 
 export function edgeId(from: string, to: string): string {
@@ -24,7 +25,12 @@ function definedOnly<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
-export function applyOp(graph: Graph, op: Op, by: Actor, now: string): GraphResult {
+export type ApplyOptions = {
+  /** Rewrites references to a renamed variable inside a template (the engine passes a Jinja-aware one). */
+  rewriteReferences?: (text: string, from: string, to: string) => string;
+};
+
+export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: ApplyOptions = {}): GraphResult {
   const fail = (error: string): GraphResult => ({ ok: false, error });
   const has = (id: string) => graph.nodes.some((n) => n.id === id);
   const done = (patch: Partial<Graph>): GraphResult => ({ ok: true, graph: { ...graph, ...patch, updatedAt: now } });
@@ -84,6 +90,39 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string): GraphResu
       return done({ goal: op.goal });
     case 'setInstructions':
       return done({ instructions: op.instructions });
+    case 'addVariable': {
+      const problem = variableNameProblem(op.name, graph.variables);
+      if (problem) return fail(problem);
+      return done({ variables: [...graph.variables, { name: op.name, description: op.description?.trim() ?? '' }] });
+    }
+    case 'renameVariable': {
+      if (!graph.variables.some((v) => v.name === op.name)) return fail(`variable ${op.name} does not exist`);
+      if (op.newName === op.name) return done({});
+      const problem = variableNameProblem(op.newName, graph.variables);
+      if (problem) return fail(problem);
+      const rewrite = options.rewriteReferences;
+      const text = (s: string | undefined) => (s === undefined || !rewrite ? s : rewrite(s, op.name, op.newName));
+      const nodes = graph.nodes.map((n) => {
+        const prompt = text(n.prompt);
+        const command = text(n.command);
+        if (prompt === n.prompt && command === n.command) return n;
+        return definedOnly<GraphNode>({ ...n, prompt, command, updatedBy: by, updatedAt: now }) as GraphNode;
+      });
+      return done({
+        variables: graph.variables.map((v) => (v.name === op.name ? { ...v, name: op.newName } : v)),
+        nodes,
+        goal: text(graph.goal) ?? '',
+        instructions: text(graph.instructions) ?? '',
+      });
+    }
+    case 'setVariableDescription': {
+      if (!graph.variables.some((v) => v.name === op.name)) return fail(`variable ${op.name} does not exist`);
+      return done({ variables: graph.variables.map((v) => (v.name === op.name ? { ...v, description: op.description.trim() } : v)) });
+    }
+    case 'deleteVariable': {
+      if (!graph.variables.some((v) => v.name === op.name)) return fail(`variable ${op.name} does not exist`);
+      return done({ variables: graph.variables.filter((v) => v.name !== op.name) });
+    }
     case 'moveNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
       return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? { ...n, position: op.position } : n)) });

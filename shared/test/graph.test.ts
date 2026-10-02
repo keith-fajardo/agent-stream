@@ -184,4 +184,48 @@ describe('contentSignature', () => {
     const r = applyOp(g, { type: 'setInstructions', instructions: 'Never touch prod.' }, 'user', T2);
     expect(r.ok && contentSignature(r.graph)).not.toBe(contentSignature(g));
   });
+
+  describe('variables', () => {
+    const withVar = () => {
+      const g = build([agent('a', 'Use {{ schema }}'), cmd('b', 'dbt build --target {{ schema }}')]);
+      const r = applyOp(g, { type: 'addVariable', name: 'schema', description: ' Target schema ' }, 'user', T2);
+      if (!r.ok) throw new Error(r.error);
+      return r.graph;
+    };
+
+    it('starts empty and adds a variable with a trimmed description', () => {
+      expect(emptyGraph('g', 'G', T).variables).toEqual([]);
+      expect(withVar().variables).toEqual([{ name: 'schema', description: 'Target schema' }]);
+    });
+
+    it('refuses invalid or duplicate names', () => {
+      const g = withVar();
+      expect(applyOp(g, { type: 'addVariable', name: 'schema' }, 'user', T2)).toEqual({ ok: false, error: 'A variable named "schema" already exists.' });
+      expect(applyOp(g, { type: 'addVariable', name: 'n1' }, 'user', T2).ok).toBe(false);
+      expect(applyOp(g, { type: 'renameVariable', name: 'nope', newName: 'x' }, 'user', T2)).toEqual({ ok: false, error: 'variable nope does not exist' });
+    });
+
+    it('renames a variable and rewrites references through the given rewriter', () => {
+      const g = { ...withVar(), goal: 'Build in {{ schema }}' };
+      const rewrite = (text: string, from: string, to: string) => text.replaceAll(`{{ ${from} }}`, `{{ ${to} }}`);
+      const r = applyOp(g, { type: 'renameVariable', name: 'schema', newName: 'target_schema' }, 'agent', T2, { rewriteReferences: rewrite });
+      if (!r.ok) throw new Error(r.error);
+      expect(r.graph.variables).toEqual([{ name: 'target_schema', description: 'Target schema' }]);
+      expect(r.graph.nodes.map((n) => n.prompt ?? n.command)).toEqual(['Use {{ target_schema }}', 'dbt build --target {{ target_schema }}']);
+      expect(r.graph.nodes[0]).toMatchObject({ updatedBy: 'agent', updatedAt: T2 });
+      expect(r.graph.goal).toBe('Build in {{ target_schema }}');
+    });
+
+    it('renames only the definition when no rewriter is given', () => {
+      const r = applyOp(withVar(), { type: 'renameVariable', name: 'schema', newName: 'target_schema' }, 'user', T2);
+      expect(r.ok && r.graph.nodes[0].prompt).toBe('Use {{ schema }}');
+    });
+
+    it('changes descriptions and deletes variables', () => {
+      const d = applyOp(withVar(), { type: 'setVariableDescription', name: 'schema', description: 'Where to build' }, 'user', T2);
+      expect(d.ok && d.graph.variables[0].description).toBe('Where to build');
+      const x = applyOp(withVar(), { type: 'deleteVariable', name: 'schema' }, 'user', T2);
+      expect(x.ok && x.graph.variables).toEqual([]);
+    });
+  });
 });

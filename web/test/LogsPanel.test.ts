@@ -12,7 +12,7 @@ const { LogsPanel } = await import('../src/components/LogsPanel');
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const step = (id: string, title: string) => ({ id, title, kind: 'agent' as const, prompt: 'p', createdBy: 'user' as const, updatedBy: 'user' as const, updatedAt: 't' });
-const graph: Graph = { id: 'g', name: 'G', goal: '', instructions: '', nodes: [step('n1', 'Plan'), step('n2', 'Build new')], edges: [], nodeSeq: 2, updatedAt: 't' };
+const graph: Graph = { id: 'g', name: 'G', goal: '', instructions: '', variables: [], nodes: [step('n1', 'Plan'), step('n2', 'Build new')], edges: [], nodeSeq: 2, updatedAt: 't' };
 const run: RunMeta = {
   id: '20261002-100000-aaaa',
   graphId: 'g',

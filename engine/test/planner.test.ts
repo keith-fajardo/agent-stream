@@ -254,3 +254,12 @@ describe('describeOp for instructions', () => {
     expect(describeOp({ type: 'setInstructions', instructions: 'long text' })).toBe('changed the instructions');
   });
 });
+
+describe('describeOp for variables', () => {
+  it('names the variable', () => {
+    expect(describeOp({ type: 'addVariable', name: 'schema' })).toBe('added variable schema');
+    expect(describeOp({ type: 'renameVariable', name: 'schema', newName: 'target' })).toBe('renamed variable schema to target');
+    expect(describeOp({ type: 'setVariableDescription', name: 'schema', description: 'x' })).toBe('changed the description of variable schema');
+    expect(describeOp({ type: 'deleteVariable', name: 'schema' })).toBe('deleted variable schema');
+  });
+});

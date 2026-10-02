@@ -9,7 +9,7 @@ describe('parseGraph', () => {
   it('fills defaults for a minimal file', () => {
     expect(parseGraph({ id: 'g', name: 'G' })).toEqual({
       ok: true,
-      graph: { id: 'g', name: 'G', goal: '', instructions: '', nodes: [], edges: [], nodeSeq: 0, updatedAt: '' },
+      graph: { id: 'g', name: 'G', goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: '' },
     });
   });
 
@@ -77,5 +77,14 @@ describe('format', () => {
   it('loads graph files written before instructions existed', () => {
     const r = parseGraph({ id: 'g', name: 'G' });
     expect(r.ok && r.graph.instructions).toBe('');
+  });
+
+  it('defaults variables and rejects invalid variable names in graph files', () => {
+    const ok = parseGraph({ id: 'g', name: 'G' });
+    expect(ok.ok && ok.graph.variables).toEqual([]);
+    const withDescriptionDefault = parseGraph({ id: 'g', name: 'G', variables: [{ name: 'schema' }] });
+    expect(withDescriptionDefault.ok && withDescriptionDefault.graph.variables).toEqual([{ name: 'schema', description: '' }]);
+    expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'env_var' }] })).toEqual({ ok: false, error: 'invalid variable: "env_var" is a reserved word.' });
+    expect(parseGraph({ id: 'g', name: 'G', variables: [{ name: 'a' }, { name: 'a' }] })).toEqual({ ok: false, error: 'invalid variable: A variable named "a" already exists.' });
   });
 });

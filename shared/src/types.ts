@@ -17,12 +17,15 @@ export type GraphNode = {
 
 export type Edge = { id: string; from: string; to: string };
 
+export type VariableDef = { name: string; description: string };
+
 export type Graph = {
   id: string;
   name: string;
   goal: string;
   /** Longer guidance every agent step and the planner receive after the goal. */
   instructions: string;
+  variables: VariableDef[];
   nodes: GraphNode[];
   edges: Edge[];
   /** Highest node number ever issued, so ids are never reused. */
@@ -59,6 +62,10 @@ export type Op =
   | { type: 'disconnect'; from: string; to: string }
   | { type: 'setGoal'; goal: string }
   | { type: 'setInstructions'; instructions: string }
+  | { type: 'addVariable'; name: string; description?: string }
+  | { type: 'renameVariable'; name: string; newName: string }
+  | { type: 'setVariableDescription'; name: string; description: string }
+  | { type: 'deleteVariable'; name: string }
   | { type: 'moveNode'; id: string; position: Position };
 
 export type OpRecord = { at: string; by: Actor; op: Op };
