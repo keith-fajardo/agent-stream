@@ -12,6 +12,8 @@ export function webviewHtml(p: WebviewPage): string {
     `font-src ${p.cspSource}`,
     `style-src ${p.cspSource} 'unsafe-inline'`,
     `script-src 'nonce-${p.nonce}' ${p.cspSource}`,
+    "base-uri 'none'",
+    "form-action 'none'",
   ].join('; ');
   return [
     '<!doctype html>',

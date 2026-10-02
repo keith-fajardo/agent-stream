@@ -11,6 +11,8 @@ describe('webviewHtml', () => {
     expect(csp).toContain("script-src 'nonce-abc123' vscode-resource:");
     expect(csp).toContain("style-src vscode-resource: 'unsafe-inline'");
     expect(csp).not.toContain('unsafe-eval');
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).toContain("form-action 'none'");
     expect(page()).toContain('<script type="module" nonce="abc123" src="https://x/assets/index.js"></script>');
     expect(page()).toContain('<link rel="stylesheet" href="https://x/assets/index.css" />');
   });
