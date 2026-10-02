@@ -17,7 +17,9 @@ function within(path: string, folder: string): boolean {
 export function privatePathDenial(projectDir: string, toolName: string, input: unknown, privateFiles: readonly string[] = []): string | null {
   const key = toolName === 'Read' ? 'file_path' : toolName === 'Grep' || toolName === 'Glob' ? 'path' : undefined;
   if (!key || typeof input !== 'object' || input === null) return null;
-  const p = (input as Record<string, unknown>)[key];
+  const given = (input as Record<string, unknown>)[key];
+  // A search without a path searches the project folder, which may hold the values file (a home folder opened as the workspace).
+  const p = key === 'path' && (given === undefined || given === null || given === '') ? projectDir : given;
   if (typeof p !== 'string' || p === '') return null;
   const norm = (x: string) => (process.platform === 'win32' ? x.toLowerCase() : x);
   // Claude Code expands a leading ~ to the home folder, where the values file lives.

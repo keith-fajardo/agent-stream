@@ -1,6 +1,7 @@
-import { homedir } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { privatePathDenial } from '../src/privatePaths';
 
 const root = join('/', 'work', 'proj');
@@ -84,6 +85,33 @@ describe('privatePathDenial', () => {
       expect(privatePathDenial(root, 'Read', { file_path }, [values])).toBeNull();
     }
   });
+  describe('a Grep or Glob without a path searches the project folder', () => {
+    const made: string[] = [];
+    const tempDir = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cs-private-'));
+      made.push(dir);
+      return dir;
+    };
+    afterEach(() => {
+      for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('denies it when the project folder holds the values file (a home folder opened as the workspace)', () => {
+      const home = tempDir();
+      const file = join(home, '.claude-stream', 'values', 'x.json');
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, '{}');
+      expect(privatePathDenial(home, 'Grep', { pattern: 'x' }, [file])).toBe(reason);
+      expect(privatePathDenial(home, 'Glob', { pattern: '**/*.json' }, [file])).toBe(reason);
+      expect(privatePathDenial(home, 'Grep', { pattern: 'x', path: '' }, [file])).toBe(reason);
+    });
+
+    it('allows it in an unrelated folder', () => {
+      const file = join(tempDir(), '.claude-stream', 'values', 'x.json');
+      expect(privatePathDenial(tempDir(), 'Grep', { pattern: 'x' }, [file])).toBeNull();
+    });
+  });
+
   it('ignores other tools and odd input', () => {
     expect(privatePathDenial(root, 'Bash', { command: `cat ${values}` }, [values])).toBeNull();
     expect(privatePathDenial(root, 'Read', null, [values])).toBeNull();
