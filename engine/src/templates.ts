@@ -1,8 +1,16 @@
+import { randomBytes } from 'node:crypto';
 import * as nunjucksModule from 'nunjucks';
 
 type Token = { type: string; value: string; lineno: number; colno: number };
 type AstNode = { typename: string; fields: string[]; value?: unknown; [field: string]: unknown };
+type Runtime = {
+  memberLookup(obj: unknown, val: unknown): unknown;
+  contextOrFrameLookup(context: unknown, frame: unknown, name: string): unknown;
+  markSafe(value: unknown): unknown;
+};
 type NunjucksInternals = {
+  runtime: Runtime;
+  lib: { escape(s: string): string };
   lexer: { lex(src: string): { nextToken(): Token | null } };
   parser: { parse(src: string): AstNode };
 };
@@ -10,6 +18,34 @@ type NunjucksInternals = {
 // Nunjucks is CommonJS; this works whether the bundler hands us the module or its default export.
 const nunjucks = ((nunjucksModule as { default?: unknown }).default ?? nunjucksModule) as typeof nunjucksModule & NunjucksInternals;
 nunjucks.installJinjaCompat();
+
+// Nunjucks is not a sandbox: block the JavaScript escape hatches (`range.constructor(...)`, `__proto__`, ...).
+const BLOCKED_NAMES: ReadonlySet<unknown> = new Set(['constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__']);
+const runtime = nunjucks.runtime;
+const memberLookup = runtime.memberLookup;
+const contextOrFrameLookup = runtime.contextOrFrameLookup;
+runtime.memberLookup = function (this: unknown, obj: unknown, val: unknown) {
+  return BLOCKED_NAMES.has(val) ? undefined : memberLookup.call(this, obj, val);
+};
+runtime.contextOrFrameLookup = function (this: unknown, context: unknown, frame: unknown, name: string) {
+  return BLOCKED_NAMES.has(name) ? undefined : contextOrFrameLookup.call(this, context, frame, name);
+};
+
+// Command rendering: with autoescape on, Nunjucks sends every `{{ }}` output through lib.escape (unless it is
+// marked safe). During a command render that hook records the value and returns a placeholder; the placeholders
+// are then replaced by the value quoted for the shell context they landed in. Quoting protects how the shell
+// parses the command line; commands that re-parse their arguments as shell (eval, sh -c, ssh) are the author's
+// responsibility.
+type ActiveRender = { nonce: string; values: string[]; placeholder: RegExp };
+let activeRender: ActiveRender | undefined;
+const originalEscape = nunjucks.lib.escape;
+nunjucks.lib.escape = (s: string) => {
+  const r = activeRender;
+  if (!r) return originalEscape(s);
+  const raw = s.replace(r.placeholder, (_m, i: string) => r.values[Number(i)]); // set-block captures: quote once
+  r.values.push(raw);
+  return `\u0000${r.nonce}:${r.values.length - 1}\u0000`;
+};
 
 /** Names every template may use without defining them as graph variables. */
 export const TEMPLATE_GLOBALS: ReadonlySet<string> = new Set(['env_var', 'range', 'cycler', 'joiner', 'loop', 'True', 'False', 'None']);
@@ -61,22 +97,6 @@ function tagsOf(src: string): Tag[] {
     out.push({ kind: t.type === 'variable-start' ? 'variable' : 'block', open: t, close: all[j], inner });
   }
   return out;
-}
-
-/** Rewrites each `{{ expr }}` to `{{ (expr) | _shq }}` unless its last filter is `unquoted`. */
-export function quoteCommandTemplate(src: string): string {
-  let out = '';
-  let pos = 0;
-  for (const tag of tagsOf(src)) {
-    if (tag.kind !== 'variable') continue;
-    const significant = tag.inner.filter((x) => x.type !== 'whitespace');
-    const n = significant.length;
-    if (n >= 2 && significant[n - 2].type === 'pipe' && significant[n - 1].type === 'symbol' && significant[n - 1].value === 'unquoted') continue;
-    const exprStart = tag.open.offset + tag.open.value.length;
-    out += `${src.slice(pos, exprStart)} (${src.slice(exprStart, tag.close.offset).trim()}) | _shq `;
-    pos = tag.close.offset;
-  }
-  return out + src.slice(pos);
 }
 
 /** Renames symbol references to a variable inside tags (not attributes after `.` or filter names after `|`). */
@@ -177,19 +197,91 @@ export function templateErrorMessage(e: unknown): string {
   return where ? `line ${where[1]}: ${message}` : message;
 }
 
+const REFUSE_BACKSLASH = 'A \\ right before {{ }} would cancel its quoting. Remove the backslash.';
+const REFUSE_SUBSTITUTION = "{{ }} inside a command substitution within double quotes can't be quoted safely. Move it outside the quotes.";
+const REFUSE_HEREDOC = "{{ }} after a heredoc (<<) can't be quoted safely. Pass the value as an argument instead.";
+
+/** Replaces each placeholder with its value quoted for the POSIX quoting context it landed in. */
+function quotePlaceholders(rendered: string, r: ActiveRender): string {
+  let out = '';
+  let state: 'out' | 'single' | 'double' = 'out';
+  let doubleStart = 0;
+  let heredoc = false;
+  const marker = `\u0000${r.nonce}:`;
+  for (let i = 0; i < rendered.length; ) {
+    if (rendered.startsWith(marker, i)) {
+      const end = rendered.indexOf('\u0000', i + marker.length);
+      const value = r.values[Number(rendered.slice(i + marker.length, end))];
+      if (state === 'out') {
+        if (heredoc) throw new Error(REFUSE_HEREDOC);
+        out += shellQuote(value);
+      } else if (state === 'single') {
+        out += value.replace(/'/g, `'\\''`);
+      } else {
+        const since = rendered.slice(doubleStart, i);
+        if (since.includes('$(') || since.includes('`')) throw new Error(REFUSE_SUBSTITUTION);
+        out += value.replace(/[\\"$`]/g, '\\$&');
+      }
+      i = end + 1;
+      continue;
+    }
+    const c = rendered[i];
+    if (state === 'single') {
+      if (c === "'") state = 'out';
+    } else if (c === '\\') {
+      if (rendered.startsWith(marker, i + 1)) throw new Error(REFUSE_BACKSLASH);
+      out += rendered.slice(i, i + 2);
+      i += 2;
+      continue;
+    } else if (state === 'double') {
+      if (c === '"') state = 'out';
+    } else if (c === "'") {
+      state = 'single';
+    } else if (c === '"') {
+      state = 'double';
+      doubleStart = i + 1;
+    } else if (c === '<' && rendered[i + 1] === '<') {
+      if (rendered[i + 2] === '<') {
+        out += '<<<';
+        i += 3;
+        continue;
+      }
+      heredoc = true;
+      out += '<<';
+      i += 2;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 export function renderTemplate(src: string, o: RenderOptions): string {
+  const command = o.mode === 'command';
   // No loaders: {% include %}, {% import %} and {% extends %} can't read files.
-  const env = new nunjucks.Environment([], { autoescape: false, throwOnUndefined: true });
-  env.addFilter('unquoted', (value: unknown) => value);
-  env.addFilter('_shq', (value: unknown) => {
-    if (value === undefined || value === null) throw new Error('attempted to output null or undefined value');
-    return shellQuote(String(value));
-  });
+  const env = new nunjucks.Environment([], { autoescape: command, throwOnUndefined: true });
+  env.addFilter('unquoted', (value: unknown) => (command && value !== undefined && value !== null ? nunjucks.runtime.markSafe(String(value)) : value));
+  if (command) {
+    env.addFilter('safe', () => {
+      throw new Error('Use | unquoted to insert a value without quotes.');
+    });
+  }
   env.addGlobal('env_var', (name: unknown, fallback?: unknown) => {
     const value = o.env(String(name));
     if (value !== undefined) return value;
     if (fallback !== undefined) return String(fallback);
     throw new Error(`environment variable ${String(name)} is not set on this machine`);
   });
-  return env.renderString(o.mode === 'command' ? quoteCommandTemplate(src) : src, o.context);
+  if (!command) return env.renderString(src, o.context);
+  const nonce = randomBytes(8).toString('hex');
+  const render: ActiveRender = { nonce, values: [], placeholder: new RegExp(`\u0000${nonce}:(\\d+)\u0000`, 'g') };
+  let rendered: string;
+  activeRender = render;
+  try {
+    rendered = env.renderString(src, o.context);
+  } finally {
+    activeRender = undefined;
+  }
+  return quotePlaceholders(rendered, render);
 }

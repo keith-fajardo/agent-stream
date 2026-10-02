@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { quoteCommandTemplate, renameReferences, renderTemplate, shellQuote, templateErrorMessage, templateNames, type EnvLookup } from '../src/templates';
+import { renameReferences, renderTemplate, shellQuote, templateErrorMessage, templateNames, type EnvLookup } from '../src/templates';
 
 const env: EnvLookup = (name) => ({ HOME: '/home/me', DBT_SCHEMA: 'analytics_dev' })[name];
 const command = (src: string, context: Record<string, unknown> = {}) => renderTemplate(src, { mode: 'command', context, env });
@@ -60,12 +61,6 @@ describe('renderTemplate', () => {
   });
 });
 
-describe('quoteCommandTemplate', () => {
-  it('wraps each expression in the quoting filter', () => {
-    expect(quoteCommandTemplate('a {{ x }} b {{ y | unquoted }}')).toBe('a {{ (x) | _shq }} b {{ y | unquoted }}');
-  });
-});
-
 describe('templateNames', () => {
   it('lists names a template uses but does not define', () => {
     const src =
@@ -94,5 +89,62 @@ describe('renameReferences', () => {
   it('works across lines and returns broken templates unchanged', () => {
     expect(renameReferences('line\r\n  {{ schema }}', 'schema', 'target')).toBe('line\r\n  {{ target }}');
     expect(renameReferences('{{ "unterminated', 'schema', 'target')).toBe('{{ "unterminated');
+  });
+});
+
+describe('command quoting by shell context', () => {
+  it('quotes values even when raw blocks hold unbalanced tags', () => {
+    // The raw text's lone `"` opens a double quote, so the value is escaped for that context (the shell then rejects the unterminated quote).
+    expect(command('echo {% raw %}{{ " }}{% endraw %} {{ v }}', { v: 'a b' })).toBe('echo {{ " }} a b');
+    expect(command('printf %s {% raw %}{{ "{% endraw %}" }}{{ v }}', { v: '$(echo PWNED)' })).toBe(`printf %s {{ "" }}'$(echo PWNED)'`);
+  });
+
+  it('only exempts the value | unquoted is applied to', () => {
+    expect(command('echo {{ v ~ w | unquoted }}', { v: 'x;', w: ' echo INJECTED' })).toBe(`echo 'x; echo INJECTED'`);
+    expect(command('echo {{ v if c else w | unquoted }}', { v: 'x;', w: 'y z', c: true })).toBe(`echo 'x;'`);
+  });
+
+  it('does not repair syntax errors', () => {
+    expect(() => command('echo {{ v) ~ (w }}', { v: 'a', w: 'b' })).toThrow();
+  });
+
+  it('adapts to quotes the author wrote around the expression', () => {
+    expect(command(`printf %s '{{ v }}'`, { v: `it's $(x)` })).toBe(`printf %s 'it'\\''s $(x)'`);
+    expect(command('printf %s "{{ v }}"', { v: 'a"$b`c\\' })).toBe('printf %s "a\\"\\$b\\`c\\\\"');
+    expect(command(`dbt run --vars '{"schema": "{{ v }}"}'`, { v: 'dev' })).toBe(`dbt run --vars '{"schema": "dev"}'`);
+  });
+
+  it('refuses contexts it cannot quote safely', () => {
+    expect(error(() => command('echo \\{{ v }}', { v: 'x' }))).toBe('A \\ right before {{ }} would cancel its quoting. Remove the backslash.');
+    expect(error(() => command('echo "$(cat {{ f }})"', { f: 'x' }))).toBe("{{ }} inside a command substitution within double quotes can't be quoted safely. Move it outside the quotes.");
+    expect(error(() => command('cat <<EOF\n{{ v }}\nEOF', { v: 'x' }))).toBe("{{ }} after a heredoc (<<) can't be quoted safely. Pass the value as an argument instead.");
+    expect(command('cat <<<{{ v }}', { v: 'a b' })).toBe(`cat <<<'a b'`);
+  });
+
+  it('quotes a {% set %} capture once', () => {
+    expect(command('{% set s %}{{ v }}-x{% endset %}echo {{ s }}', { v: 'a b' })).toBe(`echo 'a b-x'`);
+  });
+
+  it('refuses | safe in commands', () => {
+    expect(error(() => command('echo {{ v | safe }}', { v: 'x' }))).toBe('Use | unquoted to insert a value without quotes.');
+  });
+
+  it('keeps error lines identical in both modes', () => {
+    const src = '{{\n v\n}}\n{% bogus %}';
+    expect(error(() => command(src, { v: 'x' }))).toBe(error(() => text(src, { v: 'x' })));
+  });
+});
+
+describe('sandbox', () => {
+  it.each([`{{ range.constructor("return 1")() }}`, `{{ "".constructor }}`, `{{ constructor }}`, `{{ x.__proto__ }}`])('blocks %s', (src) => {
+    expect(() => text(src, { x: {} })).toThrow();
+    expect(() => command(src, { x: {} })).toThrow();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('real shell', () => {
+  const v = `x'; echo PWNED; '$(echo PWNED)"\`id`;
+  it.each([`printf '%s|' {{ v }}`, `printf '%s|' '{{ v }}'`, `printf '%s|' "{{ v }}"`])('runs %s without executing the value', (src) => {
+    expect(execFileSync('/bin/sh', ['-c', command(src, { v })]).toString()).toBe(`${v}|`);
   });
 });
