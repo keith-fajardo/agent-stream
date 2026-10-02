@@ -87,14 +87,37 @@ describe('client state', () => {
 
   it('keeps the open graph’s variable values and the preview for the open dialog', () => {
     const preview = { graphId: 'a', problems: [], warnings: [], steps: [], variables: [], signature: 's' };
-    const s = apply(opened(graph('a'), { variableValues: { schema: 'dev' } }), { kind: 'openConfirm', request: {} });
+    const s = apply(opened(graph('a'), { variableValues: { schema: 'dev' } }), { kind: 'openConfirm', request: {} }, { kind: 'previewRequested', requestId: 'p1' });
     expect(s.variableValues).toEqual({ schema: 'dev' });
     expect(reduce(s, server({ type: 'variableValues', graphId: 'b', values: {} })).variableValues).toEqual({ schema: 'dev' });
     expect(reduce(s, server({ type: 'variableValues', graphId: 'a', values: { schema: 'prod' } })).variableValues).toEqual({ schema: 'prod' });
-    const withPreview = reduce(s, server({ type: 'runPreview', preview }));
+    const withPreview = reduce(s, server({ type: 'runPreview', preview, requestId: 'p1' }));
     expect(withPreview.preview).toEqual(preview);
     expect(reduce(withPreview, { kind: 'closeConfirm' }).preview).toBeUndefined();
-    expect(reduce(apply(opened(graph('a'))), server({ type: 'runPreview', preview })).preview).toBeUndefined(); // no dialog open
+    expect(reduce(apply(opened(graph('a'))), server({ type: 'runPreview', preview, requestId: 'p1' })).preview).toBeUndefined(); // no dialog open
+  });
+
+  it('never keeps a stale preview', () => {
+    const preview = { graphId: 'a', problems: [], warnings: [], steps: [], variables: [], signature: 's' };
+    const open = apply(opened(graph('a')), { kind: 'openConfirm', request: {} }, { kind: 'previewRequested', requestId: 'p1' });
+    const shown = reduce(open, server({ type: 'runPreview', preview, requestId: 'p1' }));
+    expect(shown.preview).toEqual(preview);
+    expect(reduce(shown, server({ type: 'graph', graph: graph('a', ['n1']) })).preview).toBeUndefined();
+    expect(reduce(shown, server({ type: 'variableValues', graphId: 'a', values: { x: '1' } })).preview).toBeUndefined();
+    expect(reduce(shown, server({ type: 'variableValues', graphId: 'b', values: {} })).preview).toEqual(preview);
+    const closed = apply(opened(graph('a')));
+    expect(reduce(closed, server({ type: 'graph', graph: graph('a', ['n1']) })).preview).toBeUndefined();
+    expect(reduce(closed, { kind: 'previewRequested', requestId: 'p9' }).previewRequestId).toBe('p9');
+    expect(reduce(shown, { kind: 'closeConfirm' }).previewRequestId).toBeUndefined();
+  });
+
+  it('accepts only the reply to the latest preview request', () => {
+    const preview = { graphId: 'a', problems: [], warnings: [], steps: [], variables: [], signature: 's' };
+    const s1 = apply(opened(graph('a')), { kind: 'openConfirm', request: {} }, { kind: 'previewRequested', requestId: 'p1' });
+    const s2 = reduce(s1, { kind: 'previewRequested', requestId: 'p2' });
+    expect(reduce(s2, server({ type: 'runPreview', preview, requestId: 'p1' })).preview).toBeUndefined();
+    expect(reduce(s2, server({ type: 'runPreview', preview })).preview).toBeUndefined();
+    expect(reduce(s2, server({ type: 'runPreview', preview, requestId: 'p2' })).preview).toEqual(preview);
   });
 
   it('drops the open graph when it is deleted', () => {

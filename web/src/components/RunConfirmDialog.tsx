@@ -2,17 +2,22 @@ import { useEffect } from 'react';
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
+let requestCounter = 0;
+
 /** Shows exactly what will run, as the engine rendered it (spec §7.6); Start sends the preview's signature. */
 export function RunConfirmDialog() {
   const confirm = useStore((s) => s.confirm);
   const graph = useStore((s) => s.graph);
   const preview = useStore((s) => s.preview);
+  const variableValues = useStore((s) => s.variableValues);
 
   useEffect(() => {
     if (confirm && graph) {
-      send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
+      const requestId = `preview-${++requestCounter}`;
+      dispatch({ kind: 'previewRequested', requestId });
+      send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId, requestId });
     }
-  }, [confirm, graph]);
+  }, [confirm, graph, variableValues]);
 
   if (!confirm || !graph) return null;
   const close = () => dispatch({ kind: 'closeConfirm' });

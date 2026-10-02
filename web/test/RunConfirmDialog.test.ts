@@ -25,6 +25,10 @@ const preview = (patch: Partial<RunPreview> = {}): RunPreview => ({
 });
 let container: HTMLDivElement;
 let root: Root;
+const lastRequestId = () => {
+  const calls = vi.mocked(send).mock.calls.filter(([m]) => m.type === 'previewRun');
+  return (calls.at(-1)![0] as { requestId?: string }).requestId;
+};
 const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
 
 beforeEach(async () => {
@@ -40,14 +44,14 @@ afterEach(async () => act(async () => root.unmount()));
 describe('RunConfirmDialog', () => {
   it('asks the engine for a preview when it opens', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: { fromNodeId: 'n2', sourceRunId: 'r1' } }));
-    expect(send).toHaveBeenCalledWith({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r1' });
+    expect(send).toHaveBeenCalledWith({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r1', requestId: expect.any(String) });
     expect(container.textContent).toContain('Checking the run…');
     expect(button('Start run').disabled).toBe(true);
   });
 
   it('shows commands in full, agent prompts folded, the variables used, then starts with the signature', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
-    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview() } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));
     expect(container.querySelector('pre.mono')?.textContent).toBe("dbt build -s 'orders v2'");
     expect(container.querySelector('details summary')?.textContent).toBe('n2 · Check');
     expect(container.querySelector('details pre')?.textContent).toBe('Compare orders and orders_v2.');
@@ -60,11 +64,40 @@ describe('RunConfirmDialog', () => {
   it('lists problems first and blocks Start, and shows warnings', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
     await act(async () =>
-      dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ problems: ['Set a value for model (Variables menu).'], warnings: ['n1 inserts a value without quotes (| unquoted). Check its command below.'] }) } }),
+      dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ problems: ['Set a value for model (Variables menu).'], warnings: ['n1 inserts a value without quotes (| unquoted). Check its command below.'] }), requestId: lastRequestId() } }),
     );
     const text = container.textContent ?? '';
     expect(text.indexOf('Set a value for model (Variables menu).')).toBeLessThan(text.indexOf('dbt build'));
     expect(text).toContain('⚠ n1 inserts a value without quotes');
     expect(button('Start run').disabled).toBe(true);
+  });
+
+  it('goes back to checking when the graph changes, and asks again', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));
+    expect(button('Start run').disabled).toBe(false);
+    const first = lastRequestId();
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: emptyGraph('g', 'G2', 't') } }));
+    expect(container.textContent).toContain('Checking the run…');
+    expect(button('Start run').disabled).toBe(true);
+    expect(lastRequestId()).not.toBe(first);
+  });
+
+  it('asks again with a new request id when a variable value changes', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    const first = lastRequestId();
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: first } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'variableValues', graphId: 'g', values: { model: 'x' } } }));
+    expect(container.textContent).toContain('Checking the run…');
+    expect(lastRequestId()).not.toBe(first);
+    expect(vi.mocked(send).mock.calls.filter(([m]) => m.type === 'previewRun')).toHaveLength(2);
+  });
+
+  it('ignores a reply to an older request', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    const stale = lastRequestId();
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'variableValues', graphId: 'g', values: { model: 'x' } } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: stale } }));
+    expect(container.textContent).toContain('Checking the run…');
   });
 });

@@ -231,7 +231,7 @@ export function createApp(d: AppDeps) {
         if (!r.ok) return error(r.error);
         const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
-        client.send({ type: 'runPreview', preview: p.outcome.preview });
+        client.send({ type: 'runPreview', preview: p.outcome.preview, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
       }
       case 'startRun': {

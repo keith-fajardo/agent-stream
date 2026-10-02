@@ -31,6 +31,8 @@ export type State = {
   confirm?: ConfirmRequest;
   variableValues: Record<string, string>;
   preview?: RunPreview;
+  /** Id of the previewRun request whose reply is the only one the dialog will show. */
+  previewRequestId?: string;
   selectedNodeId?: string;
   tab: Tab;
   toast?: string;
@@ -48,6 +50,7 @@ export type Action =
   | { kind: 'setTab'; tab: Tab }
   | { kind: 'openConfirm'; request: ConfirmRequest }
   | { kind: 'closeConfirm' }
+  | { kind: 'previewRequested'; requestId: string }
   | { kind: 'dismissToast' }
   | { kind: 'setMinimap'; value: boolean }
   | { kind: 'toggleLogs' }
@@ -67,9 +70,11 @@ export function reduce(state: State, action: Action): State {
     case 'setTab':
       return { ...state, tab: action.tab };
     case 'openConfirm':
-      return { ...state, confirm: action.request, preview: undefined };
+      return { ...state, confirm: action.request, preview: undefined, previewRequestId: undefined };
     case 'closeConfirm':
-      return { ...state, confirm: undefined, preview: undefined };
+      return { ...state, confirm: undefined, preview: undefined, previewRequestId: undefined };
+    case 'previewRequested':
+      return { ...state, preview: undefined, previewRequestId: action.requestId };
     case 'dismissToast':
       return { ...state, toast: undefined };
     case 'toggleLogs':
@@ -96,7 +101,7 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, graphs: msg.graphs };
     case 'graphDeleted':
       return msg.graphId === current
-        ? { ...state, graph: undefined, run: undefined, runs: [], chat: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, toast: 'This graph was deleted.' }
+        ? { ...state, graph: undefined, run: undefined, runs: [], chat: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
         : state;
     case 'graphOpened':
       return {
@@ -110,12 +115,13 @@ function reduceServer(state: State, msg: HostMessage): State {
         confirm: undefined,
         variableValues: msg.variableValues,
         preview: undefined,
+        previewRequestId: undefined,
         selectedNodeId: current === msg.graph.id ? state.selectedNodeId : undefined,
       };
     case 'graph': {
       if (msg.graph.id !== current) return state;
       const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);
-      return { ...state, graph: msg.graph, selectedNodeId: stillThere ? state.selectedNodeId : undefined };
+      return { ...state, graph: msg.graph, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
     }
     case 'opRejected':
       return msg.graphId === current ? { ...state, toast: msg.error } : state;
@@ -148,15 +154,21 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'confirmRun':
       return msg.graphId === current ? { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId } } : state;
     case 'variableValues':
-      return msg.graphId === current ? { ...state, variableValues: msg.values } : state;
+      return msg.graphId === current ? { ...state, variableValues: msg.values, preview: undefined } : state;
     case 'runPreview':
-      return state.confirm && msg.preview.graphId === current && msg.preview.fromNodeId === state.confirm.fromNodeId ? { ...state, preview: msg.preview } : state;
+      return state.confirm &&
+        state.previewRequestId !== undefined &&
+        msg.requestId === state.previewRequestId &&
+        msg.preview.graphId === current &&
+        msg.preview.fromNodeId === state.confirm.fromNodeId
+        ? { ...state, preview: msg.preview }
+        : state;
     case 'error':
       return { ...state, toast: msg.message };
     case 'revealNode':
       return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, selectedNodeId: msg.nodeId, tab: 'node' } : state;
     case 'openRunDialog':
-      return { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId }, preview: undefined };
+      return { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId }, preview: undefined, previewRequestId: undefined };
     case 'openVariables':
       return { ...state, variablesDialog: {} };
     case 'prefs':

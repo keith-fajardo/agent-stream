@@ -59,6 +59,16 @@ describe('app', () => {
     });
   });
 
+  it('echoes the preview request id in its reply', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    await app.handle(a.c, { type: 'previewRun', graphId: g.id, requestId: 'r1' });
+    expect(a.of('runPreview').at(-1)?.requestId).toBe('r1');
+    await app.handle(a.c, { type: 'previewRun', graphId: g.id });
+    expect(a.of('runPreview').at(-1)).not.toHaveProperty('requestId');
+  });
+
   it('creates graphs, applies user ops and broadcasts the new graph', async () => {
     const { app, client } = setup();
     const a = client();

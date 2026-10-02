@@ -192,7 +192,7 @@ export type ServerMessage =
   | { type: 'chatEntry'; graphId: string; entry: ChatEntry }
   | { type: 'chatBusy'; graphId: string; busy: boolean }
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
-  | { type: 'runPreview'; preview: RunPreview }
+  | { type: 'runPreview'; preview: RunPreview; requestId?: string }
   | { type: 'variableValues'; graphId: string; values: Record<string, string> }
   | { type: 'error'; message: string };
 
@@ -203,7 +203,7 @@ export type ClientMessage =
   | { type: 'chat'; graphId: string; text: string }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
   | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string }
-  | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestId?: string }
   | { type: 'setVariableValue'; graphId: string; name: string; value: string }
   | { type: 'stopRun'; runId: string }
   | { type: 'selectRun'; runId: string }

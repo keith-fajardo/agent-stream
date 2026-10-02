@@ -41,6 +41,8 @@ describe('parseWebviewMessage', () => {
     const msg = { type: 'op', graphId: 'g', op: { type: 'connect', from: 'n1', to: 'n2' } };
     expect(parseWebviewMessage(msg)).toEqual({ ok: true, kind: 'engine', msg });
     expect(parseWebviewMessage({ type: 'previewRun', graphId: 'g', fromNodeId: 'n2', sourceRunId: 'r' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'previewRun', graphId: 'g', requestId: 'p1' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'previewRun', graphId: 'g', requestId: 'x'.repeat(65) }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'dev' }).ok).toBe(true);
   });
 
