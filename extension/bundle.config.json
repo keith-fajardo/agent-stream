@@ -1,0 +1,10 @@
+{
+  "bundle": true,
+  "platform": "node",
+  "format": "cjs",
+  "target": "node20",
+  "sourcemap": true,
+  "logLevel": "warning",
+  "define": { "import.meta.url": "__cs_import_meta_url" },
+  "banner": { "js": "const __cs_import_meta_url = require('node:url').pathToFileURL(__filename).href;" }
+}

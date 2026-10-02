@@ -1,0 +1,56 @@
+{
+  "name": "claude-stream",
+  "displayName": "Claude Stream",
+  "description": "Co-create a workflow graph with a Claude planner and run it step by step on your Claude subscription.",
+  "version": "0.2.0",
+  "publisher": "claude-stream-local",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "vscode": "^1.100.0" },
+  "extensionKind": ["workspace"],
+  "categories": ["Other"],
+  "main": "./dist/extension.cjs",
+  "activationEvents": ["workspaceContains:.claude-stream/graphs/*.json"],
+  "contributes": {
+    "configuration": {
+      "title": "Claude Stream",
+      "properties": {
+        "claudeStream.claudePath": {
+          "type": "string",
+          "default": "",
+          "description": "Full path to Claude Code (claude, or claude.exe on Windows). Leave empty to find it automatically."
+        },
+        "claudeStream.gitBashPath": {
+          "type": "string",
+          "default": "",
+          "description": "Windows only: full path to Git Bash (bash.exe), used for command steps. Leave empty to find it automatically."
+        },
+        "claudeStream.maxParallel": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "How many steps of a run may run at the same time."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "build:all": "cd .. && npm run build",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license && node scripts/check-vsix.mjs",
+    "test": "vitest run",
+    "test:integration": "npm run build:all && node test/integration/runTest.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@claude-stream/engine": "*",
+    "@claude-stream/shared": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "~1.100.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2"
+  }
+}

@@ -6,10 +6,12 @@
   "workspaces": [
     "shared",
     "engine",
-    "web"
+    "web",
+    "extension"
   ],
   "scripts": {
-    "build": "npm run build -w web",
+    "build": "npm run build -w web && npm run build -w extension",
+    "package": "npm run build && npm run package -w extension",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
