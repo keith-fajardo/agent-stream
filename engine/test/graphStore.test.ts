@@ -113,6 +113,15 @@ describe('GraphStore', () => {
     expect(changed).not.toHaveBeenCalled();
     expect(store.readOps(id)).toEqual([]);
   });
+
+  it('rewrites Jinja references when a variable is renamed', () => {
+    const store = new GraphStore(tmpProject(), fixedClock());
+    const { id } = store.create('G');
+    store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'command', command: 'dbt build --target {{ schema }} # schema' } }, 'user');
+    store.apply(id, { type: 'addVariable', name: 'schema' }, 'user');
+    expect(store.apply(id, { type: 'renameVariable', name: 'schema', newName: 'target_schema' }, 'user').ok).toBe(true);
+    expect(store.get(id).nodes[0].command).toBe('dbt build --target {{ target_schema }} # schema');
+  });
 });
 
 describe('ChatLog', () => {

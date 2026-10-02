@@ -16,6 +16,7 @@ import {
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import { isGraphId, type ProjectPaths } from './paths';
+import { renameReferences } from './templates';
 
 export function slugify(name: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -99,7 +100,7 @@ export class GraphStore extends EventEmitter {
     const at = this.clock();
     const resolved: Op =
       op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(current.graph) } } : op;
-    const r = applyOp(current.graph, resolved, by, at);
+    const r = applyOp(current.graph, resolved, by, at, { rewriteReferences: renameReferences });
     if (!r.ok) return r;
     this.save(r.graph);
     if (resolved.type !== 'moveNode') {
