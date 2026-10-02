@@ -124,4 +124,41 @@ describe('command executor', () => {
     expect(kills).toHaveLength(1);
     expect(kills[0].platform).toBe('win32');
   });
+
+  it('on Windows passes the command through the environment so backslashes and globs survive', async () => {
+    const exec = createCommandExecutor({ platform: 'win32', gitBashPath: '/bin/sh', killTree: () => {} });
+    const out = await exec(ctx("printf '%s|' 'a\\\\b' '*'").c);
+    expect(out).toMatchObject({ ok: true, output: 'a\\\\b|*|' });
+  });
+
+  it('on Windows, Stop settles even when taskkill does nothing and a background process holds the pipes', async () => {
+    const exec = createCommandExecutor({ platform: 'win32', gitBashPath: '/bin/sh', killTree: () => {}, killGraceMs: 100 });
+    const ac = new AbortController();
+    const started = Date.now();
+    const running = exec(ctx('sleep 30 & echo started', { signal: ac.signal }).c);
+    await new Promise((r) => setTimeout(r, 300));
+    ac.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(2500);
+  });
+
+  it('on Windows, does not taskkill a process that already exited', async () => {
+    const killTree = vi.fn();
+    const exec = createCommandExecutor({ platform: 'win32', gitBashPath: '/bin/sh', killTree, killGraceMs: 100 });
+    const ac = new AbortController();
+    const running = exec(ctx('sleep 30 & echo started', { signal: ac.signal }).c);
+    await new Promise((r) => setTimeout(r, 300));
+    ac.abort();
+    await running;
+    expect(killTree).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!existsSync('/usr/bin/setsid') && !existsSync('/bin/setsid'))('settles after Stop when the command escaped its process group', async () => {
+    const exec = createCommandExecutor({ shell: '/bin/sh', killGraceMs: 100 });
+    const ac = new AbortController();
+    const running = exec(ctx('setsid sleep 30 & echo x', { signal: ac.signal }).c);
+    await new Promise((r) => setTimeout(r, 300));
+    ac.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+  });
 });

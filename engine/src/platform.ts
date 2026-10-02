@@ -101,7 +101,7 @@ export function childEnv(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Nod
   return out;
 }
 
-export type ShellSpec = { file: string; args: string[]; detached: boolean; windowsHide: boolean };
+export type ShellSpec = { file: string; args: string[]; detached: boolean; windowsHide: boolean; env?: NodeJS.ProcessEnv };
 
 // Command values are quoted for POSIX shells; fish and others quote differently.
 const POSIX_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh']);
@@ -110,7 +110,7 @@ const posixShell = (shell: string | undefined) => (shell && POSIX_SHELLS.has(pat
 export function commandShell(o: { platform: NodeJS.Platform; env: NodeJS.ProcessEnv; command: string; shell?: string; gitBashPath?: string }): ShellSpec | { error: string } {
   if (o.platform === 'win32') {
     if (!o.gitBashPath) return { error: GIT_BASH_MISSING };
-    return { file: o.gitBashPath, args: ['-lc', o.command], detached: false, windowsHide: true };
+    return { file: o.gitBashPath, args: ['-lc', 'eval "$CLAUDE_STREAM_COMMAND"'], detached: false, windowsHide: true, env: { CLAUDE_STREAM_COMMAND: o.command } };
   }
   return { file: o.shell ?? posixShell(o.env.SHELL), args: ['-lc', o.command], detached: true, windowsHide: false };
 }
@@ -125,7 +125,9 @@ export function killTree(
   o: { platform: NodeJS.Platform; signal: NodeJS.Signals; execFile?: (file: string, args: string[]) => void; kill?: (pid: number, signal: NodeJS.Signals) => void },
 ): void {
   if (o.platform === 'win32') {
-    (o.execFile ?? defaultExecFile)('taskkill', ['/PID', String(pid), '/T', '/F']);
+    // By full path: a bare name could resolve to a taskkill.exe planted in the project folder.
+    const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+    (o.execFile ?? defaultExecFile)(path.win32.join(root, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F']);
     return;
   }
   try {

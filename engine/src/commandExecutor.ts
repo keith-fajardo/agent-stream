@@ -14,6 +14,8 @@ export type CommandExecutorOptions = {
   env?: NodeJS.ProcessEnv;
   /** Replaces the process-tree kill (tests). */
   killTree?: typeof killTree;
+  /** How long Stop waits before forcing the step to settle (default KILL_GRACE_MS; tests use less). */
+  killGraceMs?: number;
 };
 
 /**
@@ -23,6 +25,7 @@ export type CommandExecutorOptions = {
 export function createCommandExecutor(options: CommandExecutorOptions = {}): NodeExecutor {
   const platform = options.platform ?? process.platform;
   const kill = options.killTree ?? killTree;
+  const graceMs = options.killGraceMs ?? KILL_GRACE_MS;
   return (ctx) =>
     new Promise<NodeOutcome>((resolve) => {
       const command = ctx.node.command ?? '';
@@ -43,14 +46,25 @@ export function createCommandExecutor(options: CommandExecutorOptions = {}): Nod
 
       const child = spawn(spec.file, spec.args, {
         cwd: ctx.cwd,
-        env: childEnv(env, platform),
+        env: { ...childEnv(env, platform), ...spec.env },
         detached: spec.detached,
         windowsHide: spec.windowsHide,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       const stopTree = (signal: NodeJS.Signals) => {
-        if (child.pid !== undefined) kill(child.pid, { platform, signal });
+        if (child.pid === undefined) return;
+        // On Windows a finished launcher's PID may be stale or reused: never taskkill it.
+        if (platform === 'win32' && (child.exitCode !== null || child.signalCode !== null)) return;
+        kill(child.pid, { platform, signal });
+      };
+      // 'close' waits for every process holding the pipes, and a command can leave one running
+      // (or escape its process group), so after the grace period the step settles anyway.
+      const forceSettle = () => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        if (timedOut) finish({ ok: false, output, exitCode: null, error: `timed out after ${timeoutSec} s` });
+        else finish({ ok: false, output, exitCode: null, error: 'cancelled' });
       };
       let stopped = false;
       // A timeout and a Stop can both arrive; the tree is stopped once.
@@ -58,8 +72,15 @@ export function createCommandExecutor(options: CommandExecutorOptions = {}): Nod
         if (stopped) return;
         stopped = true;
         stopTree('SIGTERM');
-        // On Windows taskkill /F has already ended the tree; elsewhere force it after a grace period.
-        if (platform !== 'win32') killTimer = setTimeout(() => stopTree('SIGKILL'), KILL_GRACE_MS);
+        if (platform === 'win32') {
+          // taskkill /F has already ended the tree.
+          killTimer = setTimeout(forceSettle, graceMs);
+        } else {
+          killTimer = setTimeout(() => {
+            stopTree('SIGKILL');
+            killTimer = setTimeout(forceSettle, Math.min(500, graceMs));
+          }, graceMs);
+        }
       };
 
       const timer = setTimeout(() => {

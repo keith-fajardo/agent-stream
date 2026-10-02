@@ -73,9 +73,10 @@ describe('commandShell', () => {
     expect(commandShell({ platform: 'linux', env: {}, command: 'x' })).toMatchObject({ file: '/bin/sh' });
     expect(commandShell({ platform: 'win32', env: {}, command: 'dbt build', gitBashPath: 'C:\\Program Files\\Git\\bin\\bash.exe' })).toEqual({
       file: 'C:\\Program Files\\Git\\bin\\bash.exe',
-      args: ['-lc', 'dbt build'],
+      args: ['-lc', 'eval "$CLAUDE_STREAM_COMMAND"'],
       detached: false,
       windowsHide: true,
+      env: { CLAUDE_STREAM_COMMAND: 'dbt build' },
     });
     expect(commandShell({ platform: 'win32', env: {}, command: 'x' })).toEqual({ error: GIT_BASH_MISSING });
   });
@@ -92,7 +93,8 @@ describe('killTree', () => {
   it('uses taskkill on Windows and the process group elsewhere', () => {
     const execFile = vi.fn();
     killTree(42, { platform: 'win32', signal: 'SIGTERM', execFile });
-    expect(execFile).toHaveBeenCalledWith('taskkill', ['/PID', '42', '/T', '/F']);
+    const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+    expect(execFile).toHaveBeenCalledWith(`${root}\\System32\\taskkill.exe`, ['/PID', '42', '/T', '/F']);
     const kill = vi.fn();
     killTree(42, { platform: 'darwin', signal: 'SIGKILL', kill });
     expect(kill).toHaveBeenCalledWith(-42, 'SIGKILL');
