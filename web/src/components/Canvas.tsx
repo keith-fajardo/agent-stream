@@ -1,20 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Background,
   Controls,
-  MarkerType,
   MiniMap,
   ReactFlow,
+  applyEdgeChanges,
   applyNodeChanges,
   useReactFlow,
   type Connection,
   type Edge as FlowEdge,
+  type EdgeChange,
   type NodeChange,
   type OnDelete,
   type XYPosition,
 } from '@xyflow/react';
 import { nextNodeId, type Op, type Position } from '@claude-stream/shared';
-import { buildFlowNodes } from '../flowNodes';
+import { buildFlowEdges, buildFlowNodes } from '../flowNodes';
 import { layoutPositions } from '../layout';
 import { send } from '../socket';
 import { contentSignature } from '../state';
@@ -31,6 +32,7 @@ export function Canvas() {
   const { screenToFlowPosition } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
+  const [edges, setEdges] = useState<FlowEdge[]>([]);
   const runForGraph = run && graph && run.graphId === graph.id ? run : undefined;
 
   const dragging = useRef(new Set<string>());
@@ -45,22 +47,16 @@ export function Canvas() {
         ? buildFlowNodes({ graph, run: runForGraph, approvals, selectedId, selectionChanged, current, dragging: dragging.current, pendingMoves: pendingMoves.current })
         : [],
     );
+    setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current) : []));
   }, [graph, runForGraph, approvals, selectedId]);
-
-  const edges = useMemo<FlowEdge[]>(
-    () =>
-      (graph?.edges ?? []).map((e) => ({
-        id: e.id,
-        source: e.from,
-        target: e.to,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        animated: runForGraph?.nodes[e.to]?.status === 'running',
-      })),
-    [graph, runForGraph],
-  );
 
   const onNodesChange = useCallback(
     (changes: NodeChange<StepFlowNode>[]) => setNodes((current) => applyNodeChanges(changes.filter((c) => c.type !== 'remove'), current)),
+    [],
+  );
+  // Selection changes only; removal goes through onDelete -> a `disconnect` op and comes back from the server.
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<FlowEdge>[]) => setEdges((current) => applyEdgeChanges(changes.filter((c) => c.type !== 'remove'), current)),
     [],
   );
 
@@ -106,6 +102,7 @@ export function Canvas() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         onConnect={(c: Connection) => op({ type: 'connect', from: c.source, to: c.target })}
         onDelete={onDelete}
         onNodeDragStart={(_e, _n, ns) => ns.forEach((n) => dragging.current.add(n.id))}

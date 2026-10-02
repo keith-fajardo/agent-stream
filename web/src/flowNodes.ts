@@ -1,3 +1,4 @@
+import { MarkerType, type Edge as FlowEdge } from '@xyflow/react';
 import type { ApprovalRequest, Graph, Position, RunMeta } from '@claude-stream/shared';
 import type { StepFlowNode } from './components/StepNode';
 import { layoutPositions } from './layout';
@@ -38,4 +39,17 @@ export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
       },
     };
   });
+}
+
+/** React Flow edges for the server graph, keeping local edge selection so Delete can remove a selected edge. */
+export function buildFlowEdges(graph: Graph, run: RunMeta | undefined, current: FlowEdge[]): FlowEdge[] {
+  const previous = new Map(current.map((e) => [e.id, e]));
+  return graph.edges.map((e) => ({
+    id: e.id,
+    source: e.from,
+    target: e.to,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    animated: run?.nodes[e.to]?.status === 'running',
+    selected: previous.get(e.id)?.selected ?? false,
+  }));
 }

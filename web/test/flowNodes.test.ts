@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op, type Position } from '@claude-stream/shared';
-import { buildFlowNodes } from '../src/flowNodes';
+import type { Edge as FlowEdge } from '@xyflow/react';
+import { applyOp, emptyGraph, type Graph, type Op, type Position, type RunMeta } from '@claude-stream/shared';
+import { buildFlowEdges, buildFlowNodes } from '../src/flowNodes';
 import type { StepFlowNode } from '../src/components/StepNode';
 
 function graphOf(ops: Op[]): Graph {
@@ -55,5 +56,34 @@ describe('buildFlowNodes', () => {
     const current = buildFlowNodes({ ...base, graph: two });
     const one = graphOf([add('n1', { x: 0, y: 0 })]);
     expect(buildFlowNodes({ ...base, graph: one, current }).map((n) => n.id)).toEqual(['n1']);
+  });
+});
+
+describe('buildFlowEdges', () => {
+  const link = (from: string, to: string): Op => ({ type: 'connect', from, to });
+  const chain = graphOf([add('n1'), add('n2'), add('n3'), link('n1', 'n2'), link('n2', 'n3')]);
+  const runWith = (graph: Graph, nodes: RunMeta['nodes']): RunMeta => ({ id: 'r', graphId: graph.id, status: 'running', startedAt: 't', snapshot: graph, nodes });
+
+  it('builds arrowed edges and keeps local edge selection across rebuilds', () => {
+    const first = buildFlowEdges(chain, undefined, []);
+    expect(first.map((e) => [e.id, e.source, e.target])).toEqual([
+      ['n1->n2', 'n1', 'n2'],
+      ['n2->n3', 'n2', 'n3'],
+    ]);
+    expect(first[0]!.markerEnd).toEqual({ type: 'arrowclosed' });
+    expect(first.map((e) => e.selected)).toEqual([false, false]);
+    const current: FlowEdge[] = first.map((e) => (e.id === 'n2->n3' ? { ...e, selected: true } : e));
+    expect(buildFlowEdges(chain, undefined, current).map((e) => e.selected)).toEqual([false, true]);
+  });
+
+  it('animates edges into a running node', () => {
+    const run = runWith(chain, { n1: { status: 'succeeded' }, n2: { status: 'running' }, n3: { status: 'pending' } });
+    expect(buildFlowEdges(chain, run, []).map((e) => e.animated)).toEqual([true, false]);
+  });
+
+  it('drops edges that are no longer in the graph', () => {
+    const current = buildFlowEdges(chain, undefined, []).map((e) => ({ ...e, selected: true }));
+    const unlinked = graphOf([add('n1'), add('n2'), add('n3'), link('n1', 'n2')]);
+    expect(buildFlowEdges(unlinked, undefined, current).map((e) => e.id)).toEqual(['n1->n2']);
   });
 });
