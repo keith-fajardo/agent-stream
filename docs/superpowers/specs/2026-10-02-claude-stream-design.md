@@ -91,8 +91,9 @@ claude-stream/
 ```
 
 `shared/` holds everything both sides must agree on, plus pure functions (applying ops,
-cycle detection, topological order) so the browser can apply ops optimistically with
-the same code the server uses.
+cycle detection, topological order, run planning). The server uses them to change the
+graph; the browser reuses run planning so the run confirmation dialog shows exactly which
+nodes will execute.
 
 ### 4.1 Units and their interfaces
 
@@ -123,7 +124,9 @@ type Graph = {
   goal: string;          // shared context given to every agent node and to the planner
   nodes: Node[];
   edges: Edge[];         // { id, from, to } — "to runs after from and receives its output"
+  nodeSeq: number;       // highest node number ever issued; node ids are never reused
   plannerSessionId?: string;
+  plannerOpCursor?: number; // ops-log length when the planner's last turn started
   updatedAt: string;
 };
 
@@ -147,18 +150,20 @@ is appended to `graphs/<name>.ops.jsonl` as `{ at, by: "user" | "agent", op }` (
 `moveNode`: layout is not content, so drags are saved but not logged). That file
 is the audit trail of who changed what.
 
-Validation in `applyOp`: unique node ids, edge endpoints exist, no duplicate edges, no
-cycles (`connect` that would create one is rejected), agent nodes need a non-empty
-`prompt`, command nodes need a non-empty `command`. A rejected op returns an error
-message. The planner's tool returns it as tool output so the agent can correct itself;
+Validation in `applyOp`: unique node ids, non-empty titles, edge endpoints exist, no
+self-edges or duplicate edges, no cycles (`connect` that would create one is rejected).
+Empty prompts and commands are allowed while drafting; a run refuses to start until every
+agent node has a prompt and every command node has a command. A rejected op returns an
+error message. The planner's tool returns it as tool output so the agent can correct itself;
 the UI shows it as a toast.
 
 ## 6. Co-editing
 
 - The server applies ops **sequentially**, one at a time; there is no merge logic. Last
   write wins per node field. With one user and one agent this is sufficient.
-- Every applied op is broadcast to the browser as `graph.op`. The browser applies it with
-  the same `applyOp` from `shared/`. On (re)connect the server sends the full graph.
+- After every applied op the server broadcasts the updated graph to the browser. Graphs
+  are small, so the browser doesn't replay ops. On (re)connect the browser reopens the
+  graph and receives it in full.
 - **Your edits** go browser → server as ops tagged `by: "user"`.
 - **The planner's edits** come from its graph tools, tagged `by: "agent"`. Nodes it
   creates are marked "by agent" on the canvas until you edit them.
@@ -225,8 +230,9 @@ A run takes a frozen snapshot of the graph and gets an id
 command processes get SIGTERM, then SIGKILL after 5 s; pending approvals are cancelled.
 
 **Re-run from node X** starts a new run from the current graph. The new run executes X,
-every descendant of X, and any node that lacks a `succeeded` result in the source run.
-Every other node is `reused`: its output is copied from the source run. This is the
+any node that lacks a `succeeded`/`reused` result in the source run, any node whose kind,
+prompt, command, or upstream edges changed since the source run, and every descendant
+of those. Every other node is `reused`: its output is copied from the source run. This is the
 loop for "edit the failed node's prompt, try again" without re-running the expensive
 upstream work.
 
@@ -312,7 +318,8 @@ On disk, per run:
 `.claude-stream/.gitignore` is created with `runs/`, so graphs can be committed and run
 logs stay local.
 
-**Agent node events:** start, assistant text, tool call (name + input), tool result
+**Agent node events:** start (including the full assembled prompt, so you can audit
+exactly what context the node received), assistant text, tool call (name + input), tool result
 (truncated in the UI with expand), approval requested/decided (who, when, decision,
 note), API retry notices, result (tokens in/out, cache tokens, duration, turns,
 API-equivalent cost estimate).
