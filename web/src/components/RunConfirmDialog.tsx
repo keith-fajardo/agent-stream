@@ -1,66 +1,112 @@
-import { contentSignature } from '@claude-stream/shared';
-import { describeRunPlan } from '../runPlan';
+import { useEffect } from 'react';
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
+/** Shows exactly what will run, as the engine rendered it (spec §7.6); Start sends the preview's signature. */
 export function RunConfirmDialog() {
   const confirm = useStore((s) => s.confirm);
   const graph = useStore((s) => s.graph);
-  const run = useStore((s) => s.run);
+  const preview = useStore((s) => s.preview);
+
+  useEffect(() => {
+    if (confirm && graph) {
+      send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
+    }
+  }, [confirm, graph]);
+
   if (!confirm || !graph) return null;
-  const plan = describeRunPlan(graph, confirm, run);
   const close = () => dispatch({ kind: 'closeConfirm' });
   const start = () => {
-    send({ type: 'startRun', graphId: graph.id, reviewed: contentSignature(graph), fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
+    if (!preview) return;
+    send({ type: 'startRun', graphId: graph.id, reviewed: preview.signature, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
     close();
   };
+  const executing = preview?.steps.filter((s) => !s.reused) ?? [];
+  const commands = executing.filter((s) => s.kind === 'command');
+  const agents = executing.filter((s) => s.kind === 'agent');
+  const reused = preview?.steps.filter((s) => s.reused) ?? [];
+
   return (
     <div className="modal-backdrop" onClick={close}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-label="Run confirmation" onClick={(e) => e.stopPropagation()}>
         <h2>{confirm.fromNodeId ? `Re-run from ${confirm.fromNodeId}` : 'Run workflow'}</h2>
-        {plan.problems.length > 0 ? (
-          <>
-            <p>This graph can't run yet:</p>
-            <ul>
-              {plan.problems.map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-          </>
+        {!preview ? (
+          <p className="muted">Checking the run…</p>
         ) : (
           <>
+            {preview.problems.length > 0 && (
+              <div className="problems">
+                <p>This run can't start yet:</p>
+                <ul>
+                  {preview.problems.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {preview.warnings.map((w) => (
+              <p key={w} className="approval-warning">
+                ⚠ {w}
+              </p>
+            ))}
             <p>
-              {plan.agentCount} agent step{plan.agentCount === 1 ? '' : 's'} will run. Every file edit or shell command they attempt waits for your
-              approval.
+              {agents.length} agent step{agents.length === 1 ? '' : 's'} will run. Every file edit or shell command they attempt waits for your approval.
             </p>
-            {plan.commands.length > 0 ? (
+            {commands.length > 0 ? (
               <>
-                <p>These commands will run exactly as written:</p>
-                {plan.commands.map((n) => (
-                  <div key={n.id}>
+                <p>These commands will run exactly as shown:</p>
+                {commands.map((s) => (
+                  <div key={s.id}>
                     <div>
-                      {n.id} · {n.title}
+                      {s.id} · {s.title}
                     </div>
-                    <pre className="mono">{n.command}</pre>
+                    <pre className="mono">{s.text}</pre>
                   </div>
                 ))}
               </>
             ) : (
               <p>No command steps will run.</p>
             )}
-            {plan.reused.length > 0 && (
-              <p className="muted">
-                Reused from run {confirm.sourceRunId}: {plan.reused.join(', ')}
-              </p>
+            {agents.length > 0 && (
+              <div className="agent-prompts">
+                {agents.map((s) => (
+                  <details key={s.id}>
+                    <summary>
+                      {s.id} · {s.title}
+                    </summary>
+                    <pre>{s.text}</pre>
+                  </details>
+                ))}
+              </div>
             )}
-            {!plan.exact && (
-              <p className="muted">Showing every command step; steps unchanged since run {confirm.sourceRunId} will be reused instead of run again.</p>
+            {preview.variables.length > 0 && (
+              <table className="variables-used">
+                <thead>
+                  <tr>
+                    <th>Variable</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.variables.map((v) => (
+                    <tr key={v.name}>
+                      <td className="mono">{v.name}</td>
+                      <td className="mono">{v.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {reused.length > 0 && (
+              <p className="muted">
+                Reused from run {preview.sourceRunId}: {reused.map((s) => s.id).join(', ')}
+              </p>
             )}
           </>
         )}
         <div className="modal-actions">
           <button onClick={close}>Cancel</button>
-          <button className="primary" disabled={plan.problems.length > 0} onClick={start}>
+          <button className="primary" disabled={!preview || preview.problems.length > 0} onClick={start}>
             Start run
           </button>
         </div>

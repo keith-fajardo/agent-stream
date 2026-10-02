@@ -128,3 +128,9 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .variables-dialog td { padding: 2px 4px; vertical-align: top; }
 .variables-dialog input { width: 100%; }
 .field-error { color: var(--danger); font-size: 12px; margin-top: 2px; }
+.problems { color: var(--danger); }
+.problems ul { margin: 4px 0 8px; }
+.agent-prompts details { margin: 4px 0; }
+.agent-prompts summary { cursor: pointer; }
+.variables-used { border-collapse: collapse; margin: 8px 0; }
+.variables-used td, .variables-used th { padding: 2px 8px 2px 0; text-align: left; }
