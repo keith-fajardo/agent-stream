@@ -10,6 +10,18 @@ const SEPARATOR: MenuEntry = { separator: true };
 const item = (label: string, enabled: boolean, run: () => void, extra: Partial<MenuAction> = {}): MenuAction => ({ label, enabled, run, ...extra });
 const host = (label: string, command: HostCommand, enabled = true): MenuAction => item(label, enabled, () => actions.host(command));
 
+const short = (value: string, max = 40) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+
+function variableItems(s: State): MenuEntry[] {
+  const rows = (s.graph?.variables ?? []).map((v) => {
+    const value = s.variableValues[v.name] ?? '';
+    return value === ''
+      ? item(`⚠ ${v.name} — not set`, true, () => actions.openVariables(v.name), { warn: true })
+      : item(`${v.name} = ${short(value)}`, true, () => actions.openVariables(v.name));
+  });
+  return [...rows, ...(rows.length ? [SEPARATOR] : []), item('Add variable…', !!s.graph, actions.addVariable), item('Edit variables…', !!s.graph, () => actions.openVariables())];
+}
+
 /** The menu bar (spec §4.3): items that don't apply right now are disabled, never hidden. */
 export function buildMenus(s: State): Menu[] {
   const hasGraph = !!s.graph;
@@ -50,6 +62,7 @@ export function buildMenus(s: State): Menu[] {
         item(`Approve all (${pending})`, pending > 0, actions.approveAll),
       ],
     },
+    { id: 'variables', label: 'Variables', items: variableItems(s) },
     {
       id: 'view',
       label: 'View',

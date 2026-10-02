@@ -26,8 +26,8 @@ const run = (status: RunMeta['status']): RunMeta => ({ id: 'r1', graphId: 'g', s
 const approval = (id: string, graphId: string): ApprovalRequest => ({ id, runId: 'r', graphId, nodeId: 'n1', nodeTitle: 'n1', toolName: 'Bash', input: {}, createdAt: 't' });
 
 describe('menus', () => {
-  it('has File, Edit, Run and View in order', () => {
-    expect(buildMenus(base()).map((m) => m.label)).toEqual(['File', 'Edit', 'Run', 'View']);
+  it('has File, Edit, Run, Variables and View in order', () => {
+    expect(buildMenus(base()).map((m) => m.label)).toEqual(['File', 'Edit', 'Run', 'Variables', 'View']);
   });
 
   it('enables File items from the spec, and Delete only when nothing runs', () => {
@@ -71,5 +71,18 @@ describe('menus', () => {
     const v = items(base({ selectedNodeId: 'n1', tab: 'graph', minimap: false }), 'view');
     expect([v['Logs panel'].checked, v['Minimap'].checked, v['Graph'].checked, v['Chat'].checked]).toEqual([true, false, true, false]);
     expect(items(base(), 'view')['Logs panel'].enabled).toBe(false);
+  });
+
+  it('lists variables with their values and flags the ones not set', () => {
+    const withVars = { ...graph, variables: [{ name: 'schema', description: '' }, { name: 'model', description: '' }] };
+    const s = base({ graph: withVars, variableValues: { schema: 'analytics_dev' } });
+    const entries = buildMenus(s).find((m) => m.id === 'variables')!.items;
+    expect(entries.map((e) => ('separator' in e ? '—' : `${e.label}${e.warn ? ' [warn]' : ''}`))).toEqual([
+      'schema = analytics_dev',
+      '⚠ model — not set [warn]',
+      '—',
+      'Add variable…',
+      'Edit variables…',
+    ]);
   });
 });

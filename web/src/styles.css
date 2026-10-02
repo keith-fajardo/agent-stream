@@ -122,3 +122,9 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .modal h2 { margin: 0; font-size: 18px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; z-index: 60; cursor: pointer; max-width: 80vw; white-space: pre-wrap; }
+.variables-dialog { width: min(860px, 95vw); }
+.variables-dialog table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.variables-dialog th { text-align: left; font-size: 12px; color: var(--muted); font-weight: normal; padding: 2px 4px; }
+.variables-dialog td { padding: 2px 4px; vertical-align: top; }
+.variables-dialog input { width: 100%; }
+.field-error { color: var(--danger); font-size: 12px; margin-top: 2px; }

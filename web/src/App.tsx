@@ -5,6 +5,7 @@ import { RightPanel } from './components/RightPanel';
 import { RunConfirmDialog } from './components/RunConfirmDialog';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
+import { VariablesDialog } from './components/VariablesDialog';
 import { useStore } from './store';
 
 export function App() {
@@ -23,6 +24,7 @@ export function App() {
         <RightPanel />
       </main>
       <RunConfirmDialog />
+      <VariablesDialog />
       <Toast />
     </div>
   );
