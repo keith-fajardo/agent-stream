@@ -1,7 +1,8 @@
 # claude-stream — Graph home, Graph tab, instructions, export/import
 
 **Date:** 2026-10-02
-**Status:** Approved in conversation; written for review
+**Status:** Superseded by `2026-10-02-claude-stream-vscode-design.md` (claude-stream became a
+VS Code extension; the Graph tab, instructions and export/import carry over there)
 **Builds on:** `2026-10-02-claude-stream-design.md` (v1) and the status/logs/approvals changes on `feat/status-logs-approvals`.
 
 ## 1. Purpose
