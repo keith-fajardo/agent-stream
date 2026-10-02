@@ -1,4 +1,4 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { emptyGraph, type RunMeta } from '@claude-stream/shared';
@@ -11,7 +11,7 @@ const meta = (id: string, graphId = 'g', status: RunMeta['status'] = 'succeeded'
   status,
   startedAt: `start-${id}`,
   snapshot: emptyGraph(graphId, 'G', 't'),
-  nodes: { n1: { status: status === 'running' ? 'running' : 'succeeded' }, n2: { status: 'pending' } },
+  nodes: { n1: { status: status === 'running' ? 'running' : 'succeeded' }, n2: { status: 'queued' } },
 });
 
 describe('RunStore', () => {
@@ -55,6 +55,15 @@ describe('RunStore', () => {
     expect(store.readOutput(a, '../../../secret')).toBe('');
     expect(() => store.writeOutput(a, '../evil', 'x')).toThrow('invalid node id');
     expect(() => store.create(meta('../evil'))).toThrow('invalid run id');
+  });
+
+  it('reads runs saved with the old status names using the new ones', () => {
+    const paths = tmpProject();
+    const id = '20261001-100000-01d0';
+    mkdirSync(join(paths.runsDir, id), { recursive: true });
+    const old = { ...meta(id, 'g', 'failed'), nodes: { n1: { status: 'failed' }, n2: { status: 'skipped' }, n3: { status: 'pending' } } };
+    writeFileSync(join(paths.runsDir, id, 'run.json'), JSON.stringify(old));
+    expect(new RunStore(paths).get(id)?.nodes).toEqual({ n1: { status: 'failed' }, n2: { status: 'not_run' }, n3: { status: 'queued' } });
   });
 
   it('marks runs left running as interrupted', () => {

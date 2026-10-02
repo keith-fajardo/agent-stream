@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authLabel } from '@claude-stream/shared';
+import { authLabel, statusLabel } from '@claude-stream/shared';
 import { send } from '../socket';
 import { dispatch, useStore } from '../store';
 
@@ -82,7 +82,7 @@ export function TopBar() {
         <select value={run?.id ?? ''} onChange={(e) => send({ type: 'selectRun', runId: e.target.value })}>
           {runs.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.id} · {r.status}
+              {r.id} · {statusLabel(r.status)}
             </option>
           ))}
         </select>

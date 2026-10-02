@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { fmtDuration, type GraphNode, type NodeRunState } from '@claude-stream/shared';
+import { fmtDuration, statusLabel, type GraphNode, type NodeRunState } from '@claude-stream/shared';
 
 export type StepData = { node: GraphNode; state?: NodeRunState; waiting: boolean };
 export type StepFlowNode = Node<StepData, 'step'>;
@@ -18,7 +18,7 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
       <div className="step-meta">
         <span>{node.id}</span>
         {node.updatedBy === 'agent' && <span className="by-agent">by agent</span>}
-        {status && <span className="status">{status.replace('_', ' ')}</span>}
+        {status && <span className="status">{statusLabel(status)}</span>}
         {state?.durationMs !== undefined && <span>{fmtDuration(state.durationMs)}</span>}
       </div>
       <Handle type="source" position={Position.Right} />

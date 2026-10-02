@@ -1,12 +1,14 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { NodeEvent, RunMeta, RunSummary } from '@claude-stream/shared';
+import type { NodeEvent, NodeStatus, RunMeta, RunSummary } from '@claude-stream/shared';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import type { ProjectPaths } from './paths';
 
 const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const ACTIVE = new Set(['pending', 'running', 'waiting_approval']);
+const ACTIVE = new Set(['queued', 'running', 'waiting_approval']);
+/** Status names used before the queued / not_run rename, translated when old runs are read. */
+const RENAMED_STATUSES: Record<string, NodeStatus> = { pending: 'queued', skipped: 'not_run' };
 
 export function isRunId(id: string): boolean {
   return RUN_ID_RE.test(id);
@@ -43,11 +45,17 @@ export class RunStore {
     if (!isRunId(runId)) return undefined;
     const path = join(this.runDir(runId), 'run.json');
     if (!existsSync(path)) return undefined;
+    let meta: RunMeta;
     try {
-      return JSON.parse(readFileSync(path, 'utf8')) as RunMeta;
+      meta = JSON.parse(readFileSync(path, 'utf8')) as RunMeta;
     } catch {
       return undefined;
     }
+    for (const state of Object.values(meta.nodes ?? {})) {
+      const renamed = RENAMED_STATUSES[state.status];
+      if (renamed) state.status = renamed;
+    }
+    return meta;
   }
 
   list(graphId: string): RunSummary[] {

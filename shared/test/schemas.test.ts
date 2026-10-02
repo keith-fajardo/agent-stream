@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authLabel, fmtDuration } from '../src/format';
+import { authLabel, fmtDuration, statusLabel } from '../src/format';
 import { parseClientMessage, parseGraph } from '../src/schemas';
 
 const node = (id: string) => ({ id, title: id, kind: 'agent' });
@@ -66,5 +66,11 @@ describe('format', () => {
     expect(fmtDuration(450)).toBe('450 ms');
     expect(fmtDuration(42_100)).toBe('42.1 s');
     expect(fmtDuration(125_000)).toBe('2m 5s');
+  });
+
+  it('labels every step and run status for people', () => {
+    expect(
+      (['queued', 'running', 'waiting_approval', 'succeeded', 'failed', 'not_run', 'cancelled', 'reused', 'interrupted'] as const).map(statusLabel),
+    ).toEqual(['Queued', 'Running', 'Waiting approval', 'Succeeded', 'Failed', 'Not run', 'Cancelled', 'Reused', 'Interrupted']);
   });
 });

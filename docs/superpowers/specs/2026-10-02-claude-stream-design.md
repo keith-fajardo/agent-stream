@@ -220,10 +220,13 @@ A run takes a frozen snapshot of the graph and gets an id
 - A node is **ready** when every upstream node has `succeeded` (or `reused`).
 - Ready nodes start immediately, up to `maxParallel` (default 3, CLI flag
   `--max-parallel`) to avoid burning through plan usage limits.
-- If a node fails, every descendant is marked `skipped`. Independent branches keep going.
-- Node statuses: `pending → running → (waiting_approval ⇄ running) → succeeded | failed
-  | cancelled`, or `skipped` / `reused`.
-- The run ends `succeeded` (all nodes succeeded/reused), `failed` (any failed or skipped),
+- If a node fails, every descendant is marked `not_run` ("Not run": it never ran because a
+  step before it failed). Independent branches keep going.
+- Node statuses: `queued → running → (waiting_approval ⇄ running) → succeeded | failed
+  | cancelled`, or `not_run` / `reused`. The UI shows them as Queued, Running, Waiting
+  approval, Succeeded, Failed, Cancelled, Not run, Reused, Interrupted. Runs saved before
+  the rename (`pending`, `skipped`) are read back with the new names.
+- The run ends `succeeded` (all nodes succeeded/reused), `failed` (any failed or not run),
   `cancelled`, or `interrupted` (server stopped mid-run; see section 10).
 
 **Stop** aborts the run: agent sessions are interrupted via their `AbortController`;
@@ -383,7 +386,7 @@ Vitest across all workspaces.
   detection; `topoOrder`; `descendants`.
 - **server, no Claude calls:**
   - Runner with a fake `AgentExecutor`: parallelism cap, ready-node ordering, failure →
-    descendants skipped, stop/cancel, re-run-from node selection and `reused` copying.
+    descendants not run, stop/cancel, re-run-from node selection and `reused` copying.
   - `CommandExecutor` with real shell commands (`echo`, `sleep`, `exit 3`, timeout).
   - `buildNodePrompt`: goal, upstream ordering, truncation, full-output paths.
   - Approval gate: read-only passthrough, approve → allow, deny → deny with note, abort →

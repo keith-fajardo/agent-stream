@@ -87,7 +87,7 @@ describe('buildFlowEdges', () => {
   });
 
   it('animates edges into a running node', () => {
-    const run = runWith(chain, { n1: { status: 'succeeded' }, n2: { status: 'running' }, n3: { status: 'pending' } });
+    const run = runWith(chain, { n1: { status: 'succeeded' }, n2: { status: 'running' }, n3: { status: 'queued' } });
     expect(buildFlowEdges(chain, run, []).map((e) => e.animated)).toEqual([true, false]);
   });
 

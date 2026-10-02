@@ -63,13 +63,14 @@ export type OpRecord = { at: string; by: Actor; op: Op };
 export type GraphResult = { ok: true; graph: Graph } | { ok: false; error: string };
 
 export type NodeStatus =
-  | 'pending'
+  | 'queued'
   | 'running'
   | 'waiting_approval'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
-  | 'skipped'
+  /** Never ran because a step before it failed (or itself did not run). */
+  | 'not_run'
   | 'reused'
   | 'interrupted';
 

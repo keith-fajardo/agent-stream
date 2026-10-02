@@ -85,6 +85,7 @@ describe('Runner', () => {
     const statuses: string[] = [];
     runner.on('node', (_runId: string, nodeId: string, state: { status: string }) => statuses.push(`${nodeId}:${state.status}`));
     const r = started(runner.start({ graph: graphOf([agent('a'), agent('b'), link('n1', 'n2')]) }));
+    expect(r.run.nodes.n2.status).toBe('queued');
     await tick();
     expect(fake.started).toEqual(['n1']);
     fake.finish('n1');
@@ -127,7 +128,7 @@ describe('Runner', () => {
     const done = await r.done;
     expect(done.status).toBe('failed');
     expect(done.nodes.n1).toMatchObject({ status: 'failed', error: 'boom' });
-    expect(done.nodes.n2.status).toBe('skipped');
+    expect(done.nodes.n2.status).toBe('not_run');
     expect(done.nodes.n3.status).toBe('succeeded');
     expect(fake.started).not.toContain('n2');
     expect(runStore.readEvents(done.id, 'n1').at(-1)).toMatchObject({ type: 'result', ok: false, error: 'boom' });
@@ -276,6 +277,6 @@ describe('Runner when the filesystem or a listener fails', () => {
     expect(done.status).toBe('failed');
     expect(done.nodes.n1.status).toBe('failed');
     expect(done.nodes.n1.error).toMatch(/^claude-stream internal error: /);
-    expect(done.nodes.n2.status).toBe('skipped');
+    expect(done.nodes.n2.status).toBe('not_run');
   });
 });

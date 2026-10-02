@@ -13,7 +13,7 @@ const run = (id: string, graphId: string, status: RunMeta['status'] = 'running')
   status,
   startedAt: T,
   snapshot: graph(graphId, ['n1']),
-  nodes: { n1: { status: 'pending' } },
+  nodes: { n1: { status: 'queued' } },
 });
 const server = (msg: ServerMessage): Action => ({ kind: 'server', msg });
 const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOpened' }>> = {}): Action =>

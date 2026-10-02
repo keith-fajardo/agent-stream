@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fmtDuration, type GraphNode, type NodeKind, type NodePatch } from '@claude-stream/shared';
+import { fmtDuration, statusLabel, type GraphNode, type NodeKind, type NodePatch } from '@claude-stream/shared';
 import { send } from '../socket';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
@@ -155,7 +155,7 @@ function NodeLogs({ node }: { node: GraphNode }) {
   return (
     <div className="logs">
       <div className="log-status">
-        Run {run.id} · <b>{state.status.replace('_', ' ')}</b>
+        Run {run.id} · <b>{statusLabel(state.status)}</b>
         {state.durationMs !== undefined && ` · ${fmtDuration(state.durationMs)}`}
         {state.error && <div className="error">{state.error}</div>}
         {state.status === 'reused' && sourceRunId && (

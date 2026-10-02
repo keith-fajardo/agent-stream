@@ -48,7 +48,7 @@ type ActiveRun = {
 };
 
 const DONE_OK: ReadonlySet<NodeStatus> = new Set(['succeeded', 'reused']);
-const BLOCKED: ReadonlySet<NodeStatus> = new Set(['failed', 'skipped', 'cancelled', 'interrupted']);
+const BLOCKED: ReadonlySet<NodeStatus> = new Set(['failed', 'not_run', 'cancelled', 'interrupted']);
 
 /**
  * Executes a frozen snapshot of a graph (spec §7.2): a node starts once every upstream node
@@ -94,7 +94,7 @@ export class Runner extends EventEmitter {
     if (source) meta.sourceRunId = source.id;
     if (input.fromNodeId) meta.fromNodeId = input.fromNodeId;
     for (const n of graph.nodes) {
-      meta.nodes[n.id] = source && reuse.has(n.id) ? { ...source.nodes[n.id], status: 'reused' } : { status: 'pending' };
+      meta.nodes[n.id] = source && reuse.has(n.id) ? { ...source.nodes[n.id], status: 'reused' } : { status: 'queued' };
     }
     this.deps.runStore.create(meta);
     if (source) for (const id of reuse) this.deps.runStore.copyOutput(source.id, meta.id, id);
@@ -112,7 +112,7 @@ export class Runner extends EventEmitter {
     const run = this.runs.get(runId);
     if (!run || run.finished) return false;
     run.stopping = true;
-    for (const id of run.order) if (run.meta.nodes[id].status === 'pending') this.setNode(run, id, { status: 'cancelled' });
+    for (const id of run.order) if (run.meta.nodes[id].status === 'queued') this.setNode(run, id, { status: 'cancelled' });
     this.deps.broker.cancelRun(runId);
     for (const controller of run.running.values()) controller.abort();
     this.schedule(run);
@@ -127,10 +127,10 @@ export class Runner extends EventEmitter {
     if (run.finished) return;
     if (!run.stopping) {
       for (const id of run.order) {
-        if (run.meta.nodes[id].status !== 'pending') continue;
+        if (run.meta.nodes[id].status !== 'queued') continue;
         const parents = upstream(run.meta.snapshot, id).map((p) => run.meta.nodes[p].status);
         if (parents.some((s) => BLOCKED.has(s))) {
-          this.setNode(run, id, { status: 'skipped' });
+          this.setNode(run, id, { status: 'not_run' });
           continue;
         }
         if (parents.every((s) => DONE_OK.has(s)) && run.running.size < this.deps.maxParallel) this.launch(run, id);
