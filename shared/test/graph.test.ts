@@ -11,7 +11,7 @@ import {
   validateRunnable,
   wouldCreateCycle,
 } from '../src/graph';
-import type { Graph, NodeRunState, Op } from '../src/types';
+import type { Graph, NodeRunState, Op, RenderedRun } from '../src/types';
 
 const T = '2026-10-02T00:00:00.000Z';
 const T2 = '2026-10-02T00:00:05.000Z';
@@ -157,6 +157,18 @@ describe('reusableNodeIds', () => {
     const r = applyOp(wide, link('n1', 'n3'), 'user', T2);
     if (!r.ok) throw new Error(r.error);
     expect([...reusableNodeIds(r.graph, { snapshot: wide, nodes: allOk(wide) }, 'n2')]).toEqual(['n1']);
+  });
+
+  it('compares rendered text for reuse when both runs have it', () => {
+    const g = build([cmd('build', 'dbt build -s {{ model }}'), agent('check'), link('n1', 'n2')]);
+    const nodes: Record<string, NodeRunState> = { n1: { status: 'succeeded' }, n2: { status: 'succeeded' } };
+    const before: RenderedRun = { goal: '', instructions: '', nodes: { n1: "dbt build -s 'a'", n2: 'do check' } };
+    const source = { snapshot: g, nodes, rendered: before };
+    expect([...reusableNodeIds(g, source, 'n2', before)]).toEqual(['n1']);
+    const changed: RenderedRun = { ...before, nodes: { ...before.nodes, n1: "dbt build -s 'b'" } };
+    expect([...reusableNodeIds(g, source, 'n2', changed)]).toEqual([]);
+    // Runs recorded before rendering existed fall back to comparing the templates.
+    expect([...reusableNodeIds(g, { snapshot: g, nodes }, 'n2', changed)]).toEqual(['n1']);
   });
 });
 

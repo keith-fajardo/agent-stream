@@ -1,5 +1,5 @@
 import { variableNameProblem } from './variables';
-import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op } from './types';
+import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun } from './types';
 
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -198,7 +198,7 @@ export function validateRunnable(graph: Graph): string[] {
   return problems;
 }
 
-export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState> };
+export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun };
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
@@ -206,17 +206,23 @@ function sameSet(a: string[], b: string[]): boolean {
 
 /**
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
- * `fromNodeId`, did not succeed last time, changed kind/prompt/command, or gained/lost an
- * upstream edge — and so does everything downstream of it. Everything else is reused.
+ * `fromNodeId`, did not succeed last time, changed kind or rendered prompt/command (the template,
+ * for runs recorded before rendering), or gained/lost an upstream edge — and so does everything
+ * downstream of it. Everything else is reused.
  */
-export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string): Set<string> {
+export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun): Set<string> {
   const seeds = new Set<string>(fromNodeId ? [fromNodeId] : []);
   for (const n of graph.nodes) {
     const prev = source.snapshot.nodes.find((p) => p.id === n.id);
     const state = source.nodes[n.id];
     const succeeded = state?.status === 'succeeded' || state?.status === 'reused';
-    const sameDefinition =
-      !!prev && prev.kind === n.kind && (prev.prompt ?? '') === (n.prompt ?? '') && (prev.command ?? '') === (n.command ?? '');
+    const before = source.rendered?.nodes[n.id];
+    const now = rendered?.nodes[n.id];
+    const sameText =
+      before !== undefined && now !== undefined
+        ? before === now
+        : (prev?.prompt ?? '') === (n.prompt ?? '') && (prev?.command ?? '') === (n.command ?? '');
+    const sameDefinition = !!prev && prev.kind === n.kind && sameText;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     if (!succeeded || !sameDefinition || !sameInputs) seeds.add(n.id);
   }

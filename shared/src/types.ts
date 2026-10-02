@@ -105,6 +105,26 @@ export type NodeRunState = {
   usage?: NodeUsage;
 };
 
+/** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
+export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
+
+export type PreviewStep = { id: string; title: string; kind: NodeKind; text: string; reused: boolean };
+
+/** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
+export type RunPreview = {
+  graphId: string;
+  fromNodeId?: string;
+  sourceRunId?: string;
+  /** Block Start. */
+  problems: string[];
+  /** Shown, don't block. */
+  warnings: string[];
+  steps: PreviewStep[];
+  variables: { name: string; value: string }[];
+  /** Start must send this back; the engine refuses if a re-render differs. */
+  signature: string;
+};
+
 export type RunMeta = {
   id: string;
   graphId: string;
@@ -115,6 +135,7 @@ export type RunMeta = {
   fromNodeId?: string;
   snapshot: Graph;
   nodes: Record<string, NodeRunState>;
+  rendered?: RenderedRun;
 };
 
 export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string };
