@@ -16,15 +16,25 @@ export class ApprovalBroker extends EventEmitter {
 
   request(input: ApprovalInput, signal?: AbortSignal): { id: string; decision: Promise<Decision> } {
     const request: ApprovalRequest = { ...input, id: randomUUID(), createdAt: this.clock() };
+    let resolveDecision: (decision: Decision) => void;
     const decision = new Promise<Decision>((resolve) => {
       if (signal?.aborted) {
         resolve({ decision: 'cancelled' });
         return;
       }
+      resolveDecision = resolve;
       this.pendingById.set(request.id, { request, resolve });
       signal?.addEventListener('abort', () => this.settle(request.id, { decision: 'cancelled' }), { once: true });
     });
-    if (this.pendingById.has(request.id)) this.emit('changed', this.pending());
+    if (this.pendingById.has(request.id)) {
+      try {
+        this.emit('changed', this.pending());
+      } catch (error) {
+        this.pendingById.delete(request.id);
+        resolveDecision!({ decision: 'cancelled' });
+        throw error;
+      }
+    }
     return { id: request.id, decision };
   }
 
@@ -47,7 +57,11 @@ export class ApprovalBroker extends EventEmitter {
     if (!p) return false;
     this.pendingById.delete(id);
     p.resolve(decision);
-    this.emit('changed', this.pending());
+    try {
+      this.emit('changed', this.pending());
+    } catch (error) {
+      throw error;
+    }
     return true;
   }
 }

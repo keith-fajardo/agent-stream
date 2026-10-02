@@ -77,4 +77,67 @@ describe('approval gate', () => {
     expect(gate.hooks.PreToolUse[0].matcher).toBeUndefined();
     expect(gate.hooks.PreToolUse[0].timeout).toBe(86400);
   });
+
+  it('denies when emitting the log event throws', async () => {
+    const broker = new ApprovalBroker();
+    const ac = new AbortController();
+    const gate = makeApprovalGate({
+      broker,
+      runId: 'r1',
+      nodeId: 'n1',
+      nodeTitle: 'Step',
+      signal: ac.signal,
+      emit: () => {
+        throw new Error('log service down');
+      },
+    });
+    const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
+    const out = hook(preToolUse('Bash', { command: 'ls' }));
+    const decision = decisionOf(await out);
+    expect(decision?.permissionDecision).toBe('deny');
+    expect(decision?.permissionDecisionReason).toContain('could not ask for approval');
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('denies when the brokers listeners throw', async () => {
+    const broker = new ApprovalBroker();
+    broker.on('changed', () => {
+      throw new Error('ws down');
+    });
+    const ac = new AbortController();
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
+    const out = hook(preToolUse('Bash', { command: 'ls' }));
+    const decision = decisionOf(await out);
+    expect(decision?.permissionDecision).toBe('deny');
+    expect(decision?.permissionDecisionReason).toContain('could not ask for approval');
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('cancels the approval when the SDK withdraws the request', async () => {
+    const broker = new ApprovalBroker();
+    const ac = new AbortController();
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const sdkAc = new AbortController();
+    const preToolUseFunc = gate.hooks.PreToolUse[0].hooks[0];
+    const out = preToolUseFunc(preToolUse('Bash', { command: 'ls' }), 'tu', { signal: sdkAc.signal });
+    sdkAc.abort();
+    const decision = decisionOf(await out);
+    expect(decision?.permissionDecision).toBe('deny');
+    expect(decision?.permissionDecisionReason).toBe('The approval request expired or was withdrawn.');
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('cancels canUseTool when SDK signal aborts', async () => {
+    const broker = new ApprovalBroker();
+    const ac = new AbortController();
+    const gate = makeApprovalGate({ broker, runId: 'r1', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, emit: () => {} });
+    const sdkAc = new AbortController();
+    const out = gate.canUseTool('Bash', { command: 'rm' }, { signal: sdkAc.signal, toolUseID: 'tu1', requestId: 'req' } as Parameters<CanUseTool>[2]);
+    sdkAc.abort();
+    const result = await out;
+    expect((result as any).behavior).toBe('deny');
+    expect((result as any).message).toBe('The approval request expired or was withdrawn.');
+    expect(broker.pending()).toEqual([]);
+  });
 });
