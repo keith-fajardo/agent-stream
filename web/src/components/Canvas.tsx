@@ -13,7 +13,8 @@ import {
   type OnDelete,
   type XYPosition,
 } from '@xyflow/react';
-import { nextNodeId, type Op } from '@claude-stream/shared';
+import { nextNodeId, type Op, type Position } from '@claude-stream/shared';
+import { buildFlowNodes } from '../flowNodes';
 import { layoutPositions } from '../layout';
 import { send } from '../socket';
 import { contentSignature } from '../state';
@@ -32,24 +33,17 @@ export function Canvas() {
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const runForGraph = run && graph && run.graphId === graph.id ? run : undefined;
 
+  const dragging = useRef(new Set<string>());
+  const pendingMoves = useRef(new Map<string, Position>());
+  const lastSelected = useRef<string | undefined>(undefined);
+
   useEffect(() => {
-    if (!graph) {
-      setNodes([]);
-      return;
-    }
-    const auto = layoutPositions(graph, true);
-    setNodes(
-      graph.nodes.map((n) => ({
-        id: n.id,
-        type: 'step',
-        position: n.position ?? auto.get(n.id) ?? { x: 0, y: 0 },
-        selected: n.id === selectedId,
-        data: {
-          node: n,
-          state: runForGraph?.nodes[n.id],
-          waiting: approvals.some((a) => a.nodeId === n.id && a.runId === runForGraph?.id),
-        },
-      })),
+    const selectionChanged = lastSelected.current !== selectedId;
+    lastSelected.current = selectedId;
+    setNodes((current) =>
+      graph
+        ? buildFlowNodes({ graph, run: runForGraph, approvals, selectedId, selectionChanged, current, dragging: dragging.current, pendingMoves: pendingMoves.current })
+        : [],
     );
   }, [graph, runForGraph, approvals, selectedId]);
 
@@ -114,7 +108,15 @@ export function Canvas() {
         onNodesChange={onNodesChange}
         onConnect={(c: Connection) => op({ type: 'connect', from: c.source, to: c.target })}
         onDelete={onDelete}
-        onNodeDragStop={(_e, n) => op({ type: 'moveNode', id: n.id, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) } })}
+        onNodeDragStart={(_e, _n, ns) => ns.forEach((n) => dragging.current.add(n.id))}
+        onNodeDragStop={(_e, _n, ns) =>
+          ns.forEach((n) => {
+            dragging.current.delete(n.id);
+            const position = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+            pendingMoves.current.set(n.id, position);
+            op({ type: 'moveNode', id: n.id, position });
+          })
+        }
         onNodeClick={(_e, n) => dispatch({ kind: 'selectNode', id: n.id })}
         onPaneClick={() => dispatch({ kind: 'selectNode' })}
         zoomOnDoubleClick={false}
