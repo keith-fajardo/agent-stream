@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import open from 'open';
 import { authLabel } from '@claude-stream/shared';
 import { createApp } from './app';
-import { checkAuth, resolveClaudePath } from './auth';
+import { checkAuth, projectSettingsProblem, resolveClaudePath } from './auth';
 import { startHttpServer, type RunningServer } from './httpServer';
 
 const USAGE = `Usage: claude-stream [projectDir] [--port 4317] [--max-parallel 3] [--no-open]
@@ -48,7 +48,9 @@ async function main(): Promise<void> {
 
   const claudePath = resolveClaudePath();
   if (!claudePath) fail('could not find `claude` on your PATH. Install Claude Code (https://code.claude.com), sign in with your Claude account, then try again.');
-  const auth = await checkAuth(claudePath);
+  let auth = await checkAuth(claudePath);
+  const settingsProblem = auth.ok ? projectSettingsProblem(projectDir) : null;
+  if (settingsProblem) auth = { ...auth, ok: false, error: settingsProblem };
   const app = createApp({ projectDir, claudePath, auth, maxParallel });
 
   let server: RunningServer;
@@ -60,7 +62,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`claude-stream · ${projectDir}`);
-  console.log(auth.ok ? `Signed in: ${authLabel(auth)}` : `${authLabel(auth)}\nRuns and chat are disabled until you sign in; restart claude-stream afterwards.`);
+  console.log(auth.ok ? `Signed in: ${authLabel(auth)}` : `${authLabel(auth)}\nRuns and chat are disabled; restart claude-stream once this is fixed.`);
   console.log(`Open: ${server.url}`);
   if (!values['no-open']) await open(server.url);
 

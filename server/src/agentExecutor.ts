@@ -1,7 +1,7 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody, NodeUsage } from '@claude-stream/shared';
 import type { ApprovalBroker } from './approvals';
-import { authSourceError, isSubscriptionAuthSource, sanitizedEnv } from './auth';
+import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { NodeExecutor, NodeOutcome } from './executors';
 import { makeApprovalGate, READ_ONLY_TOOLS } from './gate';
 import { blocksOf, realQuery, toolResultText, type QueryFn } from './sdk';
@@ -71,6 +71,9 @@ export function translateMessage(msg: SDKMessage, emit: (event: NodeEventBody) =
 export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
   const queryFn = deps.queryFn ?? realQuery;
   return async (ctx) => {
+    // Re-checked per node: the project's settings can change while the server runs.
+    const settingsProblem = projectSettingsProblem(ctx.cwd);
+    if (settingsProblem) return { ok: false, output: '', error: settingsProblem };
     ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
@@ -97,7 +100,11 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
       abortController,
     };
     try {
+      let sawInit = false;
       for await (const message of queryFn({ prompt: ctx.prompt, options })) {
+        if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') sawInit = true;
+        // Fail closed: a result we cannot tie to a checked auth source is not trusted.
+        if (message.type === 'result' && !sawInit) return { ok: false, output: '', error: UNVERIFIED_AUTH };
         const step = translateMessage(message, ctx.emit);
         if (step.stop) return step.stop;
       }

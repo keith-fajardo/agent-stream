@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ChatLog } from '../src/chatLog';
@@ -166,5 +168,33 @@ describe('Planner', () => {
     expect(s.planner.isBusy(s.graphId)).toBe(false);
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+
+  it('does not start a session when the project settings would leave the subscription', async () => {
+    const s = setup(async function* () {
+      yield init();
+      yield done();
+    });
+    mkdirSync(join(s.paths.root, '.claude'));
+    writeFileSync(join(s.paths.root, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'get-key.sh' }));
+    await s.planner.send(s.graphId, 'hi');
+    expect(s.calls).toHaveLength(0);
+    expect(s.chat().map((e) => e.role)).toEqual(['user', 'error']);
+    expect(s.chat()[1].text).toContain('sets apiKeyHelper');
+    expect(s.busy).toEqual([true, false]);
+  });
+
+  it('stops when a result arrives without the session reporting how it authenticated', async () => {
+    const s = setup(async function* () {
+      yield say({ type: 'text', text: 'unverified reply' });
+      yield done();
+    });
+    await s.planner.send(s.graphId, 'hi');
+    expect(s.chat().map((e) => [e.role, e.text])).toEqual([
+      ['user', 'hi'],
+      ['assistant', 'unverified reply'],
+      ['error', 'The Claude session did not report how it authenticated.'],
+    ]);
+    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
   });
 });

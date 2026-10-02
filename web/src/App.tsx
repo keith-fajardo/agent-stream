@@ -11,7 +11,7 @@ export function App() {
   return (
     <div className="app">
       <TopBar />
-      {auth && !auth.ok && <div className="banner">{auth.error} Restart claude-stream after signing in.</div>}
+      {auth && !auth.ok && <div className="banner">{auth.error} Restart claude-stream once this is fixed.</div>}
       <main className="main">
         <ReactFlowProvider>
           <Canvas />

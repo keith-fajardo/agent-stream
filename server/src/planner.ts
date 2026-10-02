@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatEntry, ChatRole, Op, OpRecord } from '@claude-stream/shared';
-import { authSourceError, isSubscriptionAuthSource, sanitizedEnv } from './auth';
+import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
@@ -106,6 +106,12 @@ export class Planner extends EventEmitter {
     try {
       this.emit('busy', graphId, true);
       this.add(graphId, 'user', text);
+      // Re-checked per turn: the project's settings can change while the server runs.
+      const settingsProblem = projectSettingsProblem(this.d.projectDir);
+      if (settingsProblem) {
+        this.add(graphId, 'error', settingsProblem);
+        return;
+      }
       const graph = this.d.graphStore.get(graphId);
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
@@ -132,11 +138,18 @@ export class Planner extends EventEmitter {
       if (graph.plannerSessionId) options.resume = graph.plannerSessionId;
 
       let sessionId: string | undefined;
+      let sawInit = false;
       for await (const message of this.queryFn({ prompt, options })) {
         const m = message as unknown as { type: string; subtype?: string; apiKeySource?: string; session_id?: string; parent_tool_use_id?: string | null; message?: unknown };
         if (m.session_id) sessionId = m.session_id;
+        if (m.type === 'system' && m.subtype === 'init') sawInit = true;
         if (m.type === 'system' && m.subtype === 'init' && m.apiKeySource !== undefined && !isSubscriptionAuthSource(m.apiKeySource)) {
           this.add(graphId, 'error', authSourceError(m.apiKeySource));
+          abortController.abort();
+          return;
+        }
+        if (m.type === 'result' && !sawInit) {
+          this.add(graphId, 'error', UNVERIFIED_AUTH);
           abortController.abort();
           return;
         }

@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
@@ -26,10 +29,10 @@ function fake(script: (options: Options) => AsyncGenerator<SDKMessage>) {
   return { fn, calls };
 }
 
-function ctx(signal: AbortSignal = new AbortController().signal) {
+function ctx(signal: AbortSignal = new AbortController().signal, cwd = '/proj') {
   const events: NodeEventBody[] = [];
   const node: GraphNode = { id: 'n2', title: 'Write SQL', kind: 'agent', prompt: 'p', createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
-  const c: NodeContext = { runId: 'r1', graph: emptyGraph('g', 'G', 't'), node, prompt: 'FULL PROMPT', cwd: '/proj', signal, emit: (e) => events.push(e) };
+  const c: NodeContext = { runId: 'r1', graph: emptyGraph('g', 'G', 't'), node, prompt: 'FULL PROMPT', cwd, signal, emit: (e) => events.push(e) };
   return { c, events };
 }
 
@@ -134,5 +137,26 @@ describe('agent executor', () => {
     await new Promise((r) => setTimeout(r, 10));
     ac.abort();
     expect(await pending).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  it('does not start a session when the project settings would leave the subscription', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proj-'));
+    mkdirSync(join(dir, '.claude'));
+    writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_USE_BEDROCK: '1' } }));
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('should not run');
+    });
+    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx(undefined, dir).c);
+    expect(out).toMatchObject({ ok: false, error: expect.stringContaining('sets CLAUDE_CODE_USE_BEDROCK') });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('fails when a result arrives without the session reporting how it authenticated', async () => {
+    const { fn } = fake(async function* () {
+      yield success('unverified');
+    });
+    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx().c);
+    expect(out).toEqual({ ok: false, output: '', error: 'The Claude session did not report how it authenticated.' });
   });
 });
