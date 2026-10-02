@@ -44,4 +44,4 @@ Claude Stream runs your installed, signed-in Claude Code through the Claude Agen
   runs/<run-id>/              run snapshot, per-step events and outputs (git-ignored)
 ```
 
-Variable values are kept outside the project, in `~/.claude-stream/values/<id>.json`, one file per project folder.
+Variable values are kept outside the project, in `~/.claude-stream/values/<hash>.json`, one file per project folder (named after a hash of the folder's path).
