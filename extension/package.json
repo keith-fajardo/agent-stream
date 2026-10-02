@@ -6,11 +6,19 @@
   "publisher": "claude-stream-local",
   "license": "UNLICENSED",
   "type": "module",
-  "engines": { "vscode": "^1.100.0" },
-  "extensionKind": ["workspace"],
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.cjs",
-  "activationEvents": ["workspaceContains:.claude-stream/graphs/*.json"],
+  "activationEvents": [
+    "workspaceContains:.claude-stream/graphs/*.json"
+  ],
   "contributes": {
     "configuration": {
       "title": "Claude Stream",
@@ -38,14 +46,134 @@
       {
         "viewType": "claudeStream.graph",
         "displayName": "Claude Stream Graph",
-        "selector": [{ "filenamePattern": "**/.claude-stream/graphs/*.json" }],
+        "selector": [
+          {
+            "filenamePattern": "**/.claude-stream/graphs/*.json"
+          }
+        ],
         "priority": "default"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeStream",
+          "title": "Claude Stream",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeStream": [
+        {
+          "id": "claudeStream.graphs",
+          "name": "Graphs"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "claudeStream.graphs",
+        "contents": "Open a folder to use Claude Stream.\n[Open Folder](command:vscode.openFolder)",
+        "when": "workbenchState == empty"
+      },
+      {
+        "view": "claudeStream.graphs",
+        "contents": "No graphs yet.\n[New Graph](command:claudeStream.newGraph)\n[Import Graph](command:claudeStream.importGraph)",
+        "when": "workbenchState != empty"
+      }
+    ],
     "commands": [
-      { "command": "claudeStream.retrySignIn", "title": "Retry Sign-in Check", "category": "Claude Stream", "icon": "$(refresh)" },
-      { "command": "claudeStream.signInDetails", "title": "Show Sign-in Details", "category": "Claude Stream" }
-    ]
+      {
+        "command": "claudeStream.retrySignIn",
+        "title": "Retry Sign-in Check",
+        "category": "Claude Stream",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeStream.signInDetails",
+        "title": "Show Sign-in Details",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.newGraph",
+        "title": "New Graph",
+        "category": "Claude Stream",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeStream.openGraph",
+        "title": "Open Graph",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.importGraph",
+        "title": "Import Graph",
+        "category": "Claude Stream",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "claudeStream.exportGraph",
+        "title": "Export Graph",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.renameGraph",
+        "title": "Rename Graph",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.duplicateGraph",
+        "title": "Duplicate Graph",
+        "category": "Claude Stream"
+      },
+      {
+        "command": "claudeStream.deleteGraph",
+        "title": "Delete Graph",
+        "category": "Claude Stream"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeStream.newGraph",
+          "when": "view == claudeStream.graphs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeStream.importGraph",
+          "when": "view == claudeStream.graphs",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeStream.openGraph",
+          "when": "view == claudeStream.graphs && viewItem == graph",
+          "group": "1_open@1"
+        },
+        {
+          "command": "claudeStream.renameGraph",
+          "when": "view == claudeStream.graphs && viewItem == graph",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "claudeStream.duplicateGraph",
+          "when": "view == claudeStream.graphs && viewItem == graph",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "claudeStream.exportGraph",
+          "when": "view == claudeStream.graphs && viewItem == graph",
+          "group": "3_share@1"
+        },
+        {
+          "command": "claudeStream.deleteGraph",
+          "when": "view == claudeStream.graphs && viewItem =~ /^graph/",
+          "group": "4_delete@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node build.mjs",

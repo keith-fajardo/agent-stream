@@ -1,11 +1,14 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import { authLabel, type AuthInfo, type HostCommand } from '@claude-stream/shared';
-import { EngineManager, type EngineEvents } from './engines';
-import { folderFor } from './folders';
-import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, type GraphPanel } from './graphEditor';
+import { graphCommands } from './commands';
+import { CHECKING, EngineManager, type EngineEvents } from './engines';
+import { folderFor, workspaceFolders } from './folders';
+import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
+import { GraphsView } from './graphsView';
 import { readSettings } from './settings';
 import { statusBarText } from './statusBar';
+import { vscodeUi } from './ui';
 
 let engines: EngineManager | undefined;
 
@@ -51,6 +54,26 @@ export async function activate(context: vscode.ExtensionContext) {
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     ),
   );
+  const graphsView = new GraphsView({ folders: workspaceFolders, graphs: (f) => manager.get(f).listGraphs(), auth: () => manager.auth });
+  const graphsTree = vscode.window.createTreeView('claudeStream.graphs', { treeDataProvider: graphsView });
+  events.graphs = () => graphsView.refresh();
+  events.auth = (auth) => {
+    showAuth(auth);
+    graphsTree.message = auth.ok || auth === CHECKING ? undefined : auth.error;
+    graphsView.refresh();
+  };
+  const graph = graphCommands({
+    engines: manager,
+    folders: workspaceFolders,
+    ui: vscodeUi,
+    open: (t) => openGraphTab(t.folder, t.graphId),
+    activeTarget: () => {
+      const p = panels.active();
+      return p && { folder: p.folder, graphId: p.graphId };
+    },
+  });
+  for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`claudeStream.${name}`, run));
+  context.subscriptions.push(graphsTree, vscode.workspace.onDidChangeWorkspaceFolders(() => graphsView.refresh()));
   events.confirmRun = (folder, graphId, fromNodeId, sourceRunId) => {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
     if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId });

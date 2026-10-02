@@ -1,0 +1,73 @@
+import * as vscode from 'vscode';
+import { relativeTime, statusLabel, type AuthInfo, type GraphListItem } from '@claude-stream/shared';
+import { CHECKING, type Folder } from './engines';
+
+export class FolderItem extends vscode.TreeItem {
+  constructor(readonly folder: Folder) {
+    super(folder.name, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `folder:${folder.key}`;
+    this.contextValue = 'folder';
+  }
+}
+
+export class GraphItem extends vscode.TreeItem {
+  readonly graphId: string;
+  constructor(
+    readonly folder: Folder,
+    graph: GraphListItem,
+    now: number,
+  ) {
+    super(graph.name, vscode.TreeItemCollapsibleState.None);
+    this.graphId = graph.id;
+    this.id = `graph:${folder.key}|${graph.id}`;
+    if (graph.error) {
+      this.description = "Can't be read";
+      this.tooltip = graph.error;
+      this.contextValue = 'graphUnreadable';
+      this.iconPath = new vscode.ThemeIcon('warning');
+      return;
+    }
+    this.description = graph.lastRun ? `${statusLabel(graph.lastRun.status)} · ${relativeTime(graph.lastRun.startedAt, now)}` : 'Never run';
+    this.contextValue = 'graph';
+    this.iconPath = new vscode.ThemeIcon('type-hierarchy');
+    this.command = { command: 'claudeStream.openGraph', title: 'Open', arguments: [{ folder, graphId: graph.id }] };
+  }
+}
+
+export class RetryItem extends vscode.TreeItem {
+  constructor() {
+    super('Retry sign-in check', vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('refresh');
+    this.contextValue = 'retry';
+    this.command = { command: 'claudeStream.retrySignIn', title: 'Retry sign-in check' };
+  }
+}
+
+export type GraphsSource = { folders(): Folder[]; graphs(folder: Folder): GraphListItem[]; auth(): AuthInfo; now?: () => number };
+
+/** The sidebar's Graphs section (spec §4.1). The engine already sorts graphs newest first, unreadable last. */
+export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
+  private changed = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this.changed.event;
+
+  constructor(private source: GraphsSource) {}
+
+  refresh(): void {
+    this.changed.fire();
+  }
+
+  getTreeItem(item: vscode.TreeItem): vscode.TreeItem {
+    return item;
+  }
+
+  getChildren(parent?: vscode.TreeItem): vscode.TreeItem[] {
+    const now = this.source.now?.() ?? Date.now();
+    if (parent instanceof FolderItem) return this.source.graphs(parent.folder).map((g) => new GraphItem(parent.folder, g, now));
+    if (parent) return [];
+    const auth = this.source.auth();
+    const top: vscode.TreeItem[] = auth.ok || auth === CHECKING ? [] : [new RetryItem()];
+    const folders = this.source.folders();
+    if (folders.length === 1) return [...top, ...this.source.graphs(folders[0]).map((g) => new GraphItem(folders[0], g, now))];
+    return [...top, ...folders.map((f) => new FolderItem(f))];
+  }
+}

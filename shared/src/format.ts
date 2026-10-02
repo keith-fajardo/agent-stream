@@ -29,3 +29,18 @@ const STATUS_LABELS: Record<NodeStatus | RunStatus, string> = {
 export function statusLabel(status: NodeStatus | RunStatus): string {
   return STATUS_LABELS[status] ?? status;
 }
+
+/** "just now", "45m ago", "2h ago", "yesterday", "4d ago", then the date. */
+export function relativeTime(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const minutes = Math.floor(Math.max(0, now - t) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  return new Date(t).toISOString().slice(0, 10);
+}
