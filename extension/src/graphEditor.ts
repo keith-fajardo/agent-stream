@@ -14,6 +14,17 @@ export function graphIdFromPath(p: string): string | undefined {
   return m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
+/** The graph id when `filePath` is exactly `<folderPath>/.claude-stream/graphs/<id>.json`; nested copies belong to no engine. */
+export function graphTarget(folderPath: string, filePath: string): string | undefined {
+  const segments = (p: string) => p.replace(/\\/g, '/').split('/').filter(Boolean);
+  const base = segments(folderPath);
+  const file = segments(filePath);
+  if (file.length !== base.length + 3 || !base.every((seg, i) => seg === file[i])) return undefined;
+  const [dir, graphs, name] = file.slice(base.length);
+  const m = /^(.+)\.json$/.exec(name);
+  return dir === '.claude-stream' && graphs === 'graphs' && m && isGraphId(m[1]) ? m[1] : undefined;
+}
+
 export const panelKey = (folderKey: string, graphId: string): string => `${folderKey}|${graphId}`;
 
 /** What the registry needs from a webview panel; tests pass a fake. */
@@ -152,9 +163,9 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
     const webview = webviewPanel.webview;
     webview.options = { enableScripts: true, localResourceRoots: [root] };
     const folder = this.d.folderFor(document.uri);
-    const graphId = graphIdFromPath(document.uri.fsPath);
+    const graphId = folder && graphTarget(folder.path, document.uri.fsPath);
     if (!folder || !graphId) {
-      webview.html = messagePage('This file is not a Claude Stream graph in an open workspace folder. Use "Reopen Editor With… → Text Editor" to see it as JSON.');
+      webview.html = messagePage(`This file isn't a graph in this workspace folder. Graphs live in .claude-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`);
       return;
     }
     const app = this.d.engines.get(folder);
@@ -182,7 +193,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
       runHostCommand: this.d.runHostCommand,
       setMinimap: (value) => {
         this.d.setMinimap(value);
-        for (const other of this.d.panels.all()) if (other !== panel) other.view.post({ type: 'prefs', minimap: value });
+        for (const other of this.d.panels.all()) if (other !== panel) other.send({ type: 'prefs', minimap: value });
       },
     });
     const subscription = webview.onDidReceiveMessage((raw) => handler.handle(raw));

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '@claude-stream/engine';
 import type { HostMessage, ServerMessage } from '@claude-stream/shared';
 import type { Folder } from '../src/engines';
-import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, hostCommandArgs, openAndSend } from '../src/graphEditor';
+import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, openAndSend } from '../src/graphEditor';
 
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
@@ -32,11 +32,51 @@ function setup() {
 describe('graph tab messages', () => {
   it('connects the tab to its engine when its page is ready, once per page load', () => {
     const s = setup();
+    const connect = s.app.connect.bind(s.app);
+    let active = 0;
+    vi.spyOn(s.app, 'connect').mockImplementation((client) => {
+      active++;
+      const off = connect(client);
+      let done = false;
+      return () => {
+        if (!done) active--;
+        done = true;
+        off();
+      };
+    });
     s.handler.handle({ type: 'ready' });
     expect(s.received.map((m) => m.type)).toEqual(['hello']);
     s.handler.handle({ type: 'ready' }); // the page reloaded
+    expect(active).toBe(1);
+    s.received.length = 0;
     s.app.createGraph('H');
     expect(s.received.filter((m) => m.type === 'graphs')).toHaveLength(1);
+  });
+
+  it('stops delivering engine broadcasts after dispose', () => {
+    const s = setup();
+    s.handler.handle({ type: 'ready' });
+    s.handler.dispose();
+    s.received.length = 0;
+    s.app.createGraph('H');
+    expect(s.received).toEqual([]);
+  });
+
+  it('does not unlock the tab for another graph being opened', () => {
+    const s = setup();
+    s.panel.send({ type: 'openVariables' });
+    s.handler.handle({ type: 'opened', graphId: 'other' });
+    expect(s.panel.isLoaded).toBe(false);
+    expect(s.posted).toEqual([]);
+  });
+
+  it('keeps malformed engine messages away from the engine', () => {
+    const s = setup();
+    const handle = vi.spyOn(s.app, 'handle');
+    s.handler.handle({ type: 'applyOps' });
+    s.handler.handle({ type: 'nonsense' });
+    expect(handle).not.toHaveBeenCalled();
+    expect(s.received.filter((m) => m.type === 'error')).toHaveLength(2);
   });
 
   it('passes engine messages to the engine', async () => {
@@ -139,5 +179,16 @@ describe('graphIdFromPath', () => {
     expect(graphIdFromPath('C:\\w\\.claude-stream\\graphs\\x.json')).toBe('x');
     expect(graphIdFromPath('/w/other/x.json')).toBeUndefined();
     expect(graphIdFromPath('/w/.claude-stream/graphs/Bad Name.json')).toBeUndefined();
+  });
+});
+
+describe('graphTarget', () => {
+  it('accepts only graphs at the folder root', () => {
+    expect(graphTarget('/ws', '/ws/.claude-stream/graphs/g.json')).toBe('g');
+    expect(graphTarget('C:\\ws', 'C:\\ws\\.claude-stream\\graphs\\g.json')).toBe('g');
+    expect(graphTarget('/ws', '/ws/sub/.claude-stream/graphs/x.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/node_modules/p/.claude-stream/graphs/x.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/.claude-stream/graphs/Bad Name.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/other/.claude-stream/graphs/g.json')).toBeUndefined();
   });
 });
