@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { renameReferences, renderTemplate, shellQuote, templateErrorMessage, templateNames, type EnvLookup } from '../src/templates';
 
@@ -116,7 +117,7 @@ describe('command quoting by shell context', () => {
 
   it('refuses contexts it cannot quote safely', () => {
     expect(error(() => command('echo \\{{ v }}', { v: 'x' }))).toBe('A \\ right before {{ }} would cancel its quoting. Remove the backslash.');
-    expect(error(() => command('echo "$(cat {{ f }})"', { f: 'x' }))).toBe("{{ }} inside a command substitution within double quotes can't be quoted safely. Move it outside the quotes.");
+    expect(error(() => command('echo "$(cat {{ f }})"', { f: 'x' }))).toBe(C);
     expect(error(() => command('cat <<EOF\n{{ v }}\nEOF', { v: 'x' }))).toBe("{{ }} after a heredoc (<<) can't be quoted safely. Pass the value as an argument instead.");
     expect(command('cat <<<{{ v }}', { v: 'a b' })).toBe(`cat <<<'a b'`);
   });
@@ -135,16 +136,88 @@ describe('command quoting by shell context', () => {
   });
 });
 
+const A = 'A \\ right before {{ }} would cancel its quoting. Remove the backslash.';
+const B = "{{ }} after a heredoc (<<) can't be quoted safely. Pass the value as an argument instead.";
+const C = "{{ }} after a backtick, $((, ${, $' or $\" can't be quoted safely. Put the value before them, or outside them.";
+const D = "{{ }} inside a # comment isn't allowed.";
+
+describe('conservative shell scanner', () => {
+  it('refuses heredocs in any quote context, comments, and nested or exotic contexts', () => {
+    expect(error(() => command("cat <<EOF\n'{{ v }}'\nEOF", { v: 'x' }))).toBe(B);
+    expect(error(() => command('echo hi # {{ v }}', { v: 'x' }))).toBe(D);
+    expect(error(() => command('echo "$(printf %s "{{ v }}")"', { v: 'x' }))).toBe(C);
+    expect(error(() => command('echo `printf %s {{ v }}`', { v: 'x' }))).toBe(C);
+    expect(error(() => command("printf %s $'{{ v }}'", { v: 'x' }))).toBe(C);
+    expect(error(() => command('echo $(( {{ v }} ))', { v: 'x' }))).toBe(C);
+    expect(error(() => command('echo ${x:-{{ v }}}', { v: 'x' }))).toBe(C);
+    expect(error(() => command('echo "\\{{ v }}"', { v: 'x' }))).toBe(A);
+  });
+
+  it('is not fooled by an apostrophe in a comment', () => {
+    expect(command("echo hi # don't\necho {{ v }}", { v: '; echo PWNED' })).toBe("echo hi # don't\necho '; echo PWNED'");
+  });
+
+  it('quotes inside a plain command substitution', () => {
+    expect(command('echo $(printf %s {{ v }})', { v: 'a b' })).toBe(`echo $(printf %s 'a b')`);
+    expect(command('echo $(printf %s "{{ v }}")', { v: 'a"$b' })).toBe('echo $(printf %s "a\\"\\$b")');
+  });
+
+  it('refuses a filter that mangles an inserted value', () => {
+    expect(error(() => command('{% set s %}{{ v }}{% endset %}echo {{ s | upper }}', { v: 'a' }))).toBe(
+      'A filter changed a value inserted with {{ }}. Apply the filter to the value itself, e.g. {{ v | upper }}.',
+    );
+  });
+
+  it('is re-entrant', () => {
+    const nested: EnvLookup = (name) => (name === 'X' ? renderTemplate('echo {{ w }}', { mode: 'command', context: { w: 'n n' }, env }) : undefined);
+    const out = renderTemplate(`echo {{ a }} {{ env_var('X') }} {{ b }}`, { mode: 'command', context: { a: 'a a', b: 'b b' }, env: nested });
+    expect(out).toBe(`echo 'a a' ${shellQuote(`echo 'n n'`)} 'b b'`);
+  });
+});
+
 describe('sandbox', () => {
-  it.each([`{{ range.constructor("return 1")() }}`, `{{ "".constructor }}`, `{{ constructor }}`, `{{ x.__proto__ }}`])('blocks %s', (src) => {
+  const attempts = [
+    `{{ constructor }}`,
+    `{{ "".constructor }}`,
+    `{{ range.constructor("return 1")() }}`,
+    `{{ range[["constructor"]]("return 1")() }}`,
+    `{{ {}.get("constructor") }}`,
+    `{% set d = {} %}{{ d.get("__proto__") }}`,
+    `{{ range.caller }}`,
+    `{{ x.__proto__ }}`,
+  ];
+  it.each(attempts)('blocks %s', (src) => {
     expect(() => text(src, { x: {} })).toThrow();
     expect(() => command(src, { x: {} })).toThrow();
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('keeps True, False and None', () => {
+    expect(text('{{ True }} {{ False }}')).toBe('true false');
+    expect(text('{% if None %}x{% endif %}')).toBe('');
   });
 });
 
 describe.skipIf(process.platform === 'win32')('real shell', () => {
-  const v = `x'; echo PWNED; '$(echo PWNED)"\`id`;
-  it.each([`printf '%s|' {{ v }}`, `printf '%s|' '{{ v }}'`, `printf '%s|' "{{ v }}"`])('runs %s without executing the value', (src) => {
-    expect(execFileSync('/bin/sh', ['-c', command(src, { v })]).toString()).toBe(`${v}|`);
-  });
+  const v = `x'; echo PWNED; '$(echo PWNED)"\`\\`;
+  const shells = ['/bin/sh', '/bin/zsh'].filter((s) => existsSync(s));
+  const cases: [string, string | undefined][] = [
+    [`printf '%s|' {{ v }}`, `${v}|`],
+    [`printf '%s|' '{{ v }}'`, `${v}|`],
+    [`printf '%s|' "{{ v }}"`, `${v}|`],
+    [`printf '%s|' $(printf %s {{ v }})`, undefined],
+    [`echo hi # don't\nprintf '%s|' {{ v }}`, `hi\n${v}|`],
+  ];
+  for (const sh of shells) {
+    it.each(cases)(`${sh}: %s`, (src, expected) => {
+      let out: string;
+      try {
+        out = execFileSync(sh, ['-c', command(src, { v })], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+      } catch (e) {
+        out = String((e as { stdout?: Buffer }).stdout ?? ''); // an unparseable result is fine; nothing may execute
+      }
+      expect(out).not.toContain('PWNED\n');
+      if (expected !== undefined) expect(out).toBe(expected);
+    });
+  }
 });

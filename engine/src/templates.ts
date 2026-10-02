@@ -17,15 +17,27 @@ type NunjucksInternals = {
 
 // Nunjucks is CommonJS; this works whether the bundler hands us the module or its default export.
 const nunjucks = ((nunjucksModule as { default?: unknown }).default ?? nunjucksModule) as typeof nunjucksModule & NunjucksInternals;
-nunjucks.installJinjaCompat();
 
 // Nunjucks is not a sandbox: block the JavaScript escape hatches (`range.constructor(...)`, `__proto__`, ...).
-const BLOCKED_NAMES: ReadonlySet<unknown> = new Set(['constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__']);
+// installJinjaCompat() is deliberately not used: its dict helpers (`{}.get(...)`, `.update(...)`) bypass these
+// lookups and allow prototype pollution. True/False/None are provided as globals instead.
+const BLOCKED_NAMES: ReadonlySet<string> = new Set([
+  'constructor',
+  '__proto__',
+  'prototype',
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
+  'caller',
+  'arguments',
+]);
 const runtime = nunjucks.runtime;
 const memberLookup = runtime.memberLookup;
 const contextOrFrameLookup = runtime.contextOrFrameLookup;
-runtime.memberLookup = function (this: unknown, obj: unknown, val: unknown) {
-  return BLOCKED_NAMES.has(val) ? undefined : memberLookup.call(this, obj, val);
+runtime.memberLookup = function (this: unknown, obj: unknown, key: unknown, ...rest: unknown[]) {
+  if (typeof key !== 'string' && typeof key !== 'number') return undefined;
+  return BLOCKED_NAMES.has(String(key)) ? undefined : (memberLookup as (...a: unknown[]) => unknown).call(this, obj, key, ...rest);
 };
 runtime.contextOrFrameLookup = function (this: unknown, context: unknown, frame: unknown, name: string) {
   return BLOCKED_NAMES.has(name) ? undefined : contextOrFrameLookup.call(this, context, frame, name);
@@ -36,13 +48,14 @@ runtime.contextOrFrameLookup = function (this: unknown, context: unknown, frame:
 // are then replaced by the value quoted for the shell context they landed in. Quoting protects how the shell
 // parses the command line; commands that re-parse their arguments as shell (eval, sh -c, ssh) are the author's
 // responsibility.
-type ActiveRender = { nonce: string; values: string[]; placeholder: RegExp };
+type ActiveRender = { nonce: string; values: string[]; placeholder: RegExp; mangled: boolean };
 let activeRender: ActiveRender | undefined;
 const originalEscape = nunjucks.lib.escape;
 nunjucks.lib.escape = (s: string) => {
   const r = activeRender;
   if (!r) return originalEscape(s);
   const raw = s.replace(r.placeholder, (_m, i: string) => r.values[Number(i)]); // set-block captures: quote once
+  if (raw.includes('\u0000')) r.mangled = true; // a filter altered a placeholder inside a captured value
   r.values.push(raw);
   return `\u0000${r.nonce}:${r.values.length - 1}\u0000`;
 };
@@ -198,61 +211,75 @@ export function templateErrorMessage(e: unknown): string {
 }
 
 const REFUSE_BACKSLASH = 'A \\ right before {{ }} would cancel its quoting. Remove the backslash.';
-const REFUSE_SUBSTITUTION = "{{ }} inside a command substitution within double quotes can't be quoted safely. Move it outside the quotes.";
 const REFUSE_HEREDOC = "{{ }} after a heredoc (<<) can't be quoted safely. Pass the value as an argument instead.";
+const REFUSE_UNSAFE = "{{ }} after a backtick, $((, ${, $' or $\" can't be quoted safely. Put the value before them, or outside them.";
+const REFUSE_COMMENT = "{{ }} inside a # comment isn't allowed.";
+const REFUSE_NESTED = "{{ }} inside nested quotes can't be quoted safely. Move it outside the quotes.";
+const REFUSE_MANGLED = 'A filter changed a value inserted with {{ }}. Apply the filter to the value itself, e.g. {{ v | upper }}.';
 
-/** Replaces each placeholder with its value quoted for the POSIX quoting context it landed in. */
+type Frame = { kind: 'plain' | 'sq' | 'dq' | 'comment'; substitution?: boolean };
+
+/**
+ * Replaces each placeholder with its value quoted for where it landed. The scanner is deliberately conservative:
+ * values are allowed only in a plain word, or directly inside '...' or "..." over plain frames; everything else
+ * (heredocs, comments, backticks, $((, ${, $', nested quotes) is refused.
+ */
 function quotePlaceholders(rendered: string, r: ActiveRender): string {
-  let out = '';
-  let state: 'out' | 'single' | 'double' = 'out';
-  let doubleStart = 0;
-  let heredoc = false;
   const marker = `\u0000${r.nonce}:`;
+  const frames: Frame[] = [{ kind: 'plain' }];
+  let heredocSeen = false;
+  let unsafeSeen = false;
+  let out = '';
+  let prev = '';
+  const placeholderAt = (i: number) => rendered.startsWith(marker, i);
   for (let i = 0; i < rendered.length; ) {
-    if (rendered.startsWith(marker, i)) {
+    const top = frames[frames.length - 1];
+    if (placeholderAt(i)) {
       const end = rendered.indexOf('\u0000', i + marker.length);
       const value = r.values[Number(rendered.slice(i + marker.length, end))];
-      if (state === 'out') {
-        if (heredoc) throw new Error(REFUSE_HEREDOC);
-        out += shellQuote(value);
-      } else if (state === 'single') {
-        out += value.replace(/'/g, `'\\''`);
-      } else {
-        const since = rendered.slice(doubleStart, i);
-        if (since.includes('$(') || since.includes('`')) throw new Error(REFUSE_SUBSTITUTION);
-        out += value.replace(/[\\"$`]/g, '\\$&');
-      }
+      if (heredocSeen) throw new Error(REFUSE_HEREDOC);
+      if (unsafeSeen) throw new Error(REFUSE_UNSAFE);
+      if (top.kind === 'comment') throw new Error(REFUSE_COMMENT);
+      if (top.kind === 'plain') out += shellQuote(value);
+      else if (frames.slice(0, -1).every((f) => f.kind === 'plain')) out += top.kind === 'sq' ? value.replace(/'/g, `'\\''`) : value.replace(/[\\"$`]/g, '\\$&');
+      else throw new Error(REFUSE_NESTED);
       i = end + 1;
+      prev = 'x';
       continue;
     }
     const c = rendered[i];
-    if (state === 'single') {
-      if (c === "'") state = 'out';
+    let step = 1;
+    if (top.kind === 'comment') {
+      if (c === '\n') frames.pop();
+    } else if (top.kind === 'sq') {
+      if (c === "'") frames.pop();
+    } else if (top.kind === 'dq') {
+      if (c === '\\') {
+        if (placeholderAt(i + 1)) throw new Error(REFUSE_BACKSLASH);
+        step = 2;
+      } else if (c === '"') frames.pop();
+      else if (c === '`' || rendered.startsWith('$(', i) || rendered.startsWith('${', i)) unsafeSeen = true;
     } else if (c === '\\') {
-      if (rendered.startsWith(marker, i + 1)) throw new Error(REFUSE_BACKSLASH);
-      out += rendered.slice(i, i + 2);
-      i += 2;
-      continue;
-    } else if (state === 'double') {
-      if (c === '"') state = 'out';
-    } else if (c === "'") {
-      state = 'single';
-    } else if (c === '"') {
-      state = 'double';
-      doubleStart = i + 1;
-    } else if (c === '<' && rendered[i + 1] === '<') {
-      if (rendered[i + 2] === '<') {
-        out += '<<<';
-        i += 3;
-        continue;
+      if (placeholderAt(i + 1)) throw new Error(REFUSE_BACKSLASH);
+      step = 2;
+    } else if (c === "'") frames.push({ kind: 'sq' });
+    else if (c === '"') frames.push({ kind: 'dq' });
+    else if (rendered.startsWith('$((', i) || rendered.startsWith('${', i) || rendered.startsWith("$'", i) || rendered.startsWith('$"', i) || c === '`') unsafeSeen = true;
+    else if (rendered.startsWith('$(', i)) {
+      frames.push({ kind: 'plain', substitution: true });
+      step = 2;
+    } else if (c === ')' && top.substitution) frames.pop();
+    else if (c === '#' && (prev === '' || /[\s;&|()]/.test(prev))) frames.push({ kind: 'comment' });
+    else if (c === '<' && rendered[i + 1] === '<') {
+      if (rendered[i + 2] === '<') step = 3;
+      else {
+        heredocSeen = true;
+        step = 2;
       }
-      heredoc = true;
-      out += '<<';
-      i += 2;
-      continue;
     }
-    out += c;
-    i++;
+    out += rendered.slice(i, i + step);
+    prev = rendered[i + step - 1];
+    i += step;
   }
   return out;
 }
@@ -267,6 +294,9 @@ export function renderTemplate(src: string, o: RenderOptions): string {
       throw new Error('Use | unquoted to insert a value without quotes.');
     });
   }
+  env.addGlobal('True', true);
+  env.addGlobal('False', false);
+  env.addGlobal('None', null);
   env.addGlobal('env_var', (name: unknown, fallback?: unknown) => {
     const value = o.env(String(name));
     if (value !== undefined) return value;
@@ -275,13 +305,15 @@ export function renderTemplate(src: string, o: RenderOptions): string {
   });
   if (!command) return env.renderString(src, o.context);
   const nonce = randomBytes(8).toString('hex');
-  const render: ActiveRender = { nonce, values: [], placeholder: new RegExp(`\u0000${nonce}:(\\d+)\u0000`, 'g') };
+  const render: ActiveRender = { nonce, values: [], mangled: false, placeholder: new RegExp(`\u0000${nonce}:(\\d+)\u0000`, 'g') };
   let rendered: string;
+  const previous = activeRender;
   activeRender = render;
   try {
     rendered = env.renderString(src, o.context);
   } finally {
-    activeRender = undefined;
+    activeRender = previous;
   }
+  if (render.mangled || rendered.replace(render.placeholder, '').includes('\u0000')) throw new Error(REFUSE_MANGLED);
   return quotePlaceholders(rendered, render);
 }
