@@ -3,6 +3,6 @@ web/dist/
 .claude-stream/
 *.tmp-*
 extension/dist/
-extension/.vscode-test/
+.vscode-test/
 *.vsix
 .vitest/
