@@ -15,7 +15,7 @@ import {
   type WriteLeases,
 } from '@agent-stream/engine';
 import type { ApprovalRequest, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
-import { createCopilotProvider } from './providers/copilot';
+import { createCopilotProvider, type LmAccess } from './providers/copilot';
 import { parseProviderSetting } from './providers/registry';
 import type { Settings } from './settings';
 
@@ -45,6 +45,8 @@ export type EngineManagerDeps = {
   checkAuth?: (claudePath: string) => Promise<ProviderStatus>;
   findClaude?: typeof realFindClaude;
   findGitBash?: typeof realFindGitBash;
+  /** context.languageModelAccessInformation: whether Copilot requests need the user's consent first. */
+  languageModelAccess?: LmAccess;
   createApp?: typeof realCreateApp;
   /** Test seam: how each provider is built. */
   providers?: Partial<Record<ProviderId, () => AgentProvider>>;
@@ -75,6 +77,13 @@ export class EngineManager {
     this.status = checkingStatus(this.providerFor('claude'));
   }
 
+  /** Windows: Git Bash for Copilot's Bash tool, found as for command steps; none is needed elsewhere. */
+  private gitBashPath(): string | undefined {
+    if (this.d.platform !== 'win32') return undefined;
+    const found = (this.d.findGitBash ?? realFindGitBash)({ env: this.d.env, setting: this.d.settings().gitBashPath });
+    return found.ok ? found.path : undefined;
+  }
+
   /** Built once per id and kept, so a provider's session state survives switching away and back. */
   providerFor(id: ProviderId): AgentProvider {
     let p = this.providers.get(id);
@@ -86,7 +95,16 @@ export class EngineManager {
             findClaude: () => (d.findClaude ?? realFindClaude)({ platform: d.platform, env: d.env, home: d.home, setting: d.settings().claudePath }),
             checkAuth: d.checkAuth,
           }),
-        copilot: () => createCopilotProvider({ runShell: createRunShell({ platform: d.platform, env: d.env }), limits: () => ({ maxRequestsPerStep: 25, maxRequestsPerTurn: 10 }) }),
+        copilot: () =>
+          createCopilotProvider({
+            access: d.languageModelAccess,
+            // Built per command, so a changed agentStream.gitBashPath reaches the next Bash call (Git Bash as for command steps).
+            runShell: (o) => createRunShell({ platform: d.platform, env: d.env, gitBashPath: this.gitBashPath() })(o),
+            limits: () => {
+              const s = d.settings();
+              return { maxRequestsPerStep: s.copilotMaxRequestsPerStep, maxRequestsPerTurn: s.copilotMaxRequestsPerTurn };
+            },
+          }),
         ...d.providers,
       };
       p = build[id]();

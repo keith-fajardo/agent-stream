@@ -2,19 +2,37 @@ import * as vscode from 'vscode';
 import { isEffortLevel, type EffortLevel } from '@agent-stream/shared';
 
 /** `model` and `effort`: the defaults for runs and for planner conversations without their own choice ('' = Default). */
-export type Settings = { claudePath: string; gitBashPath: string; maxParallel: number; provider: string; model: string; effort: EffortLevel | '' };
+export type Settings = {
+  claudePath: string;
+  gitBashPath: string;
+  maxParallel: number;
+  provider: string;
+  model: string;
+  effort: EffortLevel | '';
+  /** agentStream.copilot.maxRequestsPerStep: 1–200, default 25. */
+  copilotMaxRequestsPerStep: number;
+  /** agentStream.copilot.maxRequestsPerTurn: 1–100, default 10. */
+  copilotMaxRequestsPerTurn: number;
+};
+
+/** An integer setting clamped to its range; anything that isn't an integer reads as the default. */
+function intSetting(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
 
 export function readSettings(): Settings {
   const config = vscode.workspace.getConfiguration('agentStream');
-  const max = Number(config.get('maxParallel', 3));
   const model = config.get<unknown>('model', '');
   const effort = config.get<unknown>('effort', '');
   return {
     claudePath: String(config.get('claudePath', '')).trim(),
     gitBashPath: String(config.get('gitBashPath', '')).trim(),
     provider: String(config.get('provider', 'claude')).trim(),
-    maxParallel: Number.isInteger(max) ? Math.min(16, Math.max(1, max)) : 3,
+    maxParallel: intSetting(config.get('maxParallel', 3), 1, 16, 3),
     model: typeof model === 'string' ? model.trim() : '',
     effort: isEffortLevel(effort) ? effort : '',
+    copilotMaxRequestsPerStep: intSetting(config.get('copilot.maxRequestsPerStep', 25), 1, 200, 25),
+    copilotMaxRequestsPerTurn: intSetting(config.get('copilot.maxRequestsPerTurn', 10), 1, 100, 10),
   };
 }

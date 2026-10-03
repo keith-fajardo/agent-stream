@@ -282,14 +282,12 @@ export type ProviderStatus = {
   provider: ProviderId;
   /** Runs and planner chat are allowed. */
   ok: boolean;
-  /** Status-bar text: "Claude Max", "not signed in", "Copilot (preview)", "Copilot not available". */
+  /** Status-bar text: "Claude Max", "not signed in", "Copilot", "Copilot not available", "Copilot not allowed". */
   label: string;
   /** Tooltip detail: the account, or the models VS Code reports. */
   detail?: string;
   /** Why runs and chat are refused, shown verbatim. */
   error?: string;
-  /** Available but not runnable yet (the Copilot scaffold). */
-  preview?: boolean;
 };
 
 export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number };

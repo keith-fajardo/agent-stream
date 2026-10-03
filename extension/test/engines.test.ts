@@ -14,7 +14,7 @@ const folder = (name: string): Folder => {
   return { key: `file://${path}`, name, path };
 };
 
-const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const };
+const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 };
 function baseDeps(events: Partial<EngineEvents> = {}) {
   return {
     platform: 'darwin' as const,
@@ -34,7 +34,7 @@ function setup(o: { found?: boolean } = {}) {
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude', model: '', effort: '' as const }),
+    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
     platform: 'darwin',
     env: {},
     home,
@@ -160,7 +160,7 @@ describe('EngineManager', () => {
       const findGitBash = vi.fn(() => found);
       const seen: AppDeps[] = [];
       const manager = new EngineManager({
-        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude', model: '', effort: '' as const }),
+        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
@@ -202,7 +202,7 @@ describe('EngineManager', () => {
 
   it('uses the provider named in the setting, and swaps when it changes', async () => {
     let provider = 'claude';
-    const copilot = testProvider({ id: 'copilot', name: 'GitHub Copilot', status: async () => ({ provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', error: 'nope' }) });
+    const copilot = testProvider({ id: 'copilot', name: 'GitHub Copilot', status: async () => ({ provider: 'copilot', ok: false, label: 'Copilot not available', error: 'nope' }) });
     const manager = new EngineManager({ ...baseDeps(), settings: () => ({ ...defaults, provider }), providers: { copilot: () => copilot } });
     const app = manager.get(folder('a'));
     await manager.checkProvider();
@@ -220,6 +220,16 @@ describe('EngineManager', () => {
     await manager.checkProvider();
     expect(manager.currentProvider().id).toBe('claude');
     expect(warning.mock.calls).toEqual([["Unknown agentStream.provider 'gemini'; using Claude."]]);
+  });
+
+  it('builds the Copilot provider with the request caps from the settings, read when asked', () => {
+    let perStep = 7;
+    const manager = new EngineManager({ ...baseDeps(), settings: () => ({ ...defaults, provider: 'copilot', copilotMaxRequestsPerStep: perStep }) });
+    const copilot = manager.providerFor('copilot');
+    expect(copilot).toMatchObject({ id: 'copilot', name: 'GitHub Copilot' });
+    expect(copilot.stepRequestCap!()).toBe(7);
+    perStep = 30;
+    expect(copilot.stepRequestCap!()).toBe(30);
   });
 });
 

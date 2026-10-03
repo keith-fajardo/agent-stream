@@ -64,7 +64,7 @@ describe('ChatApp', () => {
   it('disables input with the provider’s reason', async () => {
     const el = await render();
     await act(async () => {
-      dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', error: "Copilot support isn't implemented yet." }, project: '/p', graphs: [], approvals: [] } });
+      dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'copilot', ok: false, label: 'Copilot not available', error: "Copilot support isn't implemented yet." }, project: '/p', graphs: [], approvals: [] } });
       dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
     });
     const box = el.querySelector('textarea')!;

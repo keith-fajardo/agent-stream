@@ -1,7 +1,7 @@
 {
   "name": "agent-stream",
   "displayName": "Agent Stream",
-  "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude today, GitHub Copilot in preview.",
+  "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude or GitHub Copilot.",
   "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot"],
   "version": "0.2.0",
   "publisher": "agent-stream-local",
@@ -35,7 +35,7 @@
           "default": "claude",
           "enumDescriptions": [
             "Claude: your Claude subscription through Claude Code.",
-            "GitHub Copilot (preview): detected only; running steps isn't implemented yet."
+            "GitHub Copilot: your Copilot plan through VS Code's Language Model API."
           ],
           "description": "The AI provider that runs agent steps and the planner."
         },
@@ -52,7 +52,7 @@
         "agentStream.model": {
           "type": "string",
           "default": "",
-          "description": "The model agent steps in runs use, and planner conversations that haven't chosen their own (an alias such as sonnet, or a full model id). Leave empty for Claude Code's default. Agent Stream: Select Model lists the models."
+          "description": "The model agent steps in runs use, and planner conversations that haven't chosen their own (an alias such as sonnet, or a full model id). Leave empty for the provider's default (Claude Code's default; Auto on Copilot). Agent Stream: Select Model lists the models."
         },
         "agentStream.effort": {
           "type": "string",
@@ -70,6 +70,20 @@
           "minimum": 1,
           "maximum": 16,
           "description": "How many steps of a run may run at the same time."
+        },
+        "agentStream.copilot.maxRequestsPerStep": {
+          "type": "integer",
+          "default": 25,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "GitHub Copilot: the most model requests one agent step may make. A step that reaches it stops and says so."
+        },
+        "agentStream.copilot.maxRequestsPerTurn": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "GitHub Copilot: the most model requests one planner chat message may make."
         }
       }
     },

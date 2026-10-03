@@ -174,15 +174,27 @@ describe('Copilot runStep', () => {
       ok: false,
       output: 'Looking.',
       error: 'Stopped after 2 Copilot requests (agentStream.copilot.maxRequestsPerStep). Raise the setting to let steps run longer.',
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 2 },
     });
     expect(m.sendRequest).toHaveBeenCalledTimes(2);
     expect(s.events.at(-1)).toEqual({ type: 'text', text: 'Copilot requests: 2 of 2' });
     expect(p.stepRequestCap!()).toBe(2);
   });
 
+  it('still reports the requests a failed step made as its turns', async () => {
+    const s = step();
+    writeFileSync(join(s.cwd, 'a.txt'), 'x');
+    const m = fakeLmModel({ id: 'auto', replies: [[call('c', 'Read', { file_path: 'a.txt' })], new Error('boom')] });
+    expect(await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll)).toMatchObject({
+      ok: false,
+      error: 'Copilot failed: boom',
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 2 },
+    });
+  });
+
   it('fails with the permission message when consent is declined, and is cancelled by Stop', async () => {
     const m = fakeLmModel({ id: 'auto', replies: [vscode.LanguageModelError.NoPermissions('declined')] });
-    expect(await provider({ lm: models(m.model) }).runStep(step().ctx, allowAll)).toEqual({ ok: false, output: '', error: COPILOT_PERMISSION });
+    expect(await provider({ lm: models(m.model) }).runStep(step().ctx, allowAll)).toEqual({ ok: false, output: '', error: COPILOT_PERMISSION, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 1 } });
     const ac = new AbortController();
     ac.abort();
     expect(await provider({ lm: models(fakeLmModel({ id: 'auto' }).model) }).runStep(step({ signal: ac.signal }).ctx, allowAll)).toEqual({ ok: false, output: '', error: 'cancelled' });

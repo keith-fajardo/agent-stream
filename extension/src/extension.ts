@@ -43,7 +43,15 @@ export async function activate(context: vscode.ExtensionContext) {
     auth: showAuth,
     warning: (message) => void vscode.window.showWarningMessage(message),
   };
-  const manager = new EngineManager({ settings: readSettings, platform: process.platform, env: process.env, home: homedir(), git: realGit, events });
+  const manager = new EngineManager({
+    settings: readSettings,
+    platform: process.platform,
+    env: process.env,
+    home: homedir(),
+    git: realGit,
+    events,
+    languageModelAccess: context.languageModelAccessInformation,
+  });
   engines = manager;
   showAuth(manager.status);
 

@@ -18,10 +18,10 @@ describe('statusBarText', () => {
     });
   });
 
-  it('marks a preview provider', () => {
-    expect(statusBarText({ provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', detail: 'Models: GPT-5.', error: 'x' })).toEqual({
-      text: '$(beaker) Copilot (preview)',
-      tooltip: 'Models: GPT-5.',
+  it('shows Copilot like any provider that can run', () => {
+    expect(statusBarText({ provider: 'copilot', ok: true, label: 'Copilot', detail: 'Models: Auto.' })).toEqual({
+      text: '$(check) Copilot',
+      tooltip: 'Agent Stream runs on Copilot (Models: Auto.).',
     });
   });
 
