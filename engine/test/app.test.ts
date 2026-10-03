@@ -868,7 +868,7 @@ describe('app', () => {
       const pending = change.run({ id: 'n2', prompt: 'Deploy to {{ target }}' });
       await vi.waitFor(() => expect(c.of('approvals').at(-1)?.approvals).toHaveLength(1));
       const [request] = c.of('approvals').at(-1)!.approvals;
-      expect(request.graphChange).toEqual({ summary: "n1 wants to change n2's prompt", detail: 'Prompt:\nDeploy to dev' });
+      expect(request.graphChange).toEqual({ summary: "n1 wants to change n2's prompt", detail: 'Title: two\n\nPrompt:\nDeploy to dev' });
       await app.handle(c.c, { type: 'decide', approvalId: request.id, decision: 'approve' });
       expect(await pending).toEqual({ text: "Applied: n1 wants to change n2's prompt" });
       held.resolve();
@@ -878,6 +878,35 @@ describe('app', () => {
       expect(prompts.n2).toBe('Deploy to dev');
       expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: "n1 wants to change n2's prompt" }]);
       expect(app.graphStore.get(g.id).nodes.find((n) => n.id === 'n2')!.prompt).toBe('Deploy to {{ target }}');
+    });
+
+    it("adds the run preview's warnings to a step agent's change", async () => {
+      const held = deferred<void>();
+      let tools: import('../src/providers/types').GraphTool[] = [];
+      const provider = testProvider({
+        runStep: async (ctx) => {
+          if (ctx.node.id === 'n1') {
+            tools = ctx.graphTools ?? [];
+            await held.promise;
+          }
+          return { ok: true, output: '' };
+        },
+      });
+      const env = (name: string) => (name === 'API_TOKEN' ? 'secret-value' : undefined);
+      const { app, client } = setup(signedIn, instant, env, { provider, executors: undefined });
+      const c = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      await vi.waitFor(() => expect(tools).toHaveLength(2));
+      void tools.find((t) => t.name === 'change_step')!.run({ id: 'n2', prompt: "Use {{ env_var('API_TOKEN') }}" });
+      await vi.waitFor(() => expect(app.broker.pending()).toHaveLength(1));
+      const { detail } = app.broker.pending()[0].graphChange!;
+      expect(detail).toMatch(/^Title: two\n\nPrompt:\nUse secret-value\n\nWarnings:\n- `API_TOKEN` looks like a credential\./);
+      app.runner.stop(app.runner.activeFor(g.id)!.id);
+      held.resolve();
     });
 
     it('warns at startup about a baseline it cannot read', () => {

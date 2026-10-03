@@ -32,6 +32,13 @@ describe('ApprovalsView', () => {
     expect(String(item.tooltip).endsWith('…')).toBe(true);
   });
 
+  it('shows the exact text of a graph change as its tooltip', () => {
+    const detail = `Title: Install\n\nCommand:\n${'z'.repeat(3000)}`;
+    const item = new ApprovalItem(a, { ...request('c', 't', { id: 'n4', command: 'npm {{ x }}' }), toolName: 'Change graph', graphChange: { summary: "n2 wants to change n4's command", detail } });
+    expect(item.tooltip).toBe(detail);
+    expect(item.description).toBe("n2 wants to change n4's command");
+  });
+
   it('badges the count', () => {
     expect(approvalsBadge(0)).toBeUndefined();
     expect(approvalsBadge(1)).toEqual({ value: 1, tooltip: '1 approval waiting' });

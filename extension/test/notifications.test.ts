@@ -49,4 +49,23 @@ describe('ApprovalNotifier', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(s.d.decide).toHaveBeenCalledTimes(1);
   });
+
+  it('never offers a one-click Approve for a graph change: Show reveals the text, or Deny', async () => {
+    const s = setup();
+    const change: ApprovalRequest = {
+      ...request('c1'),
+      toolName: 'Change graph',
+      input: { id: 'n4', command: 'npm ci' },
+      graphChange: { summary: "n2 wants to change n4's command", detail: 'Title: Install\n\nCommand:\nnpm ci' },
+    };
+    s.setPending([{ folder: a, request: change }, { folder: a, request: { ...change, id: 'c2' } }]);
+    s.notifier.update();
+    expect(s.d.ask).toHaveBeenNthCalledWith(1, "n2 wants to change n4's command", 'Show', 'Deny');
+    expect(s.d.ask.mock.calls.flat()).not.toContain('Approve');
+    // Even an 'Approve' answer (it was never offered) approves nothing.
+    s.answers[0]('Approve');
+    s.answers[1]('Show');
+    await vi.waitFor(() => expect(s.d.reveal).toHaveBeenCalledWith(a, { ...change, id: 'c2' }));
+    expect(s.d.decide).not.toHaveBeenCalled();
+  });
 });

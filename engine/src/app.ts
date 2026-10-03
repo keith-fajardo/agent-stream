@@ -97,12 +97,12 @@ export function createApp(d: AppDeps) {
   const broker = new ApprovalBroker(clock);
   /** The variable values files: no agent or planner may read them. */
   const privateFiles = () => [d.valuesFile, d.legacyValuesFile].filter((f): f is string => !!f);
-  /** A step's prompt or command filled in with the graph's values, exactly as a run would; or the first problem. */
-  function renderNode(graph: Graph, node: GraphNode): { ok: true; text: string } | { ok: false; error: string } {
+  /** A step's prompt or command filled in with the graph's values, exactly as a run would, with the preview's warnings; or the first problem. */
+  function renderNode(graph: Graph, node: GraphNode): { ok: true; text: string; warnings: string[] } | { ok: false; error: string } {
     const { preview } = previewRun({ graph: { ...graph, nodes: [node], edges: [] }, values: values.get(graph.id), env, commandShellProblem });
     const text = preview.steps[0]?.text;
     if (preview.problems.length || text === undefined) return { ok: false, error: preview.problems[0] ?? `${node.id} could not be filled in.` };
-    return { ok: true, text };
+    return { ok: true, text, warnings: preview.warnings };
   }
   /**
    * Agent steps on `p`, each asking the user through its own step gate. Each also gets the graph tools

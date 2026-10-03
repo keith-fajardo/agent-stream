@@ -13,7 +13,8 @@ export class ApprovalItem extends vscode.TreeItem {
     this.id = `approval:${request.id}`;
     this.description = approvalSummary(request.toolName, request.input, request.graphChange);
     const full = JSON.stringify(request.input, null, 2) ?? '';
-    this.tooltip = full.length > TOOLTIP_CHARS ? `${full.slice(0, TOOLTIP_CHARS)}…` : full;
+    // A graph change shows the exact text that would run, uncut; other tools their (capped) input.
+    this.tooltip = request.graphChange ? request.graphChange.detail : full.length > TOOLTIP_CHARS ? `${full.slice(0, TOOLTIP_CHARS)}…` : full;
     this.contextValue = 'approval';
     this.iconPath = new vscode.ThemeIcon('question');
     this.command = { command: 'agentStream.revealApproval', title: 'Show step', arguments: [this] };

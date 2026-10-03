@@ -23,10 +23,12 @@ export class ApprovalNotifier {
       if (this.seen.has(request.id)) continue;
       this.seen.add(request.id);
       if (this.d.isVisible(folder, request.graphId)) continue;
-      void this.d.ask(approvalSentence(request), 'Approve', 'Deny', 'Show').then((choice) => {
+      // A graph change is approved only where its exact text shows (the step's card): Show or Deny, never Approve.
+      const actions = request.graphChange ? ['Show', 'Deny'] : ['Approve', 'Deny', 'Show'];
+      void this.d.ask(approvalSentence(request), ...actions).then((choice) => {
         // Approved or denied elsewhere (the tab, the sidebar) while the notification was up.
         if (!this.d.pending().some((p) => p.request.id === request.id)) return;
-        if (choice === 'Approve') this.d.decide(folder, request.id, 'approve');
+        if (choice === 'Approve' && !request.graphChange) this.d.decide(folder, request.id, 'approve');
         else if (choice === 'Deny') this.d.decide(folder, request.id, 'deny');
         else if (choice === 'Show') this.d.reveal(folder, request);
       });

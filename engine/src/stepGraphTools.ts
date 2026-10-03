@@ -14,14 +14,18 @@ export type StepGraphToolDeps = {
   graphStore: GraphStore;
   runner: Runner;
   broker: ApprovalBroker;
-  /** Fills in `{{ }}` in the node's prompt or command exactly as the run would. */
-  render(graph: Graph, node: GraphNode): { ok: true; text: string } | { ok: false; error: string };
+  /** Fills in `{{ }}` in the node's prompt or command exactly as the run would, with the run preview's warnings. */
+  render(graph: Graph, node: GraphNode): { ok: true; text: string; warnings?: string[] } | { ok: false; error: string };
   signal: AbortSignal;
 };
 
 const APPROVAL = "Every change waits for the user's approval; only steps that haven't started can be changed.";
 const TOOL_NAME = 'Change graph';
 const started = (id: string) => `${id} already started; the change was not applied.`;
+/** A title is part of what runs (`# Your step: <title>`): one line, so it can't smuggle in instructions. */
+const MAX_TITLE_CHARS = 200;
+const TITLE_PROBLEM = `a step title must be one line of at most ${MAX_TITLE_CHARS} characters`;
+const titleProblem = (title: string | undefined) => (title !== undefined && (/[\r\n]/.test(title) || title.length > MAX_TITLE_CHARS) ? TITLE_PROBLEM : null);
 
 /** Changed fields in the order a person reads them: the text that runs first. */
 const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec'];
@@ -31,7 +35,7 @@ const listed = (names: string[]) => (names.length < 2 ? names.join('') : `${name
 const unique = (ids: string[]) => [...new Set(ids)];
 
 /** A valid change, checked against the graph and the run: the ops for the graph and the node the run gets. */
-type Proposal = { graph: Graph; ops: Op[]; node: GraphNode; summary: string; change(text: string): RunChange };
+type Proposal = { kind: 'add' | 'change'; graph: Graph; ops: Op[]; node: GraphNode; summary: string; change(text: string): RunChange };
 
 /** `ops` applied in memory, as the graph store would: the first refusal (unknown id, cycle, ...) or the result. */
 function simulate(graph: Graph, ops: Op[]): Graph | string {
@@ -66,9 +70,12 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
   const notStarted = (s: { run: RunMeta }, id: string) => id !== ctx.node.id && s.run.nodes[id]?.status === 'queued';
 
   type AddArgs = { title: string; kind: 'agent' | 'command'; prompt?: string; command?: string; description?: string; after: string[]; before: string[] };
-  function proposeAdd(a: AddArgs, id?: string): Proposal | string {
+  /** The new step's id is the next free one when this runs: at approval it is picked again, from the graph then. */
+  function proposeAdd(a: AddArgs): Proposal | string {
     const s = current();
     if (typeof s === 'string') return s;
+    const badTitle = titleProblem(a.title);
+    if (badTitle) return badTitle;
     const after = unique(a.after);
     const before = unique(a.before);
     for (const ref of [...after, ...before]) if (!known(s, ref)) return `node ${ref} does not exist`;
@@ -76,7 +83,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     if (a.kind === 'command' && !a.command?.trim()) return 'a command step needs a command';
     if (a.kind === 'agent' && !a.prompt?.trim()) return 'an agent step needs a prompt';
     // Never an id the run already has, even one the graph no longer does.
-    const newId = id ?? nextNodeId({ ...s.graph, nodes: [...s.graph.nodes, ...s.run.snapshot.nodes] });
+    const newId = nextNodeId({ ...s.graph, nodes: [...s.graph.nodes, ...s.run.snapshot.nodes] });
     const text = a.kind === 'command' ? { command: a.command } : { prompt: a.prompt };
     const ops: Op[] = [
       { type: 'addNode', node: { id: newId, title: a.title, kind: a.kind, description: a.description, ...text } },
@@ -91,6 +98,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     const problems = validateRunnable(inRun);
     if (problems.length) return problems.join('\n');
     return {
+      kind: 'add',
       graph: s.graph,
       ops,
       node,
@@ -106,6 +114,8 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     const { id, ...patch } = a;
     if (!known(s, id)) return `node ${id} does not exist`;
     if (!notStarted(s, id)) return started(id);
+    const badTitle = titleProblem(patch.title);
+    if (badTitle) return badTitle;
     const existing = s.graph.nodes.find((n) => n.id === id)!;
     if (existing.kind === 'command' && (patch.prompt !== undefined || (patch.command !== undefined && !patch.command.trim()))) return 'a command step needs a command';
     if (existing.kind === 'agent' && (patch.command !== undefined || (patch.prompt !== undefined && !patch.prompt.trim()))) return 'an agent step needs a prompt';
@@ -116,7 +126,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     const fields = changedFields(existing, node);
     if (fields.length === 0) return `Nothing to change in ${id}.`;
     const names = FIELD_ORDER.filter((f) => fields.includes(f)).map((f) => FIELD_NAMES[f]);
-    return { graph: s.graph, ops, node, summary: `${ctx.node.id} wants to change ${id}'s ${listed(names)}`, change: (rendered) => ({ kind: 'change', node, text: rendered }) };
+    return { kind: 'change', graph: s.graph, ops, node, summary: `${ctx.node.id} wants to change ${id}'s ${listed(names)}`, change: (rendered) => ({ kind: 'change', node, text: rendered }) };
   }
 
   /** One approval request, logged on the calling step like any other (createStepGate). */
@@ -141,13 +151,15 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
   }
 
   /** Check, fill in, ask; on approval check again, then change the run and the graph. Nothing changes otherwise. */
-  async function propose(input: unknown, make: (id?: string) => Proposal | string): Promise<ToolReply> {
+  async function propose(input: unknown, make: () => Proposal | string): Promise<ToolReply> {
     const p = make();
     if (typeof p === 'string') return reply(p, true);
     const r = d.render(p.graph, p.node);
     if (!r.ok) return reply(r.error, true);
     const description = p.node.description?.trim();
-    const detail = `${p.node.kind === 'command' ? 'Command' : 'Prompt'}:\n${r.text}${description ? `\n\nDescription: ${description}` : ''}`;
+    const warnings = r.warnings?.length ? `\n\nWarnings:\n${r.warnings.map((w) => `- ${w}`).join('\n')}` : '';
+    // Everything of the step that runs: its title (the agent's prompt starts with it), its text and description.
+    const detail = `Title: ${p.node.title}\n\n${p.node.kind === 'command' ? 'Command' : 'Prompt'}:\n${r.text}${description ? `\n\nDescription: ${description}` : ''}${warnings}`;
     let decision: Decision;
     try {
       decision = await ask(input, p.summary, detail);
@@ -156,10 +168,11 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     }
     if (decision.decision !== 'approve') return reply(denialReason(decision, d.signal.aborted || !d.runner.get(ctx.runId)), true);
     // The run moved on while the user decided: a target may have started.
-    const again = make(p.node.id);
+    const again = make();
     if (typeof again === 'string') return reply(again, true);
-    // The run gets exactly the approved node and text. It goes first: a stopped run refuses, and nothing changes.
-    const amended = d.runner.amend(ctx.runId, p.change(r.text), ctx.node.id, p.summary);
+    // The run gets exactly the approved node and text: a changed step as approved; an added step (built from
+    // the same arguments) under the id that is free now. The run goes first: if it refuses, nothing changes.
+    const amended = d.runner.amend(ctx.runId, (p.kind === 'add' ? again : p).change(r.text), ctx.node.id, p.summary);
     if (!amended.ok) return reply(amended.error, true);
     try {
       for (const op of again.ops) {
@@ -186,7 +199,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
         after: z.array(z.string()),
         before: z.array(z.string()),
       },
-      async (a) => propose(a, (id) => proposeAdd(a, id)),
+      async (a) => propose(a, () => proposeAdd(a)),
     ),
     defineTool(
       'change_step',
