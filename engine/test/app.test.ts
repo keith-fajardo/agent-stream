@@ -169,6 +169,16 @@ describe('app', () => {
     expect(a.of('chatEntry')).toEqual([]);
   });
 
+  it('checks the steps before the provider when refining (spec §6.2)', async () => {
+    const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'Only a title', kind: 'agent' } }, 'user');
+    await app.handle(a.c, { type: 'refineSteps', graphId: g.id, sessionId: 'default', nodeIds: ['n1'] });
+    await app.handle(a.c, { type: 'refineSteps', graphId: g.id, sessionId: 'default', nodeIds: ['n7'] });
+    expect(a.of('error').map((m) => m.message)).toEqual(['Write what the step should do first.', 'node n7 does not exist']);
+  });
+
   it('passes approval decisions to the broker and broadcasts the queue', async () => {
     const { app, client } = setup();
     const a = client();

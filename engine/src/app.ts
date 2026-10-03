@@ -376,7 +376,6 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'refineSteps': {
-        if (!status.ok) return error(`Chat is disabled: ${status.error}`);
         const g = graphStore.load(msg.graphId);
         if (!g.ok) return error(g.error);
         const s = sessions.load(msg.sessionId);
@@ -386,6 +385,7 @@ export function createApp(d: AppDeps) {
           if (!node) return error(`node ${id} does not exist`);
           if (!refinable(node)) return error('Write what the step should do first.');
         }
+        if (!status.ok) return error(`Chat is disabled: ${status.error}`);
         const r = refineRequest(msg.nodeIds);
         planner.send(msg.sessionId, msg.graphId, r.prompt, { display: r.display }).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
