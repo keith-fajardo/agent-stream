@@ -537,7 +537,13 @@ export function createApp(d: AppDeps) {
         // The dialog's Model line: what agent steps would get if the run started now. Never waits for the model list.
         const { model, effort } = modelDefaults();
         const label = model && (findModel(knownModels(), model)?.label ?? model);
-        const shown = { ...p.outcome.preview, ...(model && label && { model: { value: model, label } }), ...(effort && { effort }) };
+        // A provider that runs its default in place of a model it no longer lists (Copilot) names the one a step would get.
+        const inUse = provider.modelInUse?.(model);
+        const shownModel = inUse ? { value: inUse.value, label: inUse.label } : model && label ? { value: model, label } : undefined;
+        const cap = provider.stepRequestCap?.();
+        // Copilot ignores effort, so a configured level isn't previewed as if it applied.
+        const shownEffort = provider.id === 'copilot' ? undefined : effort;
+        const shown = { ...p.outcome.preview, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
         client.send({ type: 'runPreview', preview: shown, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
       }

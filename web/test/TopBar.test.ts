@@ -76,4 +76,10 @@ describe('TopBar run picker', () => {
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs } }));
     expect(container.querySelector('option')?.title).toBe('Model: sonnet · Effort: high');
   });
+
+  it('says effort is not supported for a Copilot run', async () => {
+    const runs: RunSummary[] = [{ id: '20261003-130000-dddd', graphId: 'g', status: 'succeeded', startedAt: 't', provider: 'copilot', model: 'auto', effort: 'high' }];
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs } }));
+    expect(container.querySelector('option')?.title).toBe('Model: auto · Effort: not supported');
+  });
 });

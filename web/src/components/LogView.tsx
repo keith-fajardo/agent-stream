@@ -83,9 +83,14 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
         </div>
       );
     case 'result': {
-      const usage = e.usage
-        ? ` · ${e.usage.inputTokens + e.usage.cacheReadTokens + e.usage.cacheWriteTokens} in / ${e.usage.outputTokens} out tokens · ${e.usage.turns} turns · ~$${e.usage.costUsd.toFixed(2)} API-equivalent`
-        : '';
+      const u = e.usage;
+      // A provider that reports no tokens or cost (Copilot) shows only its request count.
+      const counted = u ? u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens > 0 || u.costUsd > 0 : false;
+      const usage = !u
+        ? ''
+        : counted
+          ? ` · ${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns · ~$${u.costUsd.toFixed(2)} API-equivalent`
+          : ` · ${u.turns} turns`;
       const exit = e.exitCode !== undefined && e.exitCode !== null ? ` · exit ${e.exitCode}` : '';
       return (
         <div className={`ev final ${e.ok ? 'ok' : 'error'}`}>

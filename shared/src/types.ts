@@ -161,6 +161,10 @@ export type RunPreview = {
   /** The settings' default model (with its label) and effort that agent steps would use now: the dialog's Model line. */
   model?: { value: string; label: string };
   effort?: EffortLevel;
+  /** The provider the run would use: the dialog's Effort reads "not supported" for Copilot. */
+  provider?: ProviderId;
+  /** The run's provider caps model requests per step (Copilot): the dialog's "Copilot requests per step" line. */
+  copilotRequestsPerStep?: number;
 };
 
 /** Where a folder's graphs work (spec §3.2). `root` is a real path: the Git top-level, or the folder itself outside Git. */

@@ -178,7 +178,7 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       });
       ctx.emit({ type: 'text', text: requestLine(r.requests, cap) });
       if (r.ok) return { ok: true, output: r.text, usage: requestUsage(r.requests) };
-      if (r.cancelled) return { ok: false, output: '', error: 'cancelled' };
+      if (r.cancelled) return { ok: false, output: '', error: 'cancelled', usage: requestUsage(r.requests) };
       return { ok: false, output: lastAssistantText(r.messages), error: r.error, usage: requestUsage(r.requests) };
     },
 

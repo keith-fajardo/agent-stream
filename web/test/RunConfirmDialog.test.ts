@@ -75,6 +75,27 @@ describe('RunConfirmDialog', () => {
     expect(container.querySelector('.model-line')).toBeNull();
   });
 
+  it("shows Copilot's per-step request cap when the run's provider has one", async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ copilotRequestsPerStep: 25 }), requestId: lastRequestId() } }));
+    expect(container.querySelector('.cap-line')?.textContent).toBe('Copilot requests per step: up to 25');
+  });
+
+  it('shows no cap line for a provider without one, or for command steps alone', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));
+    expect(container.querySelector('.cap-line')).toBeNull();
+    const commandsOnly = preview({ signature: 'sig-2', copilotRequestsPerStep: 25, steps: [{ id: 'n1', title: 'Build', kind: 'command', text: 'dbt build', reused: false }] });
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: commandsOnly, requestId: lastRequestId() } }));
+    expect(container.querySelector('.cap-line')).toBeNull();
+  });
+
+  it('says effort is not supported for a Copilot run, and names the model in use', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ provider: 'copilot', model: { value: 'auto', label: 'Auto' } }), requestId: lastRequestId() } }));
+    expect(container.querySelector('.model-line')?.textContent).toBe('Model: Auto · Effort: not supported');
+  });
+
   it('shows each step\u2019s description as an In short line above its prompt or command', async () => {
     const steps: RunPreview['steps'] = [
       { id: 'n1', title: 'Build', kind: 'command', description: 'Builds the model.', text: 'dbt build', reused: false },

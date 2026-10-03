@@ -111,7 +111,8 @@ export function RunConfirmDialog() {
                 ⚠ {w}
               </p>
             ))}
-            {agents.length > 0 && <p className="model-line">{modelLine({ model: preview.model?.value, label: preview.model?.label, effort: preview.effort })}</p>}
+            {agents.length > 0 && <p className="model-line">{modelLine({ model: preview.model?.value, label: preview.model?.label, effort: preview.effort, provider: preview.provider })}</p>}
+            {agents.length > 0 && preview.copilotRequestsPerStep !== undefined && <p className="cap-line">Copilot requests per step: up to {preview.copilotRequestsPerStep}</p>}
             <p>
               {agents.length} agent step{agents.length === 1 ? '' : 's'} will run. Every file edit or shell command they attempt waits for your approval.
             </p>

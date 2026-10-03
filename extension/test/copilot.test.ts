@@ -197,7 +197,15 @@ describe('Copilot runStep', () => {
     expect(await provider({ lm: models(m.model) }).runStep(step().ctx, allowAll)).toEqual({ ok: false, output: '', error: COPILOT_PERMISSION, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 1 } });
     const ac = new AbortController();
     ac.abort();
-    expect(await provider({ lm: models(fakeLmModel({ id: 'auto' }).model) }).runStep(step({ signal: ac.signal }).ctx, allowAll)).toEqual({ ok: false, output: '', error: 'cancelled' });
+    expect(await provider({ lm: models(fakeLmModel({ id: 'auto' }).model) }).runStep(step({ signal: ac.signal }).ctx, allowAll)).toEqual({ ok: false, output: '', error: 'cancelled', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 0 } });
+  });
+
+  it('reports the requests a Stopped step already spent', async () => {
+    const ac = new AbortController();
+    const m = fakeLmModel({ id: 'auto', replies: [[call('c1', 'Read', { path: 'a.txt' })]] });
+    const stopOnTool: ToolGate = { ...allowAll, decide: async () => { ac.abort(); return { allow: true, by: 'user' }; } };
+    const r = await provider({ lm: models(m.model) }).runStep(step({ signal: ac.signal }).ctx, stopOnTool);
+    expect(r).toEqual({ ok: false, output: '', error: 'cancelled', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 1 } });
   });
 
   it('fails without models, after the start event and without a request line', async () => {

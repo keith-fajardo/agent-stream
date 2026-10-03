@@ -1463,6 +1463,38 @@ describe('app: model and effort', () => {
     expect(a.all('models')).toHaveLength(2);
   });
 
+  it("shows the provider's per-step request cap and the model a step would run on", async () => {
+    const defaults: ModelSelection = { model: 'gpt-9' };
+    const auto: ModelChoice = { value: 'auto', label: 'Auto', efforts: [] };
+    const provider = testProvider({ id: 'copilot', name: 'GitHub Copilot', stepRequestCap: () => 25, modelInUse: () => auto });
+    const { app, graphId } = setupWithGraph({ provider, modelDefaults: () => defaults });
+    app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    const c = client(app);
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    expect(c.last('runPreview').preview).toMatchObject({ copilotRequestsPerStep: 25, model: { value: 'auto', label: 'Auto' } });
+  });
+
+  it('leaves the cap out for a provider without one', async () => {
+    const { app, graphId } = setupWithGraph();
+    const c = client(app);
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    expect(c.last('runPreview').preview).not.toHaveProperty('copilotRequestsPerStep');
+  });
+
+  it('names the provider in a preview and drops the configured effort for Copilot, which ignores it', async () => {
+    const defaults: ModelSelection = { effort: 'high' };
+    const copilot = setupWithGraph({ provider: testProvider({ id: 'copilot', name: 'GitHub Copilot' }), modelDefaults: () => defaults });
+    copilot.app.graphStore.apply(copilot.graphId, { type: 'addNode', node: { id: 'n1', title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    const c = client(copilot.app);
+    await copilot.app.handle(c.client, { type: 'previewRun', graphId: copilot.graphId });
+    expect(c.last('runPreview').preview).toMatchObject({ provider: 'copilot' });
+    expect(c.last('runPreview').preview).not.toHaveProperty('effort');
+    const claude = setupWithGraph({ modelDefaults: () => defaults });
+    const c2 = client(claude.app);
+    await claude.app.handle(c2.client, { type: 'previewRun', graphId: claude.graphId });
+    expect(c2.last('runPreview').preview).toMatchObject({ effort: 'high' });
+  });
+
   it('never waits on the model list for a preview: the cached list names the model, else its id', async () => {
     let known: ModelChoice[] | undefined;
     const listModels = vi.fn(() => new Promise<ModelChoice[]>(() => {}));

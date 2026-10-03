@@ -10,6 +10,11 @@ describe('modelLine', () => {
     expect(modelLine({ model: 'opus', label: 'Opus', effort: 'high' })).toBe('Model: Opus · Effort: high');
     expect(modelLine({ model: 'claude-x' })).toBe('Model: claude-x · Effort: Default');
   });
+
+  it('says Copilot runs do not support effort, whatever was configured', () => {
+    expect(modelLine({ provider: 'copilot', model: 'auto', label: 'Auto', effort: 'high' })).toBe('Model: Auto · Effort: not supported');
+    expect(modelLine({ provider: 'claude', effort: 'high' })).toBe('Model: Default · Effort: high');
+  });
 });
 
 describe('isEffortLevel', () => {

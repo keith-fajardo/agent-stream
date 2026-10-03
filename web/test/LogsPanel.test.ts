@@ -127,4 +127,13 @@ describe('LogsPanel', () => {
     await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
     expect(container.querySelector('.logs-head .logs-waiting')?.textContent).toBe('Waiting for run 20261003-090000-aaaa ("billing") to finish changing files');
   });
+
+  it('shows only the request count for a step that reports no tokens or cost (Copilot)', async () => {
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: 3 };
+    await act(async () => server({ type: 'nodeLogs', runId: run.id, nodeId: 'n2', events: [{ at: '2026-10-02T10:00:00Z', type: 'result', ok: true, durationMs: 1200, usage }] }));
+    expect(text()).toContain('· 3 turns');
+    expect(text()).not.toContain('API-equivalent');
+    expect(text()).not.toContain('0 in / 0 out');
+  });
 });

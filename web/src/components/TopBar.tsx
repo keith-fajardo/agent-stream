@@ -36,7 +36,7 @@ export function TopBar() {
             const n = (selected ? selected.amendments?.length : r.amendments) ?? 0;
             const waiting = selected ? selected.waitingFor : r.waitingFor;
             const ran = selected?.checkout ?? r.checkout;
-            const title = [selected?.amendments?.map((a) => a.summary).join('\n'), ran && ranIn(ran), modelLine(selected ?? r)].filter(Boolean).join('\n');
+            const title = [selected?.amendments?.map((a) => a.summary).join('\n'), ran && ranIn(ran), modelLine({ ...(selected ?? r), provider: r.provider })].filter(Boolean).join('\n');
             return (
               <option key={r.id} value={r.id} title={title}>
                 {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}${n > 0 ? ` · ${n} change${n === 1 ? '' : 's'} by agents` : ''}${waiting ? ` · ${waitingText(waiting, graphName(waiting.graphId))}` : ''}`}
