@@ -2170,7 +2170,7 @@ export async function compactIfNeeded(o: {
 }
 ```
 
-In `engine/src/agentLoop/loop.ts`, add the import:
+In `engine/src/agentLoop/loop.ts`, add after the last import:
 
 ```ts
 import { compactIfNeeded } from './compact';
@@ -2650,7 +2650,7 @@ export class CancellationTokenSource {
 }
 ```
 
-In `extension/test/helpers.ts`, add `import { vi } from 'vitest';` and `import * as vscode from 'vscode';` to the imports, then append:
+In `extension/test/helpers.ts`, add `import { vi } from 'vitest';` and `import * as vscode from 'vscode';` after its last import (line 14; any position at module level works), then append:
 
 ```ts
 type LmRequest = { messages: vscode.LanguageModelChatMessage[]; options?: vscode.LanguageModelChatRequestOptions; token?: vscode.CancellationToken };
@@ -3496,8 +3496,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Spec tests owned (§8):** "the cap settings are read and clamped". This task also wires §5.5: `EngineManager.providerFor('copilot')` gets `vscode.lm`, `context.languageModelAccessInformation`, `createRunShell` with the same Git Bash discovery as command steps, and the caps. `preview` is retired and the status bar shows `Copilot`.
 
 **Files:**
-- Modify: `extension/src/settings.ts`; `extension/src/engines.ts` (`EngineManagerDeps.languageModelAccess`, `providerFor`, `gitBashPath`); `extension/src/extension.ts:44` (the `EngineManager` construction); `extension/src/statusBar.ts:9` (delete the preview line); `extension/package.json` (description, provider and model descriptions, two settings); `shared/src/types.ts:281-293` (`ProviderStatus`); `web/src/App.tsx:17`; `extension/test/integration/suite.cjs:81-92`
-- Modify (mechanical, two new required `Settings` fields): the `settings: () => ({ … })` literals in `extension/test/commands.test.ts:23`, `extension/test/engines.test.ts:17`, `:37` and `:163`, `extension/test/parallelTickets.test.ts:69` and `extension/test/runCommands.test.ts:22`
+- Modify: `extension/src/settings.ts`; `extension/src/engines.ts` (`EngineManagerDeps.languageModelAccess`, `providerFor`, `gitBashPath`); `extension/src/extension.ts:46` (the `EngineManager` construction); `extension/src/statusBar.ts:9` (delete the preview line); `extension/package.json` (description, provider and model descriptions, two settings); `shared/src/types.ts:281-293` (`ProviderStatus`); `web/src/App.tsx:17`; `extension/test/integration/suite.cjs:81-92`
+- Modify (mechanical, two new required `Settings` fields): the settings literals in `extension/test/commands.test.ts:23`, `extension/test/engines.test.ts:17` (`const defaults = { … }`), `:37` and `:163`, `extension/test/parallelTickets.test.ts:69` and `extension/test/runCommands.test.ts:22`
+- Modify (mechanical, `preview` is retired): the `ProviderStatus` literals with `preview: true` in `web/test/ChatApp.test.ts:67` (a type error once the field is gone) and `extension/test/engines.test.ts:205` (no type error, but Task 11's final search would find it); no assertion changes
 - Test: `extension/test/settings.test.ts`, `extension/test/engines.test.ts`, `extension/test/statusBar.test.ts`
 
 **Interfaces:**
@@ -3550,7 +3551,11 @@ In each of the six `Settings` literals listed under **Files**, replace `effort: 
 effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }
 ```
 
-Append inside `describe('EngineManager', …)` in `extension/test/engines.test.ts`:
+Drop the retired flag from the two status literals:
+- In `web/test/ChatApp.test.ts:67`, replace `status: { provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', error: "Copilot support isn't implemented yet." }` with `status: { provider: 'copilot', ok: false, label: 'Copilot not available', error: "Copilot support isn't implemented yet." }`. The test still asserts that text as the placeholder.
+- In `extension/test/engines.test.ts:205`, replace `({ provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', error: 'nope' })` with `({ provider: 'copilot', ok: false, label: 'Copilot not available', error: 'nope' })`.
+
+Add inside the first block, `describe('EngineManager', …)`, in `extension/test/engines.test.ts`, right before its closing `});` (two more `describe` blocks follow it in the file):
 
 ```ts
   it('builds the Copilot provider with the request caps from the settings, read when asked', () => {
@@ -3711,7 +3716,7 @@ In `extension/package.json`:
         }
 ```
 
-In `extension/test/integration/suite.cjs`, replace the block from `// Providers: GitHub Copilot is selectable.` through `detachProbe();` with (ruling R24):
+In `extension/test/integration/suite.cjs`, replace the block from the comment line starting `// Providers: GitHub Copilot is selectable.` through `detachProbe();` with (ruling R24):
 
 ```js
   // Providers: GitHub Copilot is selectable. This fresh profile normally has no signed-in Copilot, so its status
@@ -3745,7 +3750,7 @@ Run: `npm run typecheck`
 Expected: no errors in any workspace. Check that `rg -n "preview\?: boolean|status\.preview|beaker" shared extension web --glob '!node_modules'` finds nothing.
 
 ```bash
-git add extension/src/settings.ts extension/src/engines.ts extension/src/extension.ts extension/src/statusBar.ts extension/package.json shared/src/types.ts web/src/App.tsx extension/test/integration/suite.cjs extension/test/settings.test.ts extension/test/engines.test.ts extension/test/statusBar.test.ts extension/test/commands.test.ts extension/test/parallelTickets.test.ts extension/test/runCommands.test.ts
+git add extension/src/settings.ts extension/src/engines.ts extension/src/extension.ts extension/src/statusBar.ts extension/package.json shared/src/types.ts web/src/App.tsx extension/test/integration/suite.cjs extension/test/settings.test.ts extension/test/engines.test.ts extension/test/statusBar.test.ts extension/test/commands.test.ts extension/test/parallelTickets.test.ts extension/test/runCommands.test.ts web/test/ChatApp.test.ts
 git commit -m "feat(extension): wire Copilot to its settings, consent and Git Bash
 
 agentStream.copilot.maxRequestsPerStep (25, 1-200) and maxRequestsPerTurn
@@ -3844,7 +3849,7 @@ Expected: FAIL. The preview has no `copilotRequestsPerStep` and its model is `gp
 
 - [ ] **Step 3: Write the implementation**
 
-In `shared/src/types.ts`, add to `RunPreview`, after `effort?: EffortLevel;`:
+In `shared/src/types.ts`, add to `RunPreview` (not `RunMeta`, which has the same line), after its `effort?: EffortLevel;` (line 163):
 
 ```ts
   /** The run's provider caps model requests per step (Copilot): the dialog's "Copilot requests per step" line. */
