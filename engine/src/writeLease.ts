@@ -6,12 +6,16 @@ import type { LeaseHolder } from '@agent-stream/shared';
 export type { LeaseHolder } from '@agent-stream/shared';
 /** `lockFile` is set when the lock file can't be read, so the message can name it (ruling R6). */
 export type LeaseResult = { ok: true } | { ok: false; holder: LeaseHolder; otherWindow: boolean; lockFile?: string };
+/** Who would refuse an acquire, and how to name them in the message. */
+export type LeaseBlock = Omit<Extract<LeaseResult, { ok: false }>, 'ok'>;
 
 /** The checkout's write lease (spec §4.2): one instance per extension host, shared by every folder's engine. */
 export interface WriteLeases {
   acquire(checkoutRoot: string, holder: Omit<LeaseHolder, 'pid'>): LeaseResult;
   release(checkoutRoot: string, runId: string): void;
   holder(checkoutRoot: string): LeaseHolder | undefined;
+  /** What would refuse another run's acquire now; takes nothing and reclaims nothing. */
+  blockedBy(checkoutRoot: string): LeaseBlock | undefined;
   onRelease(listener: (checkoutRoot: string) => void): () => void;
 }
 
@@ -81,6 +85,15 @@ export function createWriteLeases(o: {
   const listeners = new Set<(checkoutRoot: string) => void>();
   /** Stale: its process is gone, or it is this process's pid but no active run of this process holds it. */
   const stale = (h: LeaseHolder, root: string) => !isAlive(h.pid) || (h.pid === pid && held.get(root)?.runId !== h.runId);
+  /** Reads the lock without taking or reclaiming it; same verdicts as acquire. */
+  const blockedBy = (root: string): LeaseBlock | undefined => {
+    const mine = held.get(root);
+    if (mine) return { holder: mine, otherWindow: false };
+    const file = leaseFile(o.locksDir, root);
+    const lock = readLock(file);
+    if (lock.kind === 'unreadable') return { holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: file };
+    return lock.kind === 'held' && !stale(lock.holder, root) ? { holder: lock.holder, otherWindow: lock.holder.pid !== pid } : undefined;
+  };
 
   return {
     acquire(root, h) {
@@ -127,12 +140,10 @@ export function createWriteLeases(o: {
     },
 
     holder(root) {
-      const mine = held.get(root);
-      if (mine) return mine;
-      const lock = readLock(leaseFile(o.locksDir, root));
-      if (lock.kind === 'unreadable') return UNKNOWN_HOLDER;
-      return lock.kind === 'held' && !stale(lock.holder, root) ? lock.holder : undefined;
+      return blockedBy(root)?.holder;
     },
+
+    blockedBy,
 
     onRelease(listener) {
       listeners.add(listener);

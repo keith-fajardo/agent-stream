@@ -1224,9 +1224,33 @@ describe('the checkout and the write lease', () => {
     expect(ran[2]).toBe(ran[0].replace('add', 'remove'));
   });
 
-  it('removes the worktrees it made when the run is blocked', async () => {
+  it('refuses a start the lease blocks before creating any worktree', async () => {
+    const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    let git: ReturnType<typeof repoGit> | undefined;
+    const { app, root } = gitApp({
+      leases: createWriteLeases({ locksDir, isAlive: () => true }),
+      git: (root) => (git = repoGit({ root, branch: 'main', head: SHA, answers: { 'worktree add --detach *': {}, 'worktree remove --force *': {} } })).exec,
+    });
+    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'billing', folder: join(tmpdir(), 'elsewhere'), startedAt: 't' });
+    const c = client(app);
+    const g = graphWith(app, 'Orders', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } }, writer);
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(c.last('runBlocked')).toMatchObject({
+      otherWindow: true,
+      holder: expect.objectContaining({ runId: '20261003-090000-beef', pid: 4242 }),
+      checkout: expect.objectContaining({ git: true, root }),
+      canSetUpTickets: true,
+      message: `"Orders" can't start: run 20261003-090000-beef in another VS Code window of "billing" is already changing files in this checkout (${root}). Separate tickets need separate worktrees.`,
+    });
+    expect(c.all('error')).toEqual([]);
+    expect(git!.ran().filter((a) => a.startsWith('worktree add') || a.startsWith('worktree remove'))).toEqual([]);
+    expect(app.runStore.list(g.id)).toEqual([]);
+  });
+
+  it('removes the worktrees it made when the runner blocks the start (the lease was taken meanwhile)', async () => {
     const ran: string[] = [];
     const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const takeLease = () => createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'x', folder: 'f', startedAt: 't' });
     const { app, root } = gitApp({
       leases: createWriteLeases({ locksDir, isAlive: () => true }),
       git: (root) =>
@@ -1234,10 +1258,9 @@ describe('the checkout and the write lease', () => {
           root,
           branch: 'main',
           head: SHA,
-          answers: { 'worktree add --detach *': (_cwd, args) => (ran.push(`add ${args[3]}`), {}), 'worktree remove --force *': (_cwd, args) => (ran.push(`remove ${args[3]}`), {}) },
+          answers: { 'worktree add --detach *': (_cwd, args) => (ran.push(`add ${args[3]}`), takeLease(), {}), 'worktree remove --force *': (_cwd, args) => (ran.push(`remove ${args[3]}`), {}) },
         }).exec,
     });
-    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'x', folder: 'f', startedAt: 't' });
     const c = client(app);
     const g = graphWith(app, 'AB', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } }, writer);
     await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
@@ -1250,6 +1273,8 @@ describe('the checkout and the write lease', () => {
   it("logs a worktree it can't remove after a blocked start, and keeps the runBlocked message", async () => {
     const added: string[] = [];
     const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const takeLease = () =>
+      createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'billing', folder: join(tmpdir(), 'elsewhere'), startedAt: 't' });
     const { app, root } = gitApp({
       leases: createWriteLeases({ locksDir, isAlive: () => true }),
       git: (root) =>
@@ -1258,12 +1283,12 @@ describe('the checkout and the write lease', () => {
           branch: 'main',
           head: SHA,
           answers: {
-            'worktree add --detach *': (_cwd, args) => (added.push(args[3]), {}),
+            // The lease is taken meanwhile, so the pre-check passes and the runner blocks the start.
+            'worktree add --detach *': (_cwd, args) => (added.push(args[3]), takeLease(), {}),
             'worktree remove --force *': () => ({ code: 128, stderr: "fatal: '/x' is locked\n" }),
           },
         }).exec,
     });
-    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'billing', folder: join(tmpdir(), 'elsewhere'), startedAt: 't' });
     const c = client(app);
     const g = graphWith(app, 'Orders', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } }, writer);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});

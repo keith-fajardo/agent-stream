@@ -12,7 +12,7 @@ export { envLookup } from './runPreview';
 export type { NodeOutcome } from './executors';
 export { ALTERNATIVES_RULE, PARALLEL_POLICY, SERIALIZATION_GUIDANCE } from './policy';
 export { GIT_MISSING, inspectCheckout, NOT_A_REPO, realGit, realOrResolved, type GitExec, type GitResult } from './git';
-export { createWriteLeases, leaseKey, type LeaseResult, type WriteLeases } from './writeLease';
+export { createWriteLeases, leaseKey, type LeaseBlock, type LeaseResult, type WriteLeases } from './writeLease';
 export { createVariantWorkspaces, pruneWorkspaces, removeWorkspace, variantPath } from './variantWorkspaces';
 export {
   checkSetup,

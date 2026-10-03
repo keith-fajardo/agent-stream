@@ -39,14 +39,14 @@ import { GIT_BASH_MISSING, type Found } from './platform';
 import { createStepGate } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
-import { Runner } from './runner';
+import { needsCheckoutLease, Runner } from './runner';
 import { RunStore } from './runStore';
 import { createStepGraphTools } from './stepGraphTools';
 import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
 import { createVariantWorkspaces, removeWorkspace } from './variantWorkspaces';
-import type { WriteLeases } from './writeLease';
+import type { LeaseBlock, WriteLeases } from './writeLease';
 
 /** Run states in which a step's definition may still be read: a revert must wait for them. */
 const IN_PROGRESS = new Set<NodeStatus | undefined>(['queued', 'running', 'waiting_approval']);
@@ -486,9 +486,23 @@ export function createApp(d: AppDeps) {
         // Steps with a workspace never reuse (spec §4.3a): every workspace the graph names gets a fresh worktree, before start.
         const names = [...new Set(r.graph.nodes.map(workspaceOf).filter((w): w is string => w !== null))];
         let workspaces: Record<string, { path: string; head: string }> | undefined;
+        const sendBlocked = ({ holder, otherWindow, lockFile }: LeaseBlock) =>
+          client.send({
+            type: 'runBlocked',
+            graphId: r.graph.id,
+            message: blockedMessage({ graphName: r.graph.name, holder, holderName: holderGraphName(holder), otherWindow, root: checkout.root, lockFile }),
+            holder,
+            otherWindow,
+            checkout,
+            canSetUpTickets: checkout.git,
+          });
         if (names.length) {
           // The preview already refused this; kept so `head` is known here.
           if (!checkout.git || !checkout.head) return error(p.outcome.preview.problems.join('\n'));
+          // Blocked now: refuse before making any worktree (spec §4.3, "nothing is created"). The runner checks again.
+          const reused = new Set(p.outcome.preview.steps.filter((s) => s.reused).map((s) => s.id));
+          const block = !msg.sequential && needsCheckoutLease(r.graph, reused) ? d.leases.blockedBy(checkout.root) : undefined;
+          if (block) return sendBlocked(block);
           const made = await createVariantWorkspaces({ checkoutRoot: checkout.root, runId, names, head: checkout.head, git: d.git, home: d.home });
           if (!made.ok) return error(made.error);
           workspaces = made.workspaces;
@@ -524,17 +538,7 @@ export function createApp(d: AppDeps) {
         // The reply stays the same whether or not every worktree could be removed.
         await removeAttempt();
         if (!started.blocked) return error(started.error);
-        const { holder, otherWindow, lockFile } = started.blocked;
-        client.send({
-          type: 'runBlocked',
-          graphId: r.graph.id,
-          message: blockedMessage({ graphName: r.graph.name, holder, holderName: holderGraphName(holder), otherWindow, root: checkout.root, lockFile }),
-          holder,
-          otherWindow,
-          checkout,
-          canSetUpTickets: checkout.git,
-        });
-        return;
+        return sendBlocked(started.blocked);
       }
       case 'inspectCheckout':
         client.send(await checkoutMessage());

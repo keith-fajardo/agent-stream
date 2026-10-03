@@ -103,6 +103,10 @@ const DONE_OK: ReadonlySet<NodeStatus> = new Set(['succeeded', 'reused']);
 const BLOCKED: ReadonlySet<NodeStatus> = new Set(['failed', 'not_run', 'cancelled', 'interrupted']);
 const waitingOn = (h: LeaseHolder): WaitingFor => ({ runId: h.runId, graphId: h.graphId, folder: h.folder });
 
+/** Only write-capable steps in this checkout that will actually run need the lease (spec §4.3). */
+export const needsCheckoutLease = (graph: Graph, reuse: ReadonlySet<string>): boolean =>
+  graph.nodes.some((n) => isWriteCapable(n) && workspaceOf(n) === null && !reuse.has(n.id));
+
 /**
  * Executes a frozen snapshot of a graph (spec §7.2): a node starts once every upstream node
  * succeeded or was reused, up to `maxParallel` at a time; failures skip descendants.
@@ -155,8 +159,7 @@ export class Runner extends EventEmitter {
     const runId = input.runId ?? this.makeRunId();
     const leaseRoot = input.checkout?.root ?? this.deps.projectDir;
     const startedAt = this.clock();
-    // Only write-capable steps in this checkout that will actually run need the lease (spec §4.3).
-    const needsLease = graph.nodes.some((n) => isWriteCapable(n) && workspaceOf(n) === null && !reuse.has(n.id));
+    const needsLease = needsCheckoutLease(graph, reuse);
     let holdsLease = false;
     let waitFor: { holder: LeaseHolder; otherWindow: boolean } | undefined;
     if (needsLease) {

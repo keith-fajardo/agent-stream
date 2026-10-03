@@ -79,6 +79,22 @@ describe('write leases', () => {
     expect(readFileSync(leaseFile(dir, ROOT), 'utf8')).toBe(content);
   });
 
+  it('says who would block an acquire, without taking the lease or reclaiming a stale lock', () => {
+    const dir = locks();
+    const file = leaseFile(dir, ROOT);
+    const mine = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true });
+    expect(mine.blockedBy(ROOT)).toBeUndefined();
+    expect(existsSync(file)).toBe(false);
+    mine.acquire(ROOT, holder('r1'));
+    expect(mine.blockedBy(ROOT)).toEqual({ holder: { ...holder('r1'), pid: 100 }, otherWindow: false });
+    expect(createWriteLeases({ locksDir: dir, pid: 200, isAlive: () => true }).blockedBy(ROOT)).toEqual({ holder: { ...holder('r1'), pid: 100 }, otherWindow: true });
+    const gone = createWriteLeases({ locksDir: dir, pid: 200, isAlive: (pid) => pid !== 100 });
+    expect(gone.blockedBy(ROOT)).toBeUndefined();
+    expect(existsSync(file)).toBe(true);
+    writeFileSync(file, 'not json');
+    expect(gone.blockedBy(ROOT)).toEqual({ holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: file });
+  });
+
   it('releases only for the run that holds the lease', () => {
     const dir = locks();
     const leases = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true });
