@@ -2,7 +2,7 @@ import type { HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
 import { couldNotAsk } from '../toolGate';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { authSourceError, isSubscriptionAuthSource, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
-import type { ClaudeRunDeps } from './runStep';
+import { sdkModelOptions, type ClaudeRunDeps } from './runStep';
 import { blocksOf, graphServer } from './sdk';
 
 const GRAPH_PREFIX = 'mcp__graph__';
@@ -47,6 +47,7 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
         ],
       },
       abortController,
+      ...sdkModelOptions(deps, turn),
     };
     if (turn.resume) options.resume = turn.resume;
     let sessionId: string | undefined;

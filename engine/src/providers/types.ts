@@ -1,5 +1,5 @@
 import type { ZodRawShape } from 'zod';
-import type { ProviderId, ProviderStatus } from '@agent-stream/shared';
+import type { EffortLevel, ModelChoice, ProviderId, ProviderStatus } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../executors';
 import type { ToolGate } from './toolGate';
 
@@ -14,6 +14,9 @@ export type PlannerTurn = {
   tools: GraphTool[];
   /** The provider's own conversation id to continue, when it belongs to this provider. */
   resume?: string;
+  /** The model and effort for this turn; absent: the provider's own default. */
+  model?: string;
+  effort?: EffortLevel;
   gate: ToolGate;
   signal: AbortSignal;
   onEvent(e: PlannerEvent): void;
@@ -28,4 +31,6 @@ export interface AgentProvider {
   folderProblem?(projectDir: string): string | undefined;
   runStep(ctx: NodeContext, gate: ToolGate): Promise<NodeOutcome>;
   planTurn(turn: PlannerTurn): Promise<PlannerTurnResult>;
+  /** The models this provider offers, for the Model menus; [] when they can't be listed (the menus then offer only Default). */
+  listModels?(): Promise<ModelChoice[]>;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
 import { Planner, PLANNER_APPEND, describeOp } from '../src/planner';
+import type { EffortLevel } from '@agent-stream/shared';
 import type { AgentProvider, PlannerTurn, PlannerTurnResult } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { SessionStore } from '../src/sessionStore';
@@ -45,7 +46,10 @@ function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
   sessions.create('B', 'b');
   const graphId = graphStore.create('G').id;
   const provider = fakeProvider(turns, over);
+  /** The settings' default model and effort, read per turn. */
+  const defaults: { model?: string; effort?: EffortLevel } = {};
   const planner = new Planner({
+    modelDefaults: () => defaults,
     graphStore,
     runStore,
     sessions,
@@ -61,10 +65,38 @@ function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
   const chat = () => sessions.chatLog('a').read(graphId);
   /** Session a's planner state for the graph. */
   const state = () => sessions.plannerState('a', graphId);
-  return { paths, graphStore, sessions, graphId, planner, provider, seen: provider.seen, busy, chat, state };
+  return { paths, graphStore, sessions, graphId, planner, provider, seen: provider.seen, busy, chat, state, defaults };
 }
 
 describe('Planner', () => {
+  it("sends the conversation's model and effort on every turn, falling back to the settings per field", async () => {
+    const s = setup([ran('s1'), ran('s1'), ran('s1'), ran('s1')]);
+    await s.planner.send('a', s.graphId, 'one');
+    expect(s.seen[0].model).toBeUndefined();
+    expect(s.seen[0].effort).toBeUndefined();
+    s.defaults.model = 'haiku';
+    s.defaults.effort = 'low';
+    await s.planner.send('a', s.graphId, 'two');
+    expect(s.seen[1]).toMatchObject({ model: 'haiku', effort: 'low' });
+    // A choice made mid-conversation applies from the next turn, and survives the turn's own state update.
+    s.sessions.setPlannerState('a', s.graphId, { model: 'sonnet' });
+    await s.planner.send('a', s.graphId, 'three');
+    expect(s.seen[2]).toMatchObject({ model: 'sonnet', effort: 'low' });
+    expect(s.state()).toMatchObject({ sessionId: 's1', model: 'sonnet' });
+    s.sessions.setPlannerState('a', s.graphId, { effort: 'max' });
+    s.defaults.model = '';
+    await s.planner.send('a', s.graphId, 'four');
+    expect(s.seen[3]).toMatchObject({ model: 'sonnet', effort: 'max' });
+  });
+
+  it('passes nothing for Default when the settings are empty too', async () => {
+    const s = setup([ran()]);
+    s.defaults.model = '';
+    await s.planner.send('a', s.graphId, 'hi');
+    expect('model' in s.seen[0]).toBe(false);
+    expect('effort' in s.seen[0]).toBe(false);
+  });
+
   it('runs a turn with the graph tools and records the chat', async () => {
     const s = setup([
       async (t) => {

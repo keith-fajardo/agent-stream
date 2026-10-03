@@ -89,7 +89,7 @@ export class RunStore {
       .reverse()
       .map((id) => this.get(id))
       .filter((m): m is RunMeta => !!m && m.graphId === graphId)
-      .map(({ id, graphId: g, status, startedAt, endedAt, provider, amendments, checkout, waitingFor }) => ({
+      .map(({ id, graphId: g, status, startedAt, endedAt, provider, amendments, checkout, waitingFor, model, effort }) => ({
         id,
         graphId: g,
         status,
@@ -99,6 +99,8 @@ export class RunStore {
         ...(amendments?.length && { amendments: amendments.length }),
         ...(checkout && { checkout }),
         ...(waitingFor && { waitingFor }),
+        ...(model && { model }),
+        ...(effort && { effort }),
       }));
   }
 

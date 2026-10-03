@@ -18,6 +18,7 @@ import {
   type NodeEventBody,
   type NodeRunState,
   type NodeStatus,
+  type EffortLevel,
   type ProviderId,
   type RenderedRun,
   type RunMeta,
@@ -62,6 +63,9 @@ export type StartRunInput = {
   agent?: NodeExecutor;
   /** Which provider runs the agent steps, recorded in the run. */
   provider?: ProviderId;
+  /** The model and effort every agent step of this run gets, captured at start and recorded in the run (only when set). */
+  model?: string;
+  effort?: EffortLevel;
   /** The run's id, when the caller needs it before the run starts (variant worktree paths contain it). */
   runId?: string;
   /** Start even though another run holds the checkout's lease: write-capable checkout steps wait for it (spec §4.3). */
@@ -189,6 +193,8 @@ export class Runner extends EventEmitter {
       snapshot: graph,
       nodes: {},
       ...(input.provider && { provider: input.provider }),
+      ...(input.model && { model: input.model }),
+      ...(input.effort && { effort: input.effort }),
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
       ...(Object.keys(workspaces).length > 0 && { workspaces }),
@@ -454,6 +460,8 @@ export class Runner extends EventEmitter {
           cwd: place?.path ?? this.deps.projectDir,
           signal: controller.signal,
           emit: (event) => this.emitEvent(run, nodeId, event),
+          ...(node.kind === 'agent' && meta.model && { model: meta.model }),
+          ...(node.kind === 'agent' && meta.effort && { effort: meta.effort }),
         });
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))

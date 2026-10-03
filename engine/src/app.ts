@@ -15,6 +15,8 @@ import {
   type GraphNode,
   type GraphResult,
   type LeaseHolder,
+  type ModelChoice,
+  type ModelSelection,
   type NodeEvent,
   type NodeStatus,
   type NodeRunState,
@@ -69,6 +71,11 @@ export type AppDeps = {
   /** Runs agent steps and planner turns. */
   provider: AgentProvider;
   status: ProviderStatus;
+  /**
+   * The settings' default model and effort ('' or absent: none, Claude Code's own default), read when a run starts and on
+   * every planner turn of a conversation without its own choice. Never written into a graph.
+   */
+  modelDefaults?: () => ModelSelection;
   maxParallel: number;
   /** For tests: replaces the step executors (agent steps then ignore the provider). */
   executors?: Executors;
@@ -100,6 +107,20 @@ export function createApp(d: AppDeps) {
   let provider = d.provider;
   let status = d.status;
   const clock = d.clock ?? systemClock;
+  /** The settings' defaults with empty values dropped. */
+  const modelDefaults = (): ModelSelection => {
+    const m = d.modelDefaults?.() ?? {};
+    return { ...(m.model && { model: m.model }), ...(m.effort && { effort: m.effort }) };
+  };
+  /** The current provider's models; [] when it can't list them. */
+  const listModels = async (p: AgentProvider = provider): Promise<ModelChoice[]> => {
+    try {
+      return (await p.listModels?.()) ?? [];
+    } catch (e) {
+      console.error('[agent-stream] could not list models', e);
+      return [];
+    }
+  };
   const paths = projectPaths(d.projectDir);
   const migrationWarnings = migrateProjectFolder(d.projectDir, d.rename);
   if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
@@ -253,7 +274,7 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, sessions, projectDir: d.projectDir, provider: () => provider,
+  const planner = new Planner({ graphStore, runStore, sessions, projectDir: d.projectDir, provider: () => provider, modelDefaults,
     privateFiles,
     requestRun,
     checkout: async () => {
@@ -319,7 +340,19 @@ export function createApp(d: AppDeps) {
   sessions.on('changed', () => broadcast({ type: 'sessions', sessions: sessions.list() }));
   planner.on('entry', (sessionId: string, graphId: string, entry: ChatEntry) => toConversation(sessionId, graphId, { type: 'chatEntry', graphId, sessionId, entry }));
   planner.on('busy', (sessionId: string, graphId: string, busy: boolean) => toConversation(sessionId, graphId, { type: 'chatBusy', graphId, sessionId, busy }));
-  planner.on('cleared', (sessionId: string, graphId: string) => toConversation(sessionId, graphId, { type: 'chatOpened', graphId, sessionId, chat: [], busy: false }));
+  planner.on('cleared', (sessionId: string, graphId: string) => toConversation(sessionId, graphId, { type: 'chatOpened', graphId, sessionId, chat: [], busy: false, ...choiceOf(sessionId, graphId) }));
+
+  /** A conversation's own model and effort choice (absent fields: Default). */
+  function choiceOf(sessionId: string, graphId: string): ModelSelection {
+    const { model, effort } = sessions.plannerState(sessionId, graphId);
+    return { ...(model && { model }), ...(effort && { effort }) };
+  }
+  /** Sends the provider's models to one client: after it opens a chat, and when the provider changes. A client that left gets nothing. */
+  function sendModels(client: Client, p: AgentProvider = provider): void {
+    void listModels(p).then((models) => {
+      if (clients.has(client) && p === provider) client.send({ type: 'models', provider: p.id, models });
+    });
+  }
 
   async function preview(
     graph: Graph,
@@ -365,6 +398,7 @@ export function createApp(d: AppDeps) {
     provider = next;
     status = nextStatus;
     broadcast({ type: 'auth', status });
+    for (const c of chatSubscriptions.keys()) sendModels(c, next);
   }
 
   /** VS Code is closing: release this engine's leases and stop every run (ruling R4, spec §8). */
@@ -421,15 +455,17 @@ export function createApp(d: AppDeps) {
         if (!s.ok) return error(s.error);
         chatSubscriptions.set(client, { graphId: msg.graphId, sessionId: msg.sessionId });
         const busy = planner.isBusy(msg.sessionId, msg.graphId);
+        const choice = choiceOf(msg.sessionId, msg.graphId);
+        if (provider.listModels) sendModels(client);
         let chat: ChatEntry[];
         try {
           chat = sessions.chatLog(msg.sessionId).read(msg.graphId);
         } catch (e) {
           // Spec §7: shown as empty plus a warning; the file is left for the user to fix.
-          client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat: [], busy });
+          client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat: [], busy, ...choice });
           return error(`The planner chat for ${msg.graphId} in this session could not be read (${e instanceof Error ? e.message : String(e)}); it shows as empty and the file is left untouched.`);
         }
-        client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat, busy });
+        client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat, busy, ...choice });
         return;
       }
       case 'chat': {
@@ -463,12 +499,26 @@ export function createApp(d: AppDeps) {
         if (!r.ok) return error(r.error);
         return;
       }
+      case 'setPlannerModel': {
+        const g = graphStore.load(msg.graphId);
+        if (!g.ok) return error(g.error);
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        // Absent fields clear the choice (Default). A turn already running keeps its own; the next one uses this.
+        sessions.setPlannerState(msg.sessionId, msg.graphId, { model: msg.model, effort: msg.effort });
+        toConversation(msg.sessionId, msg.graphId, { type: 'plannerModel', graphId: msg.graphId, sessionId: msg.sessionId, ...choiceOf(msg.sessionId, msg.graphId) });
+        return;
+      }
       case 'previewRun': {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
-        client.send({ type: 'runPreview', preview: p.outcome.preview, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
+        // The dialog's Model line: what agent steps would get if the run started now.
+        const { model, effort } = modelDefaults();
+        const label = model && ((await listModels()).find((m) => m.value === model)?.label ?? model);
+        const shown = { ...p.outcome.preview, ...(model && label && { model: { value: model, label } }), ...(effort && { effort }) };
+        client.send({ type: 'runPreview', preview: shown, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
       }
       case 'startRun': {
@@ -522,6 +572,8 @@ export function createApp(d: AppDeps) {
             sourceRunId: msg.sourceRunId,
             fromNodeId: msg.fromNodeId,
             provider: provider.id,
+            // Like the provider, fixed for the whole run: a settings change mid-run doesn't reach its later steps.
+            ...modelDefaults(),
             runId,
             checkout,
             sequential: msg.sequential,

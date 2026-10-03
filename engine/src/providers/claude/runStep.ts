@@ -1,8 +1,9 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { NodeEventBody, NodeUsage } from '@agent-stream/shared';
+import type { EffortLevel, ModelChoice, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../../executors';
 import { READ_ONLY_TOOLS, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
+import { modelOptions } from './models';
 import { blocksOf, graphServer, toolResultText, type QueryFn } from './sdk';
 import { toSdkGate } from './sdkGate';
 
@@ -10,7 +11,20 @@ import { toSdkGate } from './sdkGate';
 export const RUN_GRAPH = 'run_graph';
 
 /** What the Claude provider shares with its steps and planner turns. */
-export type ClaudeRunDeps = { claudePath: () => string | undefined; missing: () => string; queryFn: QueryFn; env?: NodeJS.ProcessEnv };
+export type ClaudeRunDeps = {
+  claudePath: () => string | undefined;
+  missing: () => string;
+  queryFn: QueryFn;
+  env?: NodeJS.ProcessEnv;
+  /** The models listed so far (undefined until listModels succeeds), to check an effort against. */
+  knownModels?: () => ModelChoice[] | undefined;
+  /** Logs a problem once per `key`. */
+  warnOnce?: (key: string, message: string) => void;
+};
+
+/** The SDK's model and effort options for a turn or step, checked against the models listed so far. */
+export const sdkModelOptions = (deps: ClaudeRunDeps, choice: { model?: string; effort?: EffortLevel }) =>
+  modelOptions(choice, deps.knownModels?.(), deps.warnOnce ?? (() => {}));
 
 function usageOf(msg: SDKResultMessage): NodeUsage {
   return {
@@ -96,6 +110,7 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
       hooks: gate.hooks,
       canUseTool: gate.canUseTool,
       abortController,
+      ...sdkModelOptions(deps, ctx),
     };
     if (ctx.graphTools?.length) {
       // The step's own graph tools: each asks the user with the exact change (the gate lets them through).

@@ -12,6 +12,31 @@ function setup() {
 }
 
 describe('SessionStore', () => {
+  it("keeps a conversation's model choice: saved, read back after a reload, and through New chat", () => {
+    const { paths, store } = setup();
+    const a = store.create('A');
+    store.setPlannerState(a.id, 'g1', { model: 'sonnet', effort: 'high' });
+    store.setPlannerState(a.id, 'g1', { sessionId: 's', provider: 'claude', opCursor: 1 });
+    const reloaded = new SessionStore(paths, fixedClock());
+    expect(reloaded.plannerState(a.id, 'g1')).toEqual({ sessionId: 's', provider: 'claude', opCursor: 1, model: 'sonnet', effort: 'high' });
+    reloaded.clearPlanner(a.id, 'g1');
+    expect(reloaded.plannerState(a.id, 'g1')).toEqual({ model: 'sonnet', effort: 'high' });
+    // Default again: the fields go.
+    reloaded.setPlannerState(a.id, 'g1', { model: undefined, effort: undefined });
+    expect(reloaded.plannerState(a.id, 'g1')).toEqual({});
+  });
+
+  it('reads a session whose saved effort is unknown, as Default', () => {
+    const { paths, store } = setup();
+    const a = store.create('A');
+    const file = join(paths.sessionsDir, a.id, 'session.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    raw.planner = { g1: { sessionId: 's', model: 'opus', effort: 'huge' } };
+    writeFileSync(file, JSON.stringify(raw));
+    expect(store.load(a.id).ok).toBe(true);
+    expect(store.plannerState(a.id, 'g1')).toEqual({ sessionId: 's', model: 'opus' });
+  });
+
   it('creates, renames, duplicates (tabs only) and deletes sessions', () => {
     const { store } = setup();
     const a = store.create('Refactor work');

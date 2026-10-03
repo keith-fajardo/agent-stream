@@ -1,10 +1,16 @@
-import { createSdkMcpServer, query, tool, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query, tool, type ModelInfo, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { GraphTool } from '../types';
 
 /** The slice of the SDK's `query` we use; tests substitute a fake. */
 export type QueryFn = (params: { prompt: string; options?: Options }) => AsyncIterable<SDKMessage>;
 
 export const realQuery: QueryFn = query;
+
+/** The slice of a streaming-input `query` that lists models: control requests only, never a user message. Tests substitute a fake. */
+export type ModelQuery = { supportedModels(): Promise<ModelInfo[]>; close(): void };
+export type ModelQueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => ModelQuery;
+
+export const realModelQuery: ModelQueryFn = query;
 
 /** A loose view of message content blocks, so we don't depend on every SDK block type. */
 export type LooseBlock = {

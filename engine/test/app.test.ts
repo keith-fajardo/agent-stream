@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
+import { emptyGraph, type EffortLevel, type ModelSelection, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 import { CHANGED_SINCE_REVIEW, createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import type { GitExec } from '../src/git';
@@ -1387,5 +1387,124 @@ describe('the checkout and the write lease', () => {
     expect(leases.holder(root)?.runId).toBe(c.all('run')[0].run.id);
     app.dispose();
     expect(leases.holder(root)).toBeUndefined();
+  });
+});
+
+describe('app: model and effort', () => {
+  const MODELS = [
+    { value: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'] as EffortLevel[] },
+    { value: 'haiku', label: 'Haiku', efforts: [] as EffortLevel[] },
+  ];
+
+  it("saves the conversation's choice in the session, tells its subscribers, and sends it on the next turn", async () => {
+    const seen: PlannerTurn[] = [];
+    const defaults: ModelSelection = { model: 'haiku' };
+    const { app, graphId } = setupWithGraph({ provider: testProvider({ planTurn: async (t) => (seen.push(t), { ok: true, sessionId: 'p1' }) }), modelDefaults: () => defaults });
+    app.createSession('B');
+    const a = client(app),
+      b = client(app);
+    await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+    await app.handle(b.client, { type: 'openChat', graphId, sessionId: 'b' });
+    await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'one' });
+    await flush();
+    expect(seen[0].model).toBe('haiku');
+    await app.handle(a.client, { type: 'setPlannerModel', graphId, sessionId: 'default', model: 'sonnet', effort: 'high' });
+    expect(a.last('plannerModel')).toEqual({ type: 'plannerModel', graphId, sessionId: 'default', model: 'sonnet', effort: 'high' });
+    expect(b.all('plannerModel')).toEqual([]);
+    expect(app.sessionStore.plannerState('default', graphId)).toMatchObject({ model: 'sonnet', effort: 'high' });
+    await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'two' });
+    await flush();
+    expect(seen[1]).toMatchObject({ model: 'sonnet', effort: 'high' });
+    // Opened again (a reload): the choice comes with the conversation, and New chat keeps it.
+    const later = client(app);
+    await app.handle(later.client, { type: 'openChat', graphId, sessionId: 'default' });
+    expect(later.last('chatOpened')).toMatchObject({ model: 'sonnet', effort: 'high' });
+    await app.handle(a.client, { type: 'newChat', graphId, sessionId: 'default' });
+    expect(a.last('chatOpened')).toEqual({ type: 'chatOpened', graphId, sessionId: 'default', chat: [], busy: false, model: 'sonnet', effort: 'high' });
+    // Default again: the settings default applies.
+    await app.handle(a.client, { type: 'setPlannerModel', graphId, sessionId: 'default' });
+    expect(a.last('plannerModel')).toEqual({ type: 'plannerModel', graphId, sessionId: 'default' });
+    await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'three' });
+    await flush();
+    expect(seen[2].model).toBe('haiku');
+    expect(seen[2].effort).toBeUndefined();
+  });
+
+  it('refuses a choice for an unknown session or graph', async () => {
+    const { app, graphId } = setupWithGraph();
+    const a = client(app);
+    await app.handle(a.client, { type: 'setPlannerModel', graphId, sessionId: 'nope', model: 'x' });
+    await app.handle(a.client, { type: 'setPlannerModel', graphId: 'nope', sessionId: 'default', model: 'x' });
+    expect(a.all('error').map((m) => m.message)).toEqual(['session "nope" not found', 'graph "nope" not found']);
+  });
+
+  it("sends the provider's models with an opened chat, and again when the provider changes", async () => {
+    const { app, graphId } = setupWithGraph({ provider: testProvider({ listModels: async () => MODELS }) });
+    const a = client(app);
+    await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'claude', models: MODELS }));
+    app.setProvider(testProvider({ id: 'copilot', name: 'GitHub Copilot' }), signedIn);
+    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'copilot', models: [] }));
+  });
+
+  it('runs with the settings captured at start, records them, and never takes a mid-run change', async () => {
+    const defaults: ModelSelection = { model: 'sonnet', effort: 'high' };
+    const seen: { node: string; model?: string; effort?: string }[] = [];
+    const provider = testProvider({
+      listModels: async () => MODELS,
+      runStep: async (ctx) => {
+        seen.push({ node: ctx.node.id, model: ctx.model, effort: ctx.effort });
+        if (ctx.node.id === 'n1') {
+          defaults.model = 'haiku';
+          defaults.effort = undefined;
+        }
+        return { ok: true, output: '' };
+      },
+    });
+    const { app, graphId } = setupWithGraph({ provider, modelDefaults: () => defaults });
+    app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n2', title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+    app.graphStore.apply(graphId, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+    const c = client(app);
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    const preview = c.last('runPreview').preview;
+    expect(preview).toMatchObject({ model: { value: 'sonnet', label: 'Sonnet' }, effort: 'high' });
+    await app.handle(c.client, { type: 'startRun', graphId, reviewed: preview.signature });
+    await vi.waitFor(() => expect(c.last('run').run.status).toBe('succeeded'));
+    expect(seen).toEqual([
+      { node: 'n1', model: 'sonnet', effort: 'high' },
+      { node: 'n2', model: 'sonnet', effort: 'high' },
+    ]);
+    const run = c.last('run').run;
+    expect(run).toMatchObject({ model: 'sonnet', effort: 'high' });
+    expect(app.runStore.list(graphId)[0]).toMatchObject({ model: 'sonnet', effort: 'high' });
+    // The next run takes the new settings; an empty setting records nothing.
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    const next = c.last('runPreview').preview;
+    expect(next.model).toEqual({ value: 'haiku', label: 'Haiku' });
+    expect(next.effort).toBeUndefined();
+    defaults.model = '';
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    const third = c.last('runPreview').preview;
+    expect(third.model).toBeUndefined();
+    await app.handle(c.client, { type: 'startRun', graphId, reviewed: third.signature });
+    await vi.waitFor(() => expect(c.last('run').run.id).not.toBe(run.id));
+    await vi.waitFor(() => expect(c.last('run').run.status).toBe('succeeded'));
+    expect('model' in c.last('run').run).toBe(false);
+    expect('effort' in c.last('run').run).toBe(false);
+    expect(seen.slice(2).map((s) => s.model)).toEqual([undefined, undefined]);
+  });
+
+  it('never writes a model or effort into the graph file or its export', async () => {
+    const { app, graphId, paths } = setupWithGraph({ provider: testProvider({ planTurn: async () => ({ ok: true, sessionId: 'p' }) }), modelDefaults: () => ({ model: 'sonnet', effort: 'high' }) });
+    const a = client(app);
+    await app.handle(a.client, { type: 'setPlannerModel', graphId, sessionId: 'default', model: 'haiku', effort: 'low' });
+    await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'plan' });
+    await flush();
+    const exported = app.exportGraph(graphId);
+    if (!exported.ok) throw new Error(exported.error);
+    for (const text of [exported.content, readFileSync(join(paths.graphsDir, `${graphId}.json`), 'utf8')]) {
+      expect(text).not.toMatch(/"model"|"effort"|sonnet|haiku/);
+    }
   });
 });

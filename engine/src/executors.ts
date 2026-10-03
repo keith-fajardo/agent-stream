@@ -1,4 +1,4 @@
-import type { Graph, GraphNode, NodeEventBody, NodeUsage } from '@agent-stream/shared';
+import type { EffortLevel, Graph, GraphNode, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { GraphTool } from './providers/types';
 
 export type NodeOutcome = { ok: boolean; output: string; error?: string; exitCode?: number | null; usage?: NodeUsage };
@@ -14,6 +14,9 @@ export type NodeContext = {
   emit: (event: NodeEventBody) => void;
   /** Agent steps: tools to change the graph of the running run, each asking the user first (add_step, change_step). */
   graphTools?: GraphTool[];
+  /** Agent steps: the run's model and effort, captured when it started; absent: the provider's own default. */
+  model?: string;
+  effort?: EffortLevel;
 };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeOutcome>;

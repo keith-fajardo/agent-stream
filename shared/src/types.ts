@@ -158,6 +158,9 @@ export type RunPreview = {
   notes?: string[];
   /** The checkout the run will use: the dialog's Checkout line. */
   checkout?: CheckoutInfo;
+  /** The settings' default model (with its label) and effort that agent steps would use now: the dialog's Model line. */
+  model?: { value: string; label: string };
+  effort?: EffortLevel;
 };
 
 /** Where a folder's graphs work (spec §3.2). `root` is a real path: the Git top-level, or the folder itself outside Git. */
@@ -206,13 +209,16 @@ export type RunMeta = {
   workspaces?: Record<string, RunWorkspace>;
   /** Set while the run's write-capable steps wait for another run's write lease. */
   waitingFor?: WaitingFor;
+  /** The model and effort the run's agent steps used, captured from the settings when it started (only when set). */
+  model?: string;
+  effort?: EffortLevel;
 };
 
 /** One approved change a step agent made to a run in progress: `byNodeId` asked, `nodeId` is the step added or changed. */
 export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summary: string };
 
 /** `amendments`: how many changes step agents made to the run, when there were any. */
-export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number; checkout?: RunCheckout; waitingFor?: WaitingFor };
+export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number; checkout?: RunCheckout; waitingFor?: WaitingFor; model?: string; effort?: EffortLevel };
 
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
@@ -252,8 +258,17 @@ export type ChatEntry = { at: string; role: ChatRole; text: string };
 export type ProviderId = 'claude' | 'copilot';
 export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
 
+/** How hard the model thinks: the Claude Agent SDK's levels. */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** A model a provider offers. `efforts` is empty when the model has no effort levels; `unavailable` when the provider can't run it yet. */
+export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean };
+/** A model and effort choice; an absent field means Default. */
+export type ModelSelection = { model?: string; effort?: EffortLevel };
+
 export type SessionTab = { graphId: string; group: number; index: number };
-export type SessionPlannerState = { sessionId?: string; provider?: ProviderId; opCursor?: number };
+/** `model`/`effort`: the conversation's own choice (absent: Default, the settings' default). */
+export type SessionPlannerState = { sessionId?: string; provider?: ProviderId; opCursor?: number; model?: string; effort?: EffortLevel };
 export type Session = { id: string; name: string; createdAt: string; updatedAt: string; tabs: SessionTab[]; activeGraphId?: string; planner: Record<string, SessionPlannerState> };
 export type SessionListItem = { id: string; name: string; updatedAt?: string; tabCount: number; problem?: string };
 export type SessionResult = { ok: true; session: Session } | { ok: false; error: string };
@@ -294,7 +309,11 @@ export type ServerMessage =
   | { type: 'chatEntry'; graphId: string; sessionId: string; entry: ChatEntry }
   | { type: 'chatBusy'; graphId: string; sessionId: string; busy: boolean }
   /** A planner conversation (one work session, one graph): sent on openChat, and empty again after New chat. */
-  | { type: 'chatOpened'; graphId: string; sessionId: string; chat: ChatEntry[]; busy: boolean }
+  | { type: 'chatOpened'; graphId: string; sessionId: string; chat: ChatEntry[]; busy: boolean; model?: string; effort?: EffortLevel }
+  /** The conversation's model and effort choice changed (absent fields: Default). */
+  | { type: 'plannerModel'; graphId: string; sessionId: string; model?: string; effort?: EffortLevel }
+  /** The models the current provider offers, for the chat's Model menu: sent on openChat and when the provider changes. */
+  | { type: 'models'; provider: ProviderId; models: ModelChoice[] }
   | { type: 'sessions'; sessions: SessionListItem[] }
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }
@@ -315,6 +334,8 @@ export type ClientMessage =
   | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
   /** Clears the conversation: its chat and the provider session. */
   | { type: 'newChat'; graphId: string; sessionId: string }
+  /** The conversation's model and effort from its next turn; an absent field is Default. */
+  | { type: 'setPlannerModel'; graphId: string; sessionId: string; model?: string; effort?: EffortLevel }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
   | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string; sequential?: boolean }
   | { type: 'inspectCheckout' }

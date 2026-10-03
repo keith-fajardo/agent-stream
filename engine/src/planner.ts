@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { ChatEntry, ChatRole, Op, OpRecord } from '@agent-stream/shared';
+import type { ChatEntry, ChatRole, ModelSelection, Op, OpRecord } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
 import { graphTools, type CheckoutSource } from './plannerTools';
@@ -99,6 +99,8 @@ export type PlannerDeps = {
   projectDir: string;
   /** The provider that runs planner turns, read per turn: the user can switch it at any time. */
   provider: () => AgentProvider;
+  /** The settings' default model and effort, read per turn, for a conversation without its own choice ('' or absent: none). */
+  modelDefaults?: () => ModelSelection;
   /** Files the planner is denied reading (the variable values files). */
   privateFiles: () => string[];
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
@@ -183,6 +185,10 @@ export class Planner extends EventEmitter {
       resume = sameProvider ? state.sessionId : undefined;
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
+      // Each field on its own: the conversation's choice, else the settings' default, else nothing (Claude Code's own default).
+      const defaults = this.d.modelDefaults?.() ?? {};
+      const model = state.model || defaults.model || undefined;
+      const effort = state.effort || defaults.effort || undefined;
       const tools = graphTools({
         graphStore: this.d.graphStore,
         runStore: this.d.runStore,
@@ -198,6 +204,8 @@ export class Planner extends EventEmitter {
         cwd: this.d.projectDir,
         tools,
         resume,
+        ...(model && { model }),
+        ...(effort && { effort }),
         gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
         signal: abortController.signal,
         onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),

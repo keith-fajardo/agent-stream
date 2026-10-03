@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { Session, SessionListItem, SessionPlannerState, SessionResult, SessionTab } from '@agent-stream/shared';
+import { EFFORT_LEVELS, type Session, type SessionListItem, type SessionPlannerState, type SessionResult, type SessionTab } from '@agent-stream/shared';
 import { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import { writeFileAtomic } from './fsutil';
@@ -18,7 +18,17 @@ const sessionSchema = z.object({
   updatedAt: z.string(),
   tabs: z.array(z.object({ graphId: z.string(), group: z.number().int().min(1).max(9), index: z.number().int().min(0) })),
   activeGraphId: z.string().optional(),
-  planner: z.record(z.string(), z.object({ sessionId: z.string().optional(), provider: z.enum(['claude', 'copilot']).optional(), opCursor: z.number().int().nonnegative().optional() })),
+  planner: z.record(
+    z.string(),
+    z.object({
+      sessionId: z.string().optional(),
+      provider: z.enum(['claude', 'copilot']).optional(),
+      opCursor: z.number().int().nonnegative().optional(),
+      model: z.string().optional(),
+      // An effort level this version doesn't know reads as Default rather than making the whole session unreadable.
+      effort: z.enum(EFFORT_LEVELS).optional().catch(undefined),
+    }),
+  ),
 });
 
 /** Personal work sessions (sessions spec §3): one folder each, git-ignored. Events: 'changed'. */
@@ -54,6 +64,8 @@ export class SessionStore extends EventEmitter {
     try {
       const parsed = sessionSchema.safeParse(JSON.parse(readFileSync(this.file(id), 'utf8')));
       if (!parsed.success) return { ok: false, error: `session.json is invalid: ${z.prettifyError(parsed.error)}` };
+      // A caught effort leaves the key behind as undefined: drop it so the state reads as it would be saved.
+      for (const state of Object.values(parsed.data.planner)) if (state.effort === undefined) delete state.effort;
       return { ok: true, session: { ...parsed.data, id } as Session };
     } catch (e) {
       return { ok: false, error: `session.json is not valid JSON (${(e as Error).message})` };
@@ -158,11 +170,12 @@ export class SessionStore extends EventEmitter {
     this.save({ ...session, planner: { ...session.planner, [graphId]: next } });
   }
 
-  /** "New chat": forget this graph's conversation in this session. */
+  /** "New chat": forget this graph's conversation in this session. Its model and effort choice stays. */
   clearPlanner(id: string, graphId: string): void {
     const session = this.get(id);
-    const { [graphId]: _gone, ...planner } = session.planner;
-    this.save({ ...session, planner });
+    const { [graphId]: gone, ...planner } = session.planner;
+    const kept: SessionPlannerState = { ...(gone?.model !== undefined && { model: gone.model }), ...(gone?.effort !== undefined && { effort: gone.effort }) };
+    this.save({ ...session, planner: Object.keys(kept).length ? { ...planner, [graphId]: kept } : planner });
     this.chatLog(id).clear(graphId);
   }
 

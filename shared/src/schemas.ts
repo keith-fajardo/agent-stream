@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { nodeIdProblem, topoOrder } from './graph';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
-import type { ClientMessage, Graph, GraphResult, WebviewHostMessage } from './types';
+import { EFFORT_LEVELS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
@@ -121,6 +121,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
   z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
+  z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: z.enum(EFFORT_LEVELS).optional() }),
   z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), sequential: z.boolean().optional() }),
   z.object({ type: z.literal('inspectCheckout') }),
   z.object({ type: z.literal('previewRun'), graphId: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),
