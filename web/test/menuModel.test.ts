@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { emptyGraph, type ApprovalRequest, type Graph, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
-const { sendHost } = await import('../src/bridge');
+const { sendHost, post } = await import('../src/bridge');
 const { buildMenus } = await import('../src/menuModel');
 const { initialState, reduce } = await import('../src/state');
 type State = import('../src/state').State;
@@ -49,6 +49,23 @@ describe('menus', () => {
     expect(items(base(), 'edit')['Delete selected step'].enabled).toBe(false);
     expect(items(base({ selectedNodeId: 'n1' }), 'edit')['Delete selected step'].enabled).toBe(true);
     expect(items(base({ graph: undefined }), 'edit')['Add step'].enabled).toBe(false);
+  });
+
+  it('has Refine items in Edit: the selected step needs content and a provider, the changed count is user-edited refinable steps', () => {
+    const planned = { ...step('n2'), prompt: undefined, description: 'Compare', updatedBy: 'agent' as const };
+    const withNodes = { ...graph, nodes: [step('n1'), { ...step('n3'), prompt: undefined }, planned, { ...step('n4'), updatedBy: 'user' as const }] };
+    const edit = (extra: Partial<State>) => items(base({ graph: withNodes, ...extra }), 'edit');
+    expect(edit({})['Refine selected step'].enabled).toBe(false);
+    expect(edit({ selectedNodeId: 'n1' })['Refine selected step'].enabled).toBe(true);
+    expect(edit({ selectedNodeId: 'n3' })['Refine selected step'].enabled).toBe(false);
+    expect(edit({ selectedNodeId: 'n1', status: { provider: 'claude', ok: false, label: 'not signed in', error: 'x' } })['Refine selected step'].enabled).toBe(false);
+    expect(edit({})['Refine steps you changed (2)'].enabled).toBe(true);
+    expect(edit({ status: { provider: 'claude', ok: false, label: 'not signed in', error: 'x' } })['Refine steps you changed (2)'].enabled).toBe(false);
+    expect(items(base({ graph: { ...graph, nodes: [planned] } }), 'edit')['Refine steps you changed (0)'].enabled).toBe(false);
+    vi.mocked(post).mockClear();
+    edit({ selectedNodeId: 'n1' })['Refine selected step'].run();
+    edit({})['Refine steps you changed (2)'].run();
+    expect(vi.mocked(post).mock.calls).toEqual([[{ type: 'refineSteps', nodeIds: ['n1'] }], [{ type: 'refineSteps', nodeIds: ['n1', 'n4'] }]]);
   });
 
   it('enables Run items by sign-in, run state, selection and history', () => {

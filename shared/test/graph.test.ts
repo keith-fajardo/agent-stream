@@ -5,13 +5,14 @@ import {
   descendants,
   emptyGraph,
   nextNodeId,
+  refinable,
   reusableNodeIds,
   topoOrder,
   upstream,
   validateRunnable,
   wouldCreateCycle,
 } from '../src/graph';
-import type { Graph, NodeRunState, Op, RenderedRun } from '../src/types';
+import type { Graph, GraphNode, NodeRunState, Op, RenderedRun } from '../src/types';
 
 const T = '2026-10-02T00:00:00.000Z';
 const T2 = '2026-10-02T00:00:05.000Z';
@@ -296,4 +297,15 @@ describe('addNode ids', () => {
     for (const id of ['n1', 'build_old', 'my-step']) expect(add(id).ok).toBe(true);
   });
 });
+});
+
+describe('refinable', () => {
+  const node = (patch: Partial<GraphNode>): GraphNode => ({ id: 'n1', title: 'T', kind: 'agent', createdBy: 'user', updatedBy: 'user', updatedAt: 't', ...patch });
+  it('is false for a title-only step and true with a description, a prompt or a command', () => {
+    expect(refinable(node({}))).toBe(false);
+    expect(refinable(node({ description: '  ', prompt: '', command: ' ' }))).toBe(false);
+    expect(refinable(node({ description: 'Compare the tables' }))).toBe(true);
+    expect(refinable(node({ prompt: 'compare' }))).toBe(true);
+    expect(refinable(node({ kind: 'command', command: 'ls' }))).toBe(true);
+  });
 });

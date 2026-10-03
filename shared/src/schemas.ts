@@ -96,12 +96,15 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('moveNode'), id: z.string(), position }),
 ]);
 
+const refineNodeIds = z.array(z.string()).min(1).max(50);
+
 const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openGraph'), graphId: z.string() }),
   z.object({ type: z.literal('createGraph'), name: z.string().min(1) }),
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
+  z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional() }),
   z.object({ type: z.literal('previewRun'), graphId: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),
@@ -120,6 +123,7 @@ const webviewHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setMinimap'), value: z.boolean() }),
   z.object({ type: z.literal('chatCommand'), command: z.enum(['switchSession', 'newChat']) }),
   z.object({ type: z.literal('draftState'), dirty: z.boolean() }),
+  z.object({ type: z.literal('refineSteps'), nodeIds: refineNodeIds }),
 ]);
 
 /** Validates what a graph tab posts: an engine message, or one of the tab's own messages for the extension. */

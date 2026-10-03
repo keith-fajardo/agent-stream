@@ -7,7 +7,8 @@ import { emptyGraph, type ProviderStatus, type RunMeta, type ServerMessage } fro
 import { createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { createClaudeProvider } from '../src/providers/claude';
-import type { PlannerTurnResult } from '../src/providers/types';
+import type { PlannerTurn, PlannerTurnResult } from '../src/providers/types';
+import { refineRequest } from '../src/refine';
 import { RunStore } from '../src/runStore';
 import { deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
@@ -465,6 +466,28 @@ describe('app', () => {
       await flush();
       expect(a.all('chatEntry').map((m) => m.entry.text)).toContain('hello');
       expect(b.all('chatEntry')).toEqual([]);
+    });
+
+    it('refines steps as a planner turn: short line in the chat, full instruction to the provider', async () => {
+      const seen: PlannerTurn[] = [];
+      const { app, graphId } = setupWithGraph({ provider: testProvider({ planTurn: async (t) => (seen.push(t), { ok: true }) }) });
+      app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'Compare', kind: 'agent', prompt: 'compare the two tables' } }, 'user');
+      const c = client(app);
+      await app.handle(c.client, { type: 'openChat', graphId, sessionId: 'default' });
+      await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n1'] });
+      await flush();
+      expect(c.all('chatEntry').map((m) => m.entry).find((e) => e.role === 'user')?.text).toBe('Refine n1');
+      expect(seen[0].prompt).toContain(refineRequest(['n1']).prompt);
+    });
+
+    it('refuses to refine unknown sessions, missing steps and title-only steps', async () => {
+      const { app, graphId } = setupWithGraph();
+      app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'Only a title', kind: 'agent' } }, 'user');
+      const c = client(app);
+      await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'nope', nodeIds: ['n1'] });
+      await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n9'] });
+      await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n1'] });
+      expect(c.all('error').map((m) => m.message)).toEqual(['session "nope" not found', 'node n9 does not exist', 'Write what the step should do first.']);
     });
 
     it('refuses chat for an unknown session, and cleans every session when a graph is deleted', async () => {

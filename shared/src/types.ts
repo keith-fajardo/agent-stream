@@ -233,6 +233,7 @@ export type ClientMessage =
   /** Subscribes this client to one planner conversation; the engine answers with chatOpened. */
   | { type: 'openChat'; graphId: string; sessionId: string }
   | { type: 'chat'; graphId: string; sessionId: string; text: string }
+  | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
   /** Clears the conversation: its chat and the provider session. */
   | { type: 'newChat'; graphId: string; sessionId: string }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
@@ -256,7 +257,8 @@ export type WebviewHostMessage =
   | { type: 'host'; command: HostCommand }
   | { type: 'setMinimap'; value: boolean }
   | { type: 'chatCommand'; command: 'switchSession' | 'newChat' }
-  | { type: 'draftState'; dirty: boolean };
+  | { type: 'draftState'; dirty: boolean }
+  | { type: 'refineSteps'; nodeIds: string[] };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 

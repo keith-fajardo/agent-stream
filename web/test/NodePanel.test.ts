@@ -64,3 +64,59 @@ describe('NodePanel description', () => {
     await act(async () => root.unmount());
   });
 });
+
+describe('NodePanel Refine with planner', () => {
+  const hello = (ok: boolean) =>
+    dispatch({
+      kind: 'server',
+      msg: { type: 'hello', status: ok ? { provider: 'claude', ok, label: 'Claude Max' } : { provider: 'claude', ok, label: 'not signed in', error: 'x' }, project: '/p', graphs: [], approvals: [] },
+    });
+  async function mount(node: Graph['nodes'][number]) {
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: { ...graph, nodes: [node] }, runs: [], variableValues: {} } });
+    dispatch({ kind: 'selectNode', id: node.id });
+    vi.mocked(send).mockClear();
+    vi.mocked(post).mockClear();
+    const el = document.createElement('div');
+    const root = createRoot(el);
+    await act(async () => root.render(createElement(NodePanel)));
+    const button = (label: string) => [...el.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+    return { el, root, button };
+  }
+
+  it('asks the planner to refine the selected step', async () => {
+    hello(true);
+    const { root, button } = await mount(step);
+    await act(async () => button('Refine with planner')!.click());
+    expect(vi.mocked(post)).toHaveBeenCalledWith({ type: 'refineSteps', nodeIds: ['n1'] });
+    expect(vi.mocked(send)).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('saves first when there are unsaved edits, then asks to refine', async () => {
+    hello(true);
+    const { el, root, button } = await mount(step);
+    const field = el.querySelector('textarea#node-description') as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Compare the tables.');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(button('Refine with planner')).toBeUndefined();
+    await act(async () => button('Save and refine')!.click());
+    expect(vi.mocked(send).mock.calls).toEqual([[{ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { description: 'Compare the tables.' } } }]]);
+    expect(vi.mocked(post)).toHaveBeenCalledWith({ type: 'refineSteps', nodeIds: ['n1'] });
+    expect(vi.mocked(send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(post).mock.invocationCallOrder.at(-1)!);
+    await act(async () => root.unmount());
+  });
+
+  it('is disabled for a title-only step and when the provider is not signed in', async () => {
+    hello(true);
+    const titleOnly = await mount({ ...step, prompt: undefined });
+    expect(titleOnly.button('Refine with planner')!.disabled).toBe(true);
+    await act(async () => titleOnly.root.unmount());
+    hello(false);
+    const signedOut = await mount(step);
+    expect(signedOut.button('Refine with planner')!.disabled).toBe(true);
+    await act(async () => signedOut.root.unmount());
+    hello(true);
+  });
+});

@@ -56,6 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
         panels,
         folderFor,
         runHostCommand,
+        activeSession: (folder) => sessions.active(folder).id,
         minimap: () => context.globalState.get<boolean>('minimap', true),
         setMinimap: (value) => void context.globalState.update('minimap', value),
       }),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { GraphNode, NodeKind, NodePatch } from '@agent-stream/shared';
+import { refinable, type GraphNode, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { post, send } from '../bridge';
 import { useStore } from '../store';
@@ -32,6 +32,7 @@ export function NodePanel() {
 function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
   const run = useStore((s) => s.run);
   const runs = useStore((s) => s.runs);
+  const status = useStore((s) => s.status);
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
@@ -129,6 +130,16 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
       <div className="actions">
         <button className="primary" disabled={!dirty} onClick={save}>
           Save
+        </button>
+        <button
+          disabled={!status?.ok || !refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command })}
+          title="Ask the planner to turn this step into a precise prompt or command, with a plain-language description"
+          onClick={() => {
+            if (dirty) save();
+            actions.refine([node.id]);
+          }}
+        >
+          {dirty ? 'Save and refine' : 'Refine with planner'}
         </button>
         <button
           disabled={!latest || running}

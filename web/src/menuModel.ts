@@ -1,4 +1,4 @@
-import type { HostCommand } from '@agent-stream/shared';
+import { refinable, type HostCommand } from '@agent-stream/shared';
 import { actions, graphApprovals } from './actions';
 import type { State, Tab } from './state';
 
@@ -29,6 +29,8 @@ export function buildMenus(s: State): Menu[] {
   const signedIn = !!s.status?.ok;
   const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
   const pending = graphApprovals(s).length;
+  const selectedNode = s.graph?.nodes.find((n) => n.id === s.selectedNodeId);
+  const changedIds = (s.graph?.nodes ?? []).filter((n) => n.updatedBy === 'user' && refinable(n)).map((n) => n.id);
   const tab = (label: string, t: Tab) => item(label, hasGraph, () => actions.showTab(t), { checked: s.tab === t });
   return [
     {
@@ -49,7 +51,14 @@ export function buildMenus(s: State): Menu[] {
     {
       id: 'edit',
       label: 'Edit',
-      items: [item('Add step', hasGraph, actions.addStep), item('Delete selected step', selected, actions.deleteSelectedStep), item('Tidy layout', hasGraph, actions.tidy)],
+      items: [
+        item('Add step', hasGraph, actions.addStep),
+        item('Delete selected step', selected, actions.deleteSelectedStep),
+        item('Tidy layout', hasGraph, actions.tidy),
+        SEPARATOR,
+        item('Refine selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.refine([selectedNode!.id])),
+        item(`Refine steps you changed (${changedIds.length})`, signedIn && changedIds.length > 0, () => actions.refine(changedIds)),
+      ],
     },
     {
       id: 'run',

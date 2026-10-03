@@ -63,6 +63,10 @@ export const actions = {
   openVariables(focus?: string): void {
     dispatch({ kind: 'openVariables', focus });
   },
+  /** Asks the planner to refine these steps; the extension runs it in the active session. */
+  refine(nodeIds: string[]): void {
+    post({ type: 'refineSteps', nodeIds });
+  },
   addVariable(): void {
     dispatch({ kind: 'openVariables', addRow: true });
   },

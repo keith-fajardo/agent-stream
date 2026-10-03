@@ -87,6 +87,13 @@ describe('Planner', () => {
     expect(s.busy).toEqual([true, false]);
   });
 
+  it('logs a short display line for the user while the provider gets the full text', async () => {
+    const s = setup([ran()]);
+    await s.planner.send('a', s.graphId, 'long text', { display: 'short' });
+    expect(s.chat().map((e) => [e.role, e.text])).toEqual([['user', 'short']]);
+    expect(s.seen[0].prompt.endsWith('long text')).toBe(true);
+  });
+
   it('describes the planner job without naming a model vendor', () => {
     expect(PLANNER_APPEND).not.toMatch(/Claude|Anthropic/);
     expect(PLANNER_APPEND).toContain('kind "agent" is a separate AI agent run');

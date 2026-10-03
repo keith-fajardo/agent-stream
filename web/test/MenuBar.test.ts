@@ -35,7 +35,7 @@ describe('MenuBar', () => {
     await act(async () => title('File').click());
     expect(openItems()).toContain('New graph…');
     await act(async () => title('Edit').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-    expect(openItems()).toEqual(['Add step', 'Delete selected step', 'Tidy layout']);
+    expect(openItems()).toEqual(['Add step', 'Delete selected step', 'Tidy layout', 'Refine selected step', 'Refine steps you changed (0)']);
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(openItems()).toEqual([]);
     await act(async () => title('Run').click());

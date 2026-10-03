@@ -1,5 +1,6 @@
 import type { renameSync } from 'node:fs';
 import {
+  refinable,
   validateRunnable,
   type ApprovalRequest,
   type ProviderStatus,
@@ -25,6 +26,7 @@ import { GraphStore } from './graphStore';
 import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
+import { refineRequest } from './refine';
 import { GIT_BASH_MISSING, type Found } from './platform';
 import { createStepGate } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
@@ -316,6 +318,21 @@ export function createApp(d: AppDeps) {
         const s = sessions.load(msg.sessionId);
         if (!s.ok) return error(s.error);
         planner.send(msg.sessionId, msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
+        return;
+      }
+      case 'refineSteps': {
+        if (!status.ok) return error(`Chat is disabled: ${status.error}`);
+        const g = graphStore.load(msg.graphId);
+        if (!g.ok) return error(g.error);
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        for (const id of msg.nodeIds) {
+          const node = g.graph.nodes.find((n) => n.id === id);
+          if (!node) return error(`node ${id} does not exist`);
+          if (!refinable(node)) return error('Write what the step should do first.');
+        }
+        const r = refineRequest(msg.nodeIds);
+        planner.send(msg.sessionId, msg.graphId, r.prompt, { display: r.display }).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
       }
       case 'newChat': {

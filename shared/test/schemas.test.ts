@@ -57,6 +57,14 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'host', command: 'focusChat' }).ok).toBe(true);
   });
 
+  it('parses refineSteps as a tab message and as an engine message, and bounds its steps', () => {
+    expect(parseWebviewMessage({ type: 'refineSteps', nodeIds: ['n1'] })).toEqual({ ok: true, kind: 'host', msg: { type: 'refineSteps', nodeIds: ['n1'] } });
+    const engine = { type: 'refineSteps', graphId: 'g', sessionId: 's', nodeIds: ['n1'] };
+    expect(parseWebviewMessage(engine)).toEqual({ ok: true, kind: 'engine', msg: engine });
+    expect(parseWebviewMessage({ type: 'refineSteps', nodeIds: [] }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'refineSteps', nodeIds: Array.from({ length: 51 }, (_, i) => `n${i}`) }).ok).toBe(false);
+  });
+
   it('rejects unknown types, bad fields and oversized values', () => {
     expect(parseWebviewMessage('{nope').ok).toBe(false);
     expect(parseWebviewMessage({ type: 'format_disk' }).ok).toBe(false);

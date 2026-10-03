@@ -32,7 +32,7 @@ function setup() {
   const received: ServerMessage[] = [];
   const runHostCommand = vi.fn();
   const setMinimap = vi.fn();
-  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap });
+  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap, activeSession: () => 'work' });
   return { app, graph, panel, posted, received, handler, runHostCommand, setMinimap };
 }
 
@@ -44,6 +44,13 @@ describe('graph tab messages', () => {
     expect(s.panel.dirty).toBe(true);
     s.handler.handle({ type: 'draftState', dirty: false });
     expect(s.panel.dirty).toBe(false);
+  });
+
+  it("asks the engine to refine steps in the folder's active session", () => {
+    const s = setup();
+    const handle = vi.spyOn(s.app, 'handle').mockResolvedValue();
+    s.handler.handle({ type: 'refineSteps', nodeIds: ['n1'] });
+    expect(handle).toHaveBeenCalledWith(expect.anything(), { type: 'refineSteps', graphId: s.graph.id, sessionId: 'work', nodeIds: ['n1'] });
   });
 
   it('connects the tab to its engine when its page is ready, once per page load', () => {

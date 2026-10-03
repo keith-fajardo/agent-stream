@@ -13,6 +13,9 @@ export function nodeIdProblem(id: string): string | null {
   return null;
 }
 
+/** A step with something for the planner to refine: a description, a prompt or a command. */
+export const refinable = (n: GraphNode): boolean => !!(n.description?.trim() || n.prompt?.trim() || n.command?.trim());
+
 export function emptyGraph(id: string, name: string, now: string): Graph {
   return { id, name, goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: now };
 }

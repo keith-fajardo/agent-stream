@@ -135,7 +135,8 @@ export class Planner extends EventEmitter {
   }
 
   /** Never rejects: failures become chat errors, or are logged when even that is impossible. */
-  async send(sessionId: string, graphId: string, text: string): Promise<void> {
+  /** `options.display` is what the chat shows for the user's turn when it differs from `text`, the full instruction. */
+  async send(sessionId: string, graphId: string, text: string, options: { display?: string } = {}): Promise<void> {
     const k = key(sessionId, graphId);
     if (this.busy.has(k)) {
       try {
@@ -151,7 +152,7 @@ export class Planner extends EventEmitter {
     let resume: string | undefined;
     try {
       this.emit('busy', sessionId, graphId, true);
-      this.add(sessionId, graphId, 'user', text);
+      this.add(sessionId, graphId, 'user', options.display ?? text);
       // Re-checked per turn: the project's settings can change while VS Code runs.
       const provider = this.d.provider();
       const problem = provider.folderProblem?.(this.d.projectDir);
