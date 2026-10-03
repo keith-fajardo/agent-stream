@@ -15,7 +15,8 @@ export class ApprovalItem extends vscode.TreeItem {
     const full = JSON.stringify(request.input, null, 2) ?? '';
     // A graph change shows the exact text that would run, uncut; other tools their (capped) input.
     this.tooltip = request.graphChange ? request.graphChange.detail : full.length > TOOLTIP_CHARS ? `${full.slice(0, TOOLTIP_CHARS)}…` : full;
-    this.contextValue = 'approval';
+    // A graph change is approved only on the step's card, where its exact text shows: the sidebar offers Show and Deny.
+    this.contextValue = request.graphChange ? 'graphChange' : 'approval';
     this.iconPath = new vscode.ThemeIcon('question');
     this.command = { command: 'agentStream.revealApproval', title: 'Show step', arguments: [this] };
   }

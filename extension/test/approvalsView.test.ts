@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ApprovalRequest } from '@agent-stream/shared';
 import { ApprovalItem, approvalsBadge, ApprovalsView } from '../src/approvalsView';
@@ -37,6 +38,21 @@ describe('ApprovalsView', () => {
     const item = new ApprovalItem(a, { ...request('c', 't', { id: 'n4', command: 'npm {{ x }}' }), toolName: 'Change graph', graphChange: { summary: "n2 wants to change n4's command", detail } });
     expect(item.tooltip).toBe(detail);
     expect(item.description).toBe("n2 wants to change n4's command");
+  });
+
+  it('gives a graph change its own context value, so the sidebar never offers Approve for it', () => {
+    const item = new ApprovalItem(a, { ...request('c', 't'), toolName: 'Change graph', graphChange: { summary: 's', detail: 'Title: x' } });
+    expect(item.contextValue).toBe('graphChange');
+    expect(item.command).toEqual({ command: 'agentStream.revealApproval', title: 'Show step', arguments: [item] });
+    expect(new ApprovalItem(a, request('p', 't')).contextValue).toBe('approval');
+  });
+
+  it('offers Show and Deny for a graph change in the sidebar, never Approve', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const entries: { command: string; when: string }[] = manifest.contributes.menus['view/item/context'];
+    const forGraphChange = entries.filter((e) => e.when.includes('viewItem == graphChange')).map((e) => e.command);
+    expect(forGraphChange.sort()).toEqual(['agentStream.deny', 'agentStream.revealApproval']);
+    expect(entries.filter((e) => e.command === 'agentStream.approve').map((e) => e.when)).toEqual(['view == agentStream.approvals && viewItem == approval']);
   });
 
   it('badges the count', () => {

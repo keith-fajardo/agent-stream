@@ -215,7 +215,8 @@
       {
         "command": "agentStream.revealApproval",
         "title": "Show Step",
-        "category": "Agent Stream"
+        "category": "Agent Stream",
+        "icon": "$(eye)"
       },
       {
         "command": "agentStream.showSidebar",
@@ -311,6 +312,16 @@
         {
           "command": "agentStream.deny",
           "when": "view == agentStream.approvals && viewItem == approval",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentStream.revealApproval",
+          "when": "view == agentStream.approvals && viewItem == graphChange",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentStream.deny",
+          "when": "view == agentStream.approvals && viewItem == graphChange",
           "group": "inline@2"
         },
         {
