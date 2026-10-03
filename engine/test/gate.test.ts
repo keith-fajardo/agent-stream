@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CanUseTool, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody } from '@claude-stream/shared';
@@ -7,7 +7,7 @@ import { makeApprovalGate } from '../src/gate';
 
 const preToolUse = (tool_name: string, tool_input: unknown, tool_use_id = 'tu1') =>
   ({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id, session_id: 's', transcript_path: '/t', cwd: '/p' }) as HookInput;
-const valuesFile = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+const valuesFile = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
 
 function setup() {
   const broker = new ApprovalBroker();
@@ -34,7 +34,7 @@ describe('approval gate', () => {
     });
     expect(decisionOf(await hook(preToolUse('Grep', { pattern: 'x', path: valuesFile })))?.permissionDecision).toBe('deny');
     expect(decisionOf(await hook(preToolUse('Grep', { pattern: 'x', path: '/', glob: '*' })))?.permissionDecision).toBe('deny');
-    expect(decisionOf(await hook(preToolUse('Glob', { pattern: '**/*.json', path: join('/', 'home', 'me') })))?.permissionDecision).toBe('deny');
+    expect(decisionOf(await hook(preToolUse('Glob', { pattern: '**/*.json', path: resolve('/', 'home', 'me') })))?.permissionDecision).toBe('deny');
     expect(broker.pending()).toEqual([]);
     expect(events).toEqual([]);
     expect(await hook(preToolUse('Read', { file_path: '/p/.claude-stream/graphs/a.json' }))).toEqual({});

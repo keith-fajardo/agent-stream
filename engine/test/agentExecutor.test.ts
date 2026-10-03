@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
@@ -131,7 +131,7 @@ describe('agent executor', () => {
   });
 
   it('denies reading the variable values file without asking', async () => {
-    const valuesFile = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+    const valuesFile = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
     const broker = new ApprovalBroker();
     const results: unknown[] = [];
     const { fn } = fake(async function* (options) {

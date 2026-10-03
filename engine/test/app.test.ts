@@ -6,7 +6,7 @@ import { emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/sh
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
-import { tmpProject, tmpValuesFile } from './helpers';
+import { testGitBash, tmpProject, tmpValuesFile } from './helpers';
 
 const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
@@ -23,6 +23,7 @@ function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant, env?:
     claudePath: 'claude',
     auth,
     maxParallel: 2,
+    gitBash: testGitBash,
     env,
     executors: { agent: instant, command },
     queryFn: async function* () {},
@@ -193,6 +194,7 @@ describe('app', () => {
       claudePath: 'claude',
       auth: signedIn,
       maxParallel: 1,
+      gitBash: testGitBash,
       queryFn: ({ options }) => {
         sessions.push(options!);
         return (async function* () {
@@ -369,6 +371,7 @@ describe('app', () => {
       claudePath: 'claude',
       auth: signedIn,
       maxParallel: 1,
+      gitBash: testGitBash,
       queryFn: () =>
         (async function* () {
           await new Promise<void>((resolve) => (gate.release = resolve));

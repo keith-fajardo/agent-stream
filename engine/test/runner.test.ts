@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyOp, emptyGraph, type Graph, type Op, type RenderedRun } from '@claude-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
@@ -101,7 +102,7 @@ describe('Runner', () => {
     expect(fake.started).toEqual(['n1', 'n2']);
     const prompt = fake.contexts.get('n2')!.prompt;
     expect(prompt).toContain('out-n1');
-    expect(prompt).toContain(`.claude-stream/runs/${r.run.id}/nodes/n1/output.md`);
+    expect(prompt).toContain(join('.claude-stream', 'runs', r.run.id, 'nodes', 'n1', 'output.md'));
     fake.finish('n2');
     const done = await r.done;
     expect(done.status).toBe('succeeded');

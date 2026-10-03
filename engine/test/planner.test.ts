@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ChatLog } from '../src/chatLog';
@@ -10,7 +10,7 @@ import type { QueryFn } from '../src/sdk';
 import { fixedClock, tmpProject } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
-const VALUES_FILE = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+const VALUES_FILE = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
 const init = (apiKeySource = 'none') => msg({ type: 'system', subtype: 'init', apiKeySource, session_id: 'sess-1' });
 const say = (...content: object[]) => msg({ type: 'assistant', parent_tool_use_id: null, message: { content }, session_id: 'sess-1' });
 const done = () =>
@@ -285,7 +285,7 @@ describe('Planner private values', () => {
       },
     });
     expect(await run('Grep', { pattern: 'x', path: '/', glob: '*' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
-    expect(await run('Glob', { pattern: '**/*', path: join('/', 'home', 'me', '.claude-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await run('Glob', { pattern: '**/*', path: resolve('/', 'home', 'me', '.claude-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(await run('Grep', { pattern: 'x', path: join(s.paths.root, 'src') })).toEqual({});
     expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toEqual({});
     expect(await run('Read', { file_path: 'models/a.sql' })).toEqual({});

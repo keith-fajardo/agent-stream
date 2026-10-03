@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { privatePathDenial } from '../src/privatePaths';
 
-const root = join('/', 'work', 'proj');
-const values = join('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+// resolve (not join) so the paths carry the current drive on Windows, as the code under test does.
+const root = resolve('/', 'work', 'proj');
+const values = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
 const reason = "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.";
 
 const runReason = "Run records contain variable values; claude-stream doesn't let Claude read .claude-stream/runs/*/run.json or events.jsonl.";
@@ -61,7 +62,7 @@ describe('privatePathDenial', () => {
   });
   it('denies Grep and Glob over the values folder, anything inside it, and every folder above it', () => {
     const valuesDir = dirname(values);
-    for (const path of [valuesDir, join(valuesDir, 'sub'), dirname(valuesDir), join('/', 'home', 'me'), '/', relative(root, valuesDir)]) {
+    for (const path of [valuesDir, join(valuesDir, 'sub'), dirname(valuesDir), resolve('/', 'home', 'me'), parse(values).root, relative(root, valuesDir)]) {
       expect(privatePathDenial(root, 'Grep', { pattern: 'x', path, glob: '*' }, [values])).toBe(reason);
       expect(privatePathDenial(root, 'Glob', { pattern: '**/*', path }, [values])).toBe(reason);
     }
@@ -69,14 +70,14 @@ describe('privatePathDenial', () => {
   });
   it('denies Grep and Glob over ~, ~/.claude-stream and ~/.claude-stream/values', () => {
     const inHome = join(homedir(), '.claude-stream', 'values', '0123456789abcdef.json');
-    for (const path of ['~/.claude-stream/values', '~/.claude-stream', '~', '~/', '/']) {
+    for (const path of ['~/.claude-stream/values', '~/.claude-stream', '~', '~/', parse(homedir()).root]) {
       expect(privatePathDenial(root, 'Grep', { pattern: 'x', path }, [inHome])).toBe(reason);
     }
     expect(privatePathDenial(root, 'Glob', { pattern: '**/*.json', path: '~' }, [inHome])).toBe(reason);
   });
   it('allows searches of unrelated folders and reads of other files near the values file', () => {
     const valuesDir = dirname(values);
-    for (const path of [join(root, 'src'), 'src', root, `${valuesDir}x`, join('/', 'home', 'other'), join(dirname(valuesDir), 'graphs')]) {
+    for (const path of [join(root, 'src'), 'src', root, `${valuesDir}x`, resolve('/', 'home', 'other'), join(dirname(valuesDir), 'graphs')]) {
       expect(privatePathDenial(root, 'Grep', { pattern: 'x', path }, [values])).toBeNull();
       expect(privatePathDenial(root, 'Glob', { pattern: '*', path }, [values])).toBeNull();
     }

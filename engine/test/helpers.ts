@@ -2,7 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Clock } from '../src/clock';
+import type { Found } from '../src/platform';
 import { ensureDataDirs, projectPaths, type ProjectPaths } from '../src/paths';
+
+/** A found Git Bash, so command steps aren't refused on Windows (ignored elsewhere). */
+export const testGitBash: Found = { ok: true, path: 'C:\\Program Files\\Git\\bin\\bash.exe' };
 
 export function tmpProject(): ProjectPaths {
   const paths = projectPaths(mkdtempSync(join(tmpdir(), 'claude-stream-')));
