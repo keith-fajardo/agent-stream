@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import {
   contentSignature,
+  parallelWriteSteps,
   reusableNodeIds,
   topoOrder,
   validateRunnable,
+  workspaceOf,
+  type CheckoutInfo,
   type Graph,
   type PreviewStep,
   type RenderedRun,
@@ -47,6 +50,8 @@ export type PreviewInput = {
   fromNodeId?: string;
   /** Why command steps can't run on this machine (Git Bash missing on Windows), if so. */
   commandShellProblem?: string | null;
+  /** The checkout the run will use (ruling R8): refuses workspaces outside Git or before the first commit, notes uncommitted changes. */
+  checkout?: CheckoutInfo;
 };
 export type PreviewOutcome = { preview: RunPreview; rendered?: RenderedRun };
 
@@ -147,6 +152,10 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     else if (!Object.hasOwn(context, name)) problems.push(`Set a value for ${name} (Variables menu).`);
   }
   if (input.commandShellProblem && graph.nodes.some((n) => n.kind === 'command')) problems.push(input.commandShellProblem);
+  const workspaceSteps = graph.nodes.filter((n) => workspaceOf(n) !== null);
+  if (input.checkout && (!input.checkout.git || !input.checkout.head)) {
+    for (const n of workspaceSteps) problems.push(`Step ${n.id} uses workspace "${n.workspace}", which needs a Git repository with at least one commit.`);
+  }
 
   for (const [name, ids] of [...credentials].sort(([a], [b]) => a.localeCompare(b))) {
     const sent = ids.size ? ` (and is sent to Claude in agent step${ids.size === 1 ? '' : 's'} ${[...ids].sort().join(', ')})` : '';
@@ -156,6 +165,11 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   }
   for (const n of graph.nodes) {
     if (n.kind === 'command' && /\|\s*unquoted\b/.test(n.command ?? '')) warnings.push(`${n.id} inserts a value without quotes (| unquoted). Check its command below.`);
+  }
+  // Notes are shown, never block (spec §4.7).
+  const notes = parallelWriteSteps(graph).map(([a, b]) => `${a} and ${b} can both change files in the same workspace; they will run one at a time.`);
+  if (input.checkout?.git && input.checkout.dirty && input.checkout.head && workspaceSteps.length > 0) {
+    notes.push(`Workspaces start from ${input.checkout.head.slice(0, 7)}; uncommitted changes in this checkout aren't included.`);
   }
 
   const rendered: RenderedRun | undefined = problems.length === 0 ? { goal: goal ?? '', instructions: instructions ?? '', nodes } : undefined;
@@ -182,7 +196,18 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     )
     .digest('hex');
   return {
-    preview: { graphId: graph.id, fromNodeId: input.fromNodeId, sourceRunId: input.source?.id, problems, warnings, steps, variables, signature },
+    preview: {
+      graphId: graph.id,
+      fromNodeId: input.fromNodeId,
+      sourceRunId: input.source?.id,
+      problems,
+      warnings,
+      notes,
+      steps,
+      variables,
+      signature,
+      ...(input.checkout && { checkout: input.checkout }),
+    },
     rendered,
   };
 }

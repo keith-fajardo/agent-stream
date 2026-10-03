@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op, type RunMeta } from '@agent-stream/shared';
+import { applyOp, emptyGraph, type CheckoutInfo, type Graph, type Op, type RunMeta } from '@agent-stream/shared';
 import { envLookup, looksLikeCredential, previewRun } from '../src/runPreview';
 
 function graphOf(ops: Op[]): Graph {
@@ -157,5 +157,44 @@ describe('looksLikeCredential', () => {
   it('flags passwords, tokens, secrets and keys', () => {
     for (const name of ['SNOWFLAKE_PASSWORD', 'DB_PASSWD', 'GITHUB_TOKEN', 'CLIENT_SECRET', 'API_KEY', 'PRIVATE_KEY_PATH', 'KEY']) expect(looksLikeCredential(name)).toBe(true);
     for (const name of ['DBT_SCHEMA', 'KEYCHAIN_DIR', 'MONKEY']) expect(looksLikeCredential(name)).toBe(false);
+  });
+});
+
+describe('previewRun notes and workspaces', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const repo = (over: Partial<Extract<CheckoutInfo, { git: true }>> = {}): CheckoutInfo => ({ git: true, root: 'repo', linkedWorktree: false, branch: 'main', head: SHA, dirty: false, worktrees: [], ...over });
+  const inWs = (title: string, workspace: string): Op => ({ type: 'addNode', node: { title, kind: 'command', command: 'make', workspace } });
+
+  it('notes write-capable steps of one workspace that will take turns, without blocking', () => {
+    const g = graphOf([agent('A', 'a'), agent('B', 'b'), { type: 'addNode', node: { title: 'C', kind: 'agent', prompt: 'c', access: 'read' } }]);
+    const { preview, rendered } = previewRun({ graph: g, values: {}, env: env() });
+    expect(preview.notes).toEqual(['n1 and n2 can both change files in the same workspace; they will run one at a time.']);
+    expect(preview.problems).toEqual([]);
+    expect(rendered).toBeDefined();
+  });
+
+  it('notes that workspaces start from HEAD when the checkout has uncommitted changes', () => {
+    const g = graphOf([inWs('A', 'wh_a')]);
+    expect(previewRun({ graph: g, values: {}, env: env(), checkout: repo({ dirty: true }) }).preview.notes).toEqual([
+      "Workspaces start from 0123456; uncommitted changes in this checkout aren't included.",
+    ]);
+    expect(previewRun({ graph: g, values: {}, env: env(), checkout: repo() }).preview.notes).toEqual([]);
+    expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env(), checkout: repo({ dirty: true }) }).preview.notes).toEqual([]);
+  });
+
+  it('refuses steps with a workspace outside Git and before the first commit, naming each step', () => {
+    const g = graphOf([inWs('A', 'wh_a'), inWs('B', 'wh_b'), agent('C', 'c')]);
+    const problems = ['Step n1 uses workspace "wh_a", which needs a Git repository with at least one commit.', 'Step n2 uses workspace "wh_b", which needs a Git repository with at least one commit.'];
+    for (const checkout of [{ git: false as const, root: 'plain', reason: 'Not a Git repository' }, repo({ head: undefined })]) {
+      const out = previewRun({ graph: g, values: {}, env: env(), checkout });
+      expect(out.preview.problems).toEqual(problems);
+      expect(out.rendered).toBeUndefined();
+    }
+    expect(previewRun({ graph: g, values: {}, env: env(), checkout: repo() }).preview.problems).toEqual([]);
+  });
+
+  it('carries the checkout for the Checkout line', () => {
+    expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env(), checkout: repo() }).preview.checkout).toEqual(repo());
+    expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env() }).preview).not.toHaveProperty('checkout');
   });
 });

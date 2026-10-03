@@ -3,8 +3,10 @@ import {
   isWriteCapable,
   refinable,
   validateRunnable,
+  workspaceOf,
   type AgentChange,
   type ApprovalRequest,
+  type CheckoutInfo,
   type ProviderStatus,
   type ChatEntry,
   type ClientMessage,
@@ -12,6 +14,7 @@ import {
   type GraphListItem,
   type GraphNode,
   type GraphResult,
+  type LeaseHolder,
   type NodeEvent,
   type NodeStatus,
   type NodeRunState,
@@ -26,7 +29,7 @@ import { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
-import type { GitExec } from './git';
+import { inspectCheckout, type GitExec } from './git';
 import { GraphStore } from './graphStore';
 import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
@@ -42,6 +45,7 @@ import { createStepGraphTools } from './stepGraphTools';
 import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
+import { createVariantWorkspaces, removeWorkspace } from './variantWorkspaces';
 import type { WriteLeases } from './writeLease';
 
 /** Run states in which a step's definition may still be read: a revert must wait for them. */
@@ -82,6 +86,12 @@ export type AppDeps = {
 };
 
 export type App = ReturnType<typeof createApp>;
+
+/** The runBlocked message (spec §4.5), naming an unreadable lock file when there is one (ruling R6). */
+export function blockedMessage(o: { graphName: string; holder: LeaseHolder; holderName: string; otherWindow: boolean; root: string; lockFile?: string }): string {
+  const text = `"${o.graphName}" can't start: run ${o.holder.runId}${o.otherWindow ? ' in another VS Code window' : ''} of "${o.holderName}" is already changing files in this checkout (${o.root}). Separate tickets need separate worktrees.`;
+  return o.lockFile ? `${text} Its lock file ${o.lockFile} can't be read; delete it if no run is changing files.` : text;
+}
 
 export function createApp(d: AppDeps) {
   let provider = d.provider;
@@ -146,6 +156,23 @@ export function createApp(d: AppDeps) {
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock, leases: d.leases });
+  const inspect = (): Promise<CheckoutInfo> => inspectCheckout(d.projectDir, d.git);
+  async function checkoutMessage(): Promise<ServerMessage> {
+    const info = await inspect();
+    const lease = d.leases.holder(info.root);
+    return { type: 'checkout', info, ...(lease && { lease }) };
+  }
+  /** Inspects the checkout and sends it; a failure is logged, never thrown into a run or a client. */
+  function sendCheckout(send: (msg: ServerMessage) => void): void {
+    checkoutMessage().then(send, (e: unknown) => console.error('[agent-stream] could not inspect the checkout', e));
+  }
+  /** The holder's graph name, read from its own folder: another workspace folder or window may hold the lease. */
+  function holderGraphName(holder: LeaseHolder): string {
+    if (!holder.folder) return holder.graphId;
+    const store = holder.folder === d.projectDir ? graphStore : new GraphStore(projectPaths(holder.folder));
+    const r = store.load(holder.graphId);
+    return r.ok ? r.graph.name : holder.graphId;
+  }
   const clients = new Set<Client>();
   const broadcast = (msg: ServerMessage) => {
     for (const c of clients) c.send(msg);
@@ -262,10 +289,17 @@ export function createApp(d: AppDeps) {
       broadcastGraphs();
     }
   });
+  /** Each active run's last announced state: the checkout chip follows a run that starts, ends or stops waiting (spec §4.5). */
+  const announced = new Map<string, string>();
   runner.on('run', (run: RunMeta) => {
     broadcast({ type: 'run', run });
     broadcast({ type: 'runs', graphId: run.graphId, runs: runStore.list(run.graphId) });
     broadcastGraphs();
+    const state = `${run.status}|${run.waitingFor?.runId ?? ''}`;
+    if (announced.get(run.id) === state) return;
+    if (run.status === 'running') announced.set(run.id, state);
+    else announced.delete(run.id);
+    sendCheckout(broadcast);
   });
   runner.on('node', (runId: string, nodeId: string, state: NodeRunState) => broadcast({ type: 'runNode', runId, nodeId, state }));
   runner.on('event', (runId: string, nodeId: string, event: NodeEvent) => broadcast({ type: 'nodeEvent', runId, nodeId, event }));
@@ -275,13 +309,18 @@ export function createApp(d: AppDeps) {
   planner.on('busy', (sessionId: string, graphId: string, busy: boolean) => toConversation(sessionId, graphId, { type: 'chatBusy', graphId, sessionId, busy }));
   planner.on('cleared', (sessionId: string, graphId: string) => toConversation(sessionId, graphId, { type: 'chatOpened', graphId, sessionId, chat: [], busy: false }));
 
-  function preview(graph: Graph, fromNodeId?: string, sourceRunId?: string): { ok: true; outcome: PreviewOutcome } | { ok: false; error: string } {
+  async function preview(
+    graph: Graph,
+    fromNodeId?: string,
+    sourceRunId?: string,
+  ): Promise<{ ok: true; outcome: PreviewOutcome; checkout: CheckoutInfo } | { ok: false; error: string }> {
     let source: RunMeta | undefined;
     if (sourceRunId) {
       source = runStore.get(sourceRunId);
       if (!source || source.graphId !== graph.id) return { ok: false, error: `run ${sourceRunId} not found` };
     }
-    return { ok: true, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem }) };
+    const checkout = await inspect();
+    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem, checkout }) };
   }
 
   /** The pending agent changes and the baseline they are against, for graphOpened and graph. */
@@ -335,6 +374,8 @@ export function createApp(d: AppDeps) {
     clients.add(client);
     client.send({ type: 'hello', status, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
     client.send({ type: 'sessions', sessions: sessions.list() });
+    // After this turn, so hello and sessions always come first (ruling R9); never to a client that left meanwhile.
+    setImmediate(() => sendCheckout((msg) => clients.has(client) && client.send(msg)));
     return () => {
       clients.delete(client);
       chatSubscriptions.delete(client);
@@ -413,7 +454,7 @@ export function createApp(d: AppDeps) {
       case 'previewRun': {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
         client.send({ type: 'runPreview', preview: p.outcome.preview, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
@@ -422,23 +463,59 @@ export function createApp(d: AppDeps) {
         if (!status.ok) return error(`Runs are disabled: ${status.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
         // Run only what the user reviewed: a step, a value or an environment variable may have changed since.
         if (p.outcome.preview.signature !== msg.reviewed) return error(CHANGED_SINCE_REVIEW);
         if (!p.outcome.rendered) return error(p.outcome.preview.problems.join('\n'));
+        if (runner.activeFor(r.graph.id)) return error('A run is already in progress for this graph.');
+        const { checkout } = p;
+        const runId = runner.newRunId();
+        // Steps with a workspace never reuse (spec §4.3a): every workspace the graph names gets a fresh worktree, before start.
+        const names = [...new Set(r.graph.nodes.map(workspaceOf).filter((w): w is string => w !== null))];
+        let workspaces: Record<string, { path: string; head: string }> | undefined;
+        if (names.length) {
+          // The preview already refused this; kept so `head` is known here.
+          if (!checkout.git || !checkout.head) return error(p.outcome.preview.problems.join('\n'));
+          const made = await createVariantWorkspaces({ checkoutRoot: checkout.root, runId, names, head: checkout.head, git: d.git, home: d.home });
+          if (!made.ok) return error(made.error);
+          workspaces = made.workspaces;
+        }
         const started = runner.start({
           graph: r.graph,
           rendered: p.outcome.rendered,
           sourceRunId: msg.sourceRunId,
           fromNodeId: msg.fromNodeId,
           provider: provider.id,
+          runId,
+          checkout,
+          sequential: msg.sequential,
+          ...(workspaces && { workspaces }),
           // Fixed for the whole run: a provider switch mid-run doesn't reach its later steps.
           ...(d.executors ? {} : { agent: agentFor(provider) }),
         });
-        if (!started.ok) return error(started.error);
+        if (started.ok) return;
+        // Nothing ran in them yet: the worktrees this attempt made go again. A failure is logged (ruling P3); the reply stays the same.
+        for (const w of Object.values(workspaces ?? {})) {
+          const removed = await removeWorkspace({ checkoutRoot: checkout.root, path: w.path, force: true, git: d.git });
+          if (!removed.ok) console.error('[agent-stream] could not remove a worktree after a refused start', w.path, removed.error);
+        }
+        if (!started.blocked) return error(started.error);
+        const { holder, otherWindow, lockFile } = started.blocked;
+        client.send({
+          type: 'runBlocked',
+          graphId: r.graph.id,
+          message: blockedMessage({ graphName: r.graph.name, holder, holderName: holderGraphName(holder), otherWindow, root: checkout.root, lockFile }),
+          holder,
+          otherWindow,
+          checkout,
+          canSetUpTickets: checkout.git,
+        });
         return;
       }
+      case 'inspectCheckout':
+        client.send(await checkoutMessage());
+        return;
       case 'setVariableValue': {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);

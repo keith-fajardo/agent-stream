@@ -1,16 +1,19 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
+import { emptyGraph, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 import { createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
+import type { GitExec } from '../src/git';
 import { createClaudeProvider } from '../src/providers/claude';
 import type { PlannerTurn, PlannerTurnResult } from '../src/providers/types';
 import { refineRequest } from '../src/refine';
 import { RunStore } from '../src/runStore';
-import { appTestDeps, deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
+import { variantPath } from '../src/variantWorkspaces';
+import { createWriteLeases, leaseFile, type WriteLeases } from '../src/writeLease';
+import { appTestDeps, deferred, noGit, repoGit, testGitBash, testLeases, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
 const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
@@ -964,5 +967,317 @@ describe('app', () => {
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The agent-change baseline .+g1\.baseline\.json could not be read \(/)]);
       expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
     });
+  });
+});
+
+describe('the checkout and the write lease', () => {
+  const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  const held = (gate: { promise: Promise<void> }): NodeExecutor => async () => {
+    await gate.promise;
+    return { ok: true, output: '' };
+  };
+  /** An App on `projectDir` (a fresh folder by default) whose fake git is built for its real path. */
+  function gitApp(o: { git?: (root: string) => GitExec; leases?: WriteLeases; projectDir?: string; over?: Partial<AppDeps> } = {}) {
+    const projectDir = o.projectDir ?? tmpProject().root;
+    const root = realpathSync(projectDir);
+    const deps = appTestDeps();
+    const leases = o.leases ?? deps.leases;
+    const app = createApp({
+      ...deps,
+      leases,
+      projectDir,
+      valuesFile: tmpValuesFile(),
+      provider: testProvider(),
+      status: signedIn,
+      maxParallel: 2,
+      gitBash: testGitBash,
+      executors: { agent: instant, command: instant },
+      git: o.git ? o.git(root) : noGit,
+      ...o.over,
+    });
+    return { app, root, projectDir, home: deps.home, leases };
+  }
+  const main = (root: string) => repoGit({ root, branch: 'main', head: SHA }).exec;
+  async function reviewedBy(app: App, c: ReturnType<typeof client>, graphId: string) {
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    return c.last('runPreview').preview;
+  }
+  function graphWith(app: App, name: string, ...nodes: Op[]) {
+    const g = app.graphStore.create(name);
+    for (const op of nodes) app.graphStore.apply(g.id, op, 'user');
+    return g;
+  }
+  const writer: Op = { type: 'addNode', node: { title: 'edit', kind: 'agent', prompt: 'p' } };
+
+  it('sends the checkout after hello and when asked', async () => {
+    const { app, root } = gitApp({ git: main });
+    const c = client(app);
+    expect(c.msgs.slice(0, 2).map((m) => m.type)).toEqual(['hello', 'sessions']);
+    await vi.waitFor(() => expect(c.all('checkout')).toHaveLength(1));
+    expect(c.last('checkout')).toEqual({
+      type: 'checkout',
+      info: { git: true, root, linkedWorktree: false, branch: 'main', head: SHA, dirty: false, worktrees: [{ path: root, branch: 'main', head: SHA, current: true }] },
+    });
+    await app.handle(c.client, { type: 'inspectCheckout' });
+    expect(c.all('checkout')).toHaveLength(2);
+  });
+
+  it('records where a run ran, and announces the checkout when the run starts and ends', async () => {
+    const gate = deferred<void>();
+    const { app, root } = gitApp({ git: main, over: { executors: { agent: held(gate), command: held(gate) } } });
+    const c = client(app);
+    await vi.waitFor(() => expect(c.all('checkout')).toHaveLength(1));
+    const g = graphWith(app, 'G', writer);
+    const preview = await reviewedBy(app, c, g.id);
+    expect(preview.checkout).toMatchObject({ git: true, root, branch: 'main' });
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+    const runId = c.all('run')[0].run.id;
+    await vi.waitFor(() => expect(c.all('checkout').at(-1)?.lease?.runId).toBe(runId));
+    gate.resolve();
+    await vi.waitFor(() => expect(c.all('run').at(-1)?.run.status).toBe('succeeded'));
+    await vi.waitFor(() => expect(c.all('checkout').at(-1)).not.toHaveProperty('lease'));
+    expect(app.runStore.get(runId)?.checkout).toEqual({ root, branch: 'main', head: SHA, linkedWorktree: false });
+  });
+
+  it('refuses a second run that would change files in the same checkout with runBlocked, not an error', async () => {
+    const leases = testLeases();
+    const gate = deferred<void>();
+    const a = gitApp({ leases, git: main, over: { executors: { agent: held(gate), command: held(gate) } } });
+    const b = gitApp({ leases, git: () => main(a.root) });
+    const ga = graphWith(a.app, 'Orders', writer);
+    const gb = graphWith(b.app, 'Billing', writer);
+    const ca = client(a.app);
+    const cb = client(b.app);
+    await a.app.handle(ca.client, { type: 'startRun', graphId: ga.id, reviewed: (await reviewedBy(a.app, ca, ga.id)).signature });
+    const runA = ca.all('run')[0].run.id;
+    await b.app.handle(cb.client, { type: 'startRun', graphId: gb.id, reviewed: (await reviewedBy(b.app, cb, gb.id)).signature });
+    expect(cb.last('runBlocked')).toEqual({
+      type: 'runBlocked',
+      graphId: gb.id,
+      message: `"Billing" can't start: run ${runA} of "Orders" is already changing files in this checkout (${a.root}). Separate tickets need separate worktrees.`,
+      holder: expect.objectContaining({ runId: runA, graphId: ga.id, folder: a.projectDir }),
+      otherWindow: false,
+      checkout: expect.objectContaining({ git: true, root: a.root }),
+      canSetUpTickets: true,
+    });
+    expect(cb.all('error')).toEqual([]);
+    expect(b.app.runStore.list(gb.id)).toEqual([]);
+    gate.resolve();
+    await vi.waitFor(() => expect(ca.all('run').at(-1)?.run.status).toBe('succeeded'));
+  });
+
+  it('offers only sequential execution outside Git', async () => {
+    const leases = testLeases();
+    const gate = deferred<void>();
+    const folder = tmpProject().root;
+    const a = gitApp({ leases, projectDir: folder, over: { executors: { agent: held(gate), command: held(gate) } } });
+    const b = gitApp({ leases, projectDir: folder });
+    const ga = graphWith(a.app, 'Orders', writer);
+    const gb = graphWith(b.app, 'Billing', writer);
+    const ca = client(a.app);
+    const cb = client(b.app);
+    await a.app.handle(ca.client, { type: 'startRun', graphId: ga.id, reviewed: (await reviewedBy(a.app, ca, ga.id)).signature });
+    await b.app.handle(cb.client, { type: 'startRun', graphId: gb.id, reviewed: (await reviewedBy(b.app, cb, gb.id)).signature });
+    expect(cb.last('runBlocked')).toMatchObject({ canSetUpTickets: false, checkout: { git: false, root: a.root, reason: 'Not a Git repository' } });
+    expect(cb.last('runBlocked').message).toContain(`is already changing files in this checkout (${a.root}).`);
+    gate.resolve();
+    await vi.waitFor(() => expect(ca.all('run').at(-1)?.run.status).toBe('succeeded'));
+  });
+
+  it('starts a sequential run that waits for the lease, and runs it once the first run ends', async () => {
+    const leases = testLeases();
+    const gate = deferred<void>();
+    const a = gitApp({ leases, git: main, over: { executors: { agent: held(gate), command: held(gate) } } });
+    const b = gitApp({ leases, git: () => main(a.root) });
+    const ga = graphWith(a.app, 'Orders', writer);
+    const gb = graphWith(b.app, 'Billing', writer);
+    const ca = client(a.app);
+    const cb = client(b.app);
+    await a.app.handle(ca.client, { type: 'startRun', graphId: ga.id, reviewed: (await reviewedBy(a.app, ca, ga.id)).signature });
+    const runA = ca.all('run')[0].run.id;
+    await b.app.handle(cb.client, { type: 'startRun', graphId: gb.id, reviewed: (await reviewedBy(b.app, cb, gb.id)).signature, sequential: true });
+    expect(cb.all('runBlocked')).toEqual([]);
+    expect(cb.all('run')[0].run.waitingFor).toEqual({ runId: runA, graphId: ga.id, folder: a.projectDir });
+    gate.resolve();
+    await vi.waitFor(() => expect(cb.all('run').at(-1)?.run.status).toBe('succeeded'));
+  });
+
+  it('names another VS Code window, and an unreadable lock file, in the message', async () => {
+    const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const { app, root } = gitApp({ leases: createWriteLeases({ locksDir, isAlive: () => true }), git: main });
+    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'billing', folder: join(tmpdir(), 'elsewhere'), startedAt: 't' });
+    const c = client(app);
+    const g = graphWith(app, 'Orders', writer);
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(c.last('runBlocked')).toMatchObject({
+      otherWindow: true,
+      message: `"Orders" can't start: run 20261003-090000-beef in another VS Code window of "billing" is already changing files in this checkout (${root}). Separate tickets need separate worktrees.`,
+    });
+    writeFileSync(leaseFile(locksDir, root), 'not json');
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(c.last('runBlocked').message).toBe(
+      `"Orders" can't start: run unknown in another VS Code window of "unknown" is already changing files in this checkout (${root}). Separate tickets need separate worktrees. Its lock file ${leaseFile(locksDir, root)} can't be read; delete it if no run is changing files.`,
+    );
+  });
+
+  it('creates the variant worktrees before the run starts, records them, and runs each step in its own', async () => {
+    const ran: { id: string; cwd: string }[] = [];
+    const record: NodeExecutor = async (ctx) => {
+      ran.push({ id: ctx.node.id, cwd: ctx.cwd });
+      return { ok: true, output: '' };
+    };
+    const added: string[] = [];
+    const removed: string[] = [];
+    const { app, root, home, projectDir } = gitApp({
+      git: (root) =>
+        repoGit({
+          root,
+          branch: 'main',
+          head: SHA,
+          answers: {
+            'worktree add --detach *': (cwd, args) => {
+              added.push(`${cwd}|${args[3]}|${args[4]}`);
+              return {};
+            },
+            'worktree remove *': (_cwd, args) => {
+              removed.push(args.join(' '));
+              return {};
+            },
+          },
+        }).exec,
+      over: { executors: { agent: record, command: record } },
+    });
+    const c = client(app);
+    const g = graphWith(
+      app,
+      'AB',
+      { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } },
+      { type: 'addNode', node: { title: 'b', kind: 'command', command: 'make', workspace: 'wh_b' } },
+      { type: 'addNode', node: { title: 'compare', kind: 'agent', prompt: 'p', access: 'read' } },
+    );
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.all('run').at(-1)?.run.status).toBe('succeeded'));
+    const run = c.all('run').at(-1)!.run;
+    const pathA = variantPath(home, root, run.id, 'wh_a');
+    const pathB = variantPath(home, root, run.id, 'wh_b');
+    expect(run.workspaces).toEqual({ wh_a: { path: pathA, head: SHA }, wh_b: { path: pathB, head: SHA } });
+    expect(added).toEqual([`${root}|${pathA}|${SHA}`, `${root}|${pathB}|${SHA}`]);
+    expect(ran).toEqual(expect.arrayContaining([{ id: 'n1', cwd: pathA }, { id: 'n2', cwd: pathB }, { id: 'n3', cwd: projectDir }]));
+    // Kept after the run for inspection (spec §4.3a): nothing removes them.
+    expect(removed).toEqual([]);
+  });
+
+  it("refuses the run when a workspace can't be created, removing this attempt's worktrees", async () => {
+    const ran: string[] = [];
+    const { app } = gitApp({
+      git: (root) =>
+        repoGit({
+          root,
+          branch: 'main',
+          head: SHA,
+          answers: {
+            'worktree add --detach *': (_cwd, args) => {
+              ran.push(`add ${args[3]}`);
+              return args[3].endsWith('wh_b') ? { code: 128, stderr: 'fatal: boom\n' } : {};
+            },
+            'worktree remove --force *': (_cwd, args) => {
+              ran.push(`remove ${args[3]}`);
+              return {};
+            },
+          },
+        }).exec,
+    });
+    const c = client(app);
+    const g = graphWith(
+      app,
+      'AB',
+      { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } },
+      { type: 'addNode', node: { title: 'b', kind: 'command', command: 'make', workspace: 'wh_b' } },
+    );
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(c.last('error').message).toBe('Couldn\'t create workspace "wh_b": fatal: boom');
+    expect(app.runStore.list(g.id)).toEqual([]);
+    expect(ran).toHaveLength(3);
+    expect(ran[2]).toBe(ran[0].replace('add', 'remove'));
+  });
+
+  it('removes the worktrees it made when the run is blocked', async () => {
+    const ran: string[] = [];
+    const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const { app, root } = gitApp({
+      leases: createWriteLeases({ locksDir, isAlive: () => true }),
+      git: (root) =>
+        repoGit({
+          root,
+          branch: 'main',
+          head: SHA,
+          answers: { 'worktree add --detach *': (_cwd, args) => (ran.push(`add ${args[3]}`), {}), 'worktree remove --force *': (_cwd, args) => (ran.push(`remove ${args[3]}`), {}) },
+        }).exec,
+    });
+    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'x', folder: 'f', startedAt: 't' });
+    const c = client(app);
+    const g = graphWith(app, 'AB', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } }, writer);
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(c.all('runBlocked')).toHaveLength(1);
+    expect(ran).toHaveLength(2);
+    expect(ran[0]).toMatch(/^add .*wh_a$/);
+    expect(ran[1]).toBe(ran[0].replace('add', 'remove'));
+  });
+
+  it("logs a worktree it can't remove after a blocked start, and keeps the runBlocked message", async () => {
+    const added: string[] = [];
+    const locksDir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const { app, root } = gitApp({
+      leases: createWriteLeases({ locksDir, isAlive: () => true }),
+      git: (root) =>
+        repoGit({
+          root,
+          branch: 'main',
+          head: SHA,
+          answers: {
+            'worktree add --detach *': (_cwd, args) => (added.push(args[3]), {}),
+            'worktree remove --force *': () => ({ code: 128, stderr: "fatal: '/x' is locked\n" }),
+          },
+        }).exec,
+    });
+    createWriteLeases({ locksDir, pid: 4242, isAlive: () => true }).acquire(root, { runId: '20261003-090000-beef', graphId: 'billing', folder: join(tmpdir(), 'elsewhere'), startedAt: 't' });
+    const c = client(app);
+    const g = graphWith(app, 'Orders', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } }, writer);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+      expect(c.last('runBlocked').message).toBe(
+        `"Orders" can't start: run 20261003-090000-beef in another VS Code window of "billing" is already changing files in this checkout (${root}). Separate tickets need separate worktrees.`,
+      );
+      expect(c.all('error')).toEqual([]);
+      expect(added).toHaveLength(1);
+      expect(logged).toHaveBeenCalledWith('[agent-stream] could not remove a worktree after a refused start', added[0], "fatal: '/x' is locked");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('refuses a step with a workspace outside Git or before the first commit', async () => {
+    for (const { app } of [gitApp(), gitApp({ git: (root) => repoGit({ root, branch: 'main' }).exec })]) {
+      const c = client(app);
+      const g = graphWith(app, 'AB', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } });
+      const preview = await reviewedBy(app, c, g.id);
+      const problem = 'Step n1 uses workspace "wh_a", which needs a Git repository with at least one commit.';
+      expect(preview.problems).toContain(problem);
+      await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
+      expect(c.last('error').message).toContain(problem);
+      expect(app.runStore.list(g.id)).toEqual([]);
+    }
+  });
+
+  it('releases its leases on dispose', async () => {
+    const gate = deferred<void>();
+    const { app, root, leases } = gitApp({ over: { executors: { agent: held(gate), command: held(gate) } } });
+    const c = client(app);
+    const g = graphWith(app, 'G', writer);
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    expect(leases.holder(root)?.runId).toBe(c.all('run')[0].run.id);
+    app.dispose();
+    expect(leases.holder(root)).toBeUndefined();
   });
 });
