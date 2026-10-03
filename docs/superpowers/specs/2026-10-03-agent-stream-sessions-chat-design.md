@@ -68,7 +68,7 @@ Success:
   as graph IDs (`isSessionId` mirrors `isGraphId`).
 - **`group`.** This is the VS Code view column, 1–9. `index` is the tab's position within it.
 - **`planner[graphId]`.** This holds the provider's resumable conversation ID, the provider ID and the op
-  cursor, which is the length of `<graphId>.ops.jsonl` at the end of this session's last turn.
+  cursor, which is the length of `<graphId>.ops.jsonl` when this session's last turn started (edits made during a turn are reported in the next one).
 - **Writes.** They use the existing atomic write helpers. Session files are written with the same modes as
   other project data.
 
