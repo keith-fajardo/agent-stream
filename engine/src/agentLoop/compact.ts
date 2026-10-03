@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatModel, ToolSpec } from './chatModel';
+import { truncateHead } from '../prompt';
 import { clipResult } from './tools';
 
 export const SUMMARY_PROMPT = 'Summarise the conversation so far for yourself: decisions, files changed, open questions. Keep it under 300 words.';
@@ -10,6 +11,8 @@ const KEEP_RECENT = 0.4;
 /** How much of the input limit the summary request's transcript may use (ruling R6). */
 const SUMMARY_INPUT_SHARE = 0.6;
 const RESULT_CHARS_IN_SUMMARY = 2000;
+/** A summary longer than this (the model ignored "under 300 words") keeps its head. */
+const SUMMARY_MAX_CHARS = 2000;
 
 const tokens = (chars: number) => Math.ceil(chars / 4);
 const userText = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
@@ -46,12 +49,15 @@ function transcriptText(messages: ChatMessage[]): string {
 }
 
 /** The summary text, or undefined when the request failed or came back empty. A Stop is passed on. */
-async function summarise(model: ChatModel, system: string, messages: ChatMessage[], signal: AbortSignal): Promise<string | undefined> {
+async function summarise(model: ChatModel, system: string, messages: ChatMessage[], signal: AbortSignal, onRequest: () => void): Promise<string | undefined> {
   const conversation = clipResult(transcriptText(messages), Math.floor(model.maxInputTokens * SUMMARY_INPUT_SHARE * 4));
+  // Counted as it is sent, so a request that Stop interrupts still counts.
+  onRequest();
   try {
     let text = '';
     for await (const part of model.send([userText(system), userText(`${conversation}\n\n${SUMMARY_PROMPT}`)], [], signal)) if (part.type === 'text') text += part.text;
-    return text.trim() || undefined;
+    text = text.trim();
+    return text ? truncateHead(text, SUMMARY_MAX_CHARS) : undefined;
   } catch (e) {
     if (signal.aborted) throw e;
     return undefined;
@@ -61,8 +67,10 @@ async function summarise(model: ChatModel, system: string, messages: ChatMessage
 /**
  * Compaction (spec §4.6): over 75 % of the model's input limit, keep the first message (the task) and the most recent
  * rounds up to 40 % of the limit, and replace the older ones with one summary. Still too long, or no summary (it failed,
- * or `canSummarise` is false because the request cap has no room for it): drop the oldest kept rounds, with a note.
- * The newest round is always kept, and a tool call is never separated from its results.
+ * or `canSummarise` is false because the request cap has no room for it): drop the older rounds and then the oldest kept
+ * ones until the whole history is within the 40 % keep target, so the next rounds don't compact again at once, with a
+ * note when anything was dropped. The newest round is always kept, and a tool call is never separated from its results.
+ * `onRequest` is called just before the summary request is sent; `requests` is 1 when one was sent, else 0.
  */
 export async function compactIfNeeded(o: {
   model: ChatModel;
@@ -71,9 +79,11 @@ export async function compactIfNeeded(o: {
   tools: ToolSpec[];
   signal: AbortSignal;
   canSummarise: boolean;
+  onRequest?: () => void;
 }): Promise<{ messages: ChatMessage[]; requests: number }> {
   const limit = o.model.maxInputTokens;
-  const fits = (messages: ChatMessage[]) => estimateTokens(o.system, messages, o.tools) <= COMPACT_AT * limit;
+  const within = (share: number, messages: ChatMessage[]) => estimateTokens(o.system, messages, o.tools) <= share * limit;
+  const fits = (messages: ChatMessage[]) => within(COMPACT_AT, messages);
   if (o.messages.length < 2 || fits(o.messages)) return { messages: o.messages, requests: 0 };
   const [first, ...rest] = o.messages;
   const all = rounds(rest);
@@ -91,12 +101,16 @@ export async function compactIfNeeded(o: {
   let summary: string | undefined;
   if (older.length > 0 && o.canSummarise) {
     requests = 1;
-    summary = await summarise(o.model, o.system, [first, ...older], o.signal);
+    summary = await summarise(o.model, o.system, [first, ...older], o.signal, o.onRequest ?? (() => {}));
   }
   const head: ChatMessage[] = summary === undefined ? [first] : [first, userText(SUMMARY_PREFIX + summary)];
   const build = () => [...head, ...tail.flat()];
   if (summary !== undefined && fits(build())) return { messages: build(), requests };
-  head.push(userText(DROPPED_NOTE));
-  while (tail.length > 1 && !fits(build())) tail = tail.slice(1);
-  return { messages: build(), requests };
+  const withNote = () => [...head, userText(DROPPED_NOTE), ...tail.flat()];
+  let dropped = summary === undefined && older.length > 0;
+  while (tail.length > 1 && !within(KEEP_RECENT, withNote())) {
+    tail = tail.slice(1);
+    dropped = true;
+  }
+  return { messages: dropped ? withNote() : build(), requests };
 }

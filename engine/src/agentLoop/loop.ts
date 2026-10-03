@@ -114,9 +114,19 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
   try {
     for (;;) {
       o.signal.throwIfAborted();
-      // A summary only when it and the real request both fit under the (normalised) cap (ruling R5).
-      const compacted = await compactIfNeeded({ model: o.model, system: o.system, messages, tools: specs, signal: o.signal, canSummarise: requests + 1 < maxRequests });
-      requests += compacted.requests;
+      // A summary only when it and the real request both fit under the (normalised) cap (ruling R5). It is counted as
+      // it is sent, so one that Stop interrupts still counts.
+      const compacted = await compactIfNeeded({
+        model: o.model,
+        system: o.system,
+        messages,
+        tools: specs,
+        signal: o.signal,
+        canSummarise: requests + 1 < maxRequests,
+        onRequest: () => {
+          requests++;
+        },
+      });
       messages = compacted.messages;
       const parts: ChatPart[] = [];
       requests++;

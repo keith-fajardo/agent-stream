@@ -89,6 +89,45 @@ describe('compactIfNeeded', () => {
     ac.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
+
+  it('trims a dropped history to the 40 % keep target, not just under the trigger', async () => {
+    const messages = conversation(10);
+    const system = 'S'.repeat(400);
+    const { model } = fakeChatModel([], { maxInputTokens: 1000 });
+    const r = await compactIfNeeded({ model, system, messages, tools: [], signal, canSummarise: false });
+    expect(r).toEqual({ messages: [messages[0], userText(DROPPED_NOTE), ...messages.slice(-2)], requests: 0 });
+    expect(estimateTokens(system, r.messages, [])).toBeLessThanOrEqual(400);
+  });
+
+  it('drops the oldest kept rounds with a note when the history is still too long after a summary', async () => {
+    const messages = conversation(10);
+    const summary = 'x'.repeat(1900);
+    const { model } = fakeChatModel([[textPart(summary)]], { maxInputTokens: 1000 });
+    const r = await compactIfNeeded({ model, system: 'System.', messages, tools: [], signal, canSummarise: true });
+    expect(r).toEqual({ messages: [messages[0], userText(`${SUMMARY_PREFIX}${summary}`), userText(DROPPED_NOTE), ...messages.slice(-2)], requests: 1 });
+    expect(pairsIntact(r.messages)).toBe(true);
+    expect(estimateTokens('System.', r.messages, [])).toBeLessThanOrEqual(750);
+  });
+
+  it('clips a long summary to 2,000 characters, keeping its head', async () => {
+    const { model } = fakeChatModel([[textPart(`${'a'.repeat(2000)}${'b'.repeat(1000)}`)]], { maxInputTokens: 10_000 });
+    const r = await compactIfNeeded({ model, system: 'System.', messages: conversation(60), tools: [], signal, canSummarise: true });
+    const summary = r.messages[1];
+    expect(summary.role).toBe('user');
+    const text = summary.content[0].type === 'text' ? summary.content[0].text : '';
+    expect(text.startsWith(`${SUMMARY_PREFIX}${'a'.repeat(2000)}`)).toBe(true);
+    expect(text).not.toContain('b');
+    expect(text.length).toBeLessThan(SUMMARY_PREFIX.length + 2100);
+  });
+
+  it('adds no drop note when nothing was dropped', async () => {
+    // The system text alone is over the limit; the one round is the newest and is always kept.
+    const messages = conversation(1);
+    const { model, requests } = fakeChatModel([], { maxInputTokens: 1000 });
+    const r = await compactIfNeeded({ model, system: 'S'.repeat(4000), messages, tools: [], signal, canSummarise: true });
+    expect(r).toEqual({ messages, requests: 0 });
+    expect(requests).toHaveLength(0);
+  });
 });
 
 describe('runAgentLoop and compaction', () => {
@@ -116,5 +155,31 @@ describe('runAgentLoop and compaction', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].messages[2]).toEqual(userText(DROPPED_NOTE));
     expect(r).toMatchObject({ ok: true, text: 'Done.', requests: 1 });
+  });
+
+  it('treats an Infinity cap as 1 when judging room for a summary', async () => {
+    const { model, requests } = fakeChatModel([[textPart('Done.')]], { maxInputTokens: 1000 });
+    const r = await runAgentLoop({ model, system: 'System.', messages: conversation(10), tools: [], gate: allowAll, maxRequests: Infinity, signal, ...quiet });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].messages[2]).toEqual(userText(DROPPED_NOTE));
+    expect(r).toMatchObject({ ok: true, text: 'Done.', requests: 1 });
+  });
+
+  it('counts a summary request that Stop interrupts', async () => {
+    const ac = new AbortController();
+    const { model } = fakeChatModel([(_m, _t, s) => untilAborted(s)], { maxInputTokens: 1000 });
+    const pending = runAgentLoop({ model, system: 'System.', messages: conversation(10), tools: [], gate: allowAll, maxRequests: 3, signal: ac.signal, ...quiet });
+    ac.abort();
+    expect(await pending).toMatchObject({ ok: false, cancelled: true, requests: 1 });
+  });
+
+  it('compacts once, then sends the next rounds without compacting again', async () => {
+    // A long system text: dropping only to just under 75 % would re-trigger within a couple of rounds.
+    const read = (id: string) => [toolCallPart(id, 'Read', { file_path: 'x' })];
+    const { model, requests } = fakeChatModel([new ChatModelError('other', 'Copilot failed: overloaded'), read('n1'), read('n2'), read('n3'), [textPart('Done.')]], { maxInputTokens: 1000 });
+    const r = await runAgentLoop({ model, system: 'S'.repeat(1200), messages: conversation(10), tools: [], gate: allowAll, maxRequests: 10, signal, ...quiet });
+    const summaryRequests = requests.filter((q) => q.messages.some((m) => m.content.some((c) => c.type === 'text' && c.text.includes(SUMMARY_PROMPT))));
+    expect(summaryRequests).toHaveLength(1);
+    expect(r).toMatchObject({ ok: true, text: 'Done.', requests: 5 });
   });
 });
