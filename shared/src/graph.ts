@@ -35,6 +35,9 @@ function definedOnly<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+const MAX_DESCRIPTION_CHARS = 2000;
+const DESCRIPTION_TOO_LONG = `a description can be at most ${MAX_DESCRIPTION_CHARS} characters`;
+
 export type ApplyOptions = {
   /** Rewrites references to a renamed variable inside a template (the engine passes a Jinja-aware one). */
   rewriteReferences?: (text: string, from: string, to: string) => string;
@@ -53,6 +56,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (has(id)) return fail(`node ${id} already exists`);
       const title = op.node.title.trim();
       if (!title) return fail('a node needs a title');
+      if ((op.node.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const node = definedOnly<GraphNode>({
         id,
         title,
@@ -76,6 +80,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         patch.title = patch.title.trim();
         if (!patch.title) return fail('a node needs a title');
       }
+      if ((patch.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const updated: GraphNode = { ...node, ...patch, updatedBy: by, updatedAt: now };
       return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? updated : n)) });
     }
@@ -234,7 +239,7 @@ export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: st
       before !== undefined && now !== undefined
         ? before === now
         : (prev?.prompt ?? '') === (n.prompt ?? '') && (prev?.command ?? '') === (n.command ?? '');
-    const sameDescription = n.kind !== 'agent' || (prev?.description ?? '') === (n.description ?? '');
+    const sameDescription = n.kind !== 'agent' || (prev?.description ?? '').trim() === (n.description ?? '').trim();
     const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     if (!succeeded || !sameDefinition || !sameInputs) seeds.add(n.id);

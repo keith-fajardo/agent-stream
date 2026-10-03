@@ -59,7 +59,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
       {
         kind,
         title: z.string(),
-        description: z.string().optional(),
+        description: z.string().max(2000).optional(),
         prompt: z.string().optional(),
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),
@@ -84,7 +84,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         id: z.string(),
         title: z.string().optional(),
         kind: kind.optional(),
-        description: z.string().optional(),
+        description: z.string().max(2000).optional(),
         prompt: z.string().optional(),
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),

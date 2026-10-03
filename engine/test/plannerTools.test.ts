@@ -112,6 +112,18 @@ describe('planner graph tools', () => {
     expect(s.tools.find((t) => t.name === 'add_node')?.description).toContain('`description` is one plain-language sentence for people saying what the step does and why.');
   });
 
+  it('refuses a description over 2000 characters from add_node and update_node, without storing it', async () => {
+    const s = setup();
+    const long = 'x'.repeat(2001);
+    const added = await s.call('add_node', { kind: 'agent', title: 'A', prompt: 'a', description: long });
+    expect(added.isError).toBe(true);
+    expect(s.graphStore.get(s.graphId).nodes).toEqual([]);
+    await s.call('add_node', { kind: 'agent', title: 'A', prompt: 'a' });
+    const updated = await s.call('update_node', { id: 'n1', description: long });
+    expect(updated.isError).toBe(true);
+    expect(s.graphStore.get(s.graphId).nodes[0].description).toBeUndefined();
+  });
+
   it('asks the user to start runs instead of starting them', async () => {
     const s = setup();
     expect((await s.call('request_run', { fromNodeId: 'n1' })).isError).toBe(false);

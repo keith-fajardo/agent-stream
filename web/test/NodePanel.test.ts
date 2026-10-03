@@ -47,6 +47,7 @@ describe('NodePanel description', () => {
     await act(async () => root.render(createElement(NodePanel)));
     const field = el.querySelector('textarea#node-description') as HTMLTextAreaElement;
     expect(field.value).toBe('Plans the work.');
+    expect(field.maxLength).toBe(2000);
     expect(field.placeholder).toBe('In plain words: what this step does and why');
     const labels = [...el.querySelectorAll('.field label')].map((l) => l.textContent);
     expect(labels.slice(0, 3)).toEqual(['Title', 'Description', 'Kind']);

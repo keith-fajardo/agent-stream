@@ -88,6 +88,7 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
         <textarea
           id="node-description"
           rows={3}
+          maxLength={2000}
           value={draft.description}
           placeholder="In plain words: what this step does and why"
           onChange={(e) => setDraft({ ...draft, description: e.target.value })}

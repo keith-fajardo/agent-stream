@@ -67,6 +67,16 @@ describe('applyOp', () => {
     expect(g.nodes[0].title).toBe('Build');
   });
 
+  it('limits a description to 2000 characters on add and update', () => {
+    const msg = 'a description can be at most 2000 characters';
+    expectError(emptyGraph('g', 'G', T), { type: 'addNode', node: { title: 'x', kind: 'agent', description: 'x'.repeat(2001) } }, msg);
+    const g = build([{ type: 'addNode', node: { title: 'x', kind: 'agent', description: 'x'.repeat(2000) } }]);
+    expect(g.nodes[0].description).toHaveLength(2000);
+    expectError(g, { type: 'updateNode', id: 'n1', patch: { description: 'x'.repeat(2001) } }, msg);
+    const ok = applyOp(g, { type: 'updateNode', id: 'n1', patch: { description: 'y'.repeat(2000) } }, 'user', T2);
+    expect(ok.ok).toBe(true);
+  });
+
   it('allows empty prompts while drafting', () => {
     const g = build([{ type: 'addNode', node: { title: 'draft', kind: 'agent', prompt: '' } }]);
     expect(g.nodes[0].prompt).toBe('');
@@ -179,6 +189,14 @@ describe('reusableNodeIds', () => {
     const rendered: RenderedRun = { goal: '', instructions: '', nodes: { n1: 'do a', n2: 'echo hi' } };
     const source = { snapshot: before, nodes, rendered };
     expect(reusableNodeIds(now, source, undefined, rendered)).toEqual(new Set(['n2']));
+  });
+
+  it('still reuses an agent step when only whitespace around its description changed', () => {
+    const before: Graph = { ...build([agent('a')]), nodes: [{ ...build([agent('a')]).nodes[0], description: 'Does a.' }] };
+    const now: Graph = { ...before, nodes: [{ ...before.nodes[0], description: '  Does a.\n' }] };
+    const nodes: Record<string, NodeRunState> = { n1: { status: 'succeeded' } };
+    const rendered: RenderedRun = { goal: '', instructions: '', nodes: { n1: 'do a' } };
+    expect(reusableNodeIds(now, { snapshot: before, nodes, rendered }, undefined, rendered)).toEqual(new Set(['n1']));
   });
 
   it('compares rendered text for reuse when both runs have it', () => {
