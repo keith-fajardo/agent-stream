@@ -5,7 +5,7 @@
   "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot"],
   "version": "0.2.0",
   "publisher": "agent-stream-local",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
@@ -400,7 +400,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:all": "cd .. && npm run build",
-    "package": "vsce package --no-dependencies --skip-license && node scripts/check-vsix.mjs",
+    "package": "vsce package --no-dependencies && node scripts/check-vsix.mjs",
     "test": "vitest run",
     "test:integration": "npm run build:all && node test/integration/runTest.mjs",
     "typecheck": "tsc -p ."

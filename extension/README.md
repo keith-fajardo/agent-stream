@@ -163,3 +163,7 @@ Older `.claude-stream` folders and values are moved to the new names automatical
 Variable values are kept outside the project, in `~/.agent-stream/values/<hash>.json`, one file per project folder (named after a hash of the folder's path).
 
 Two more folders in your home folder: `~/.agent-stream/locks/` holds one lock file per checkout while a run is changing files there, and `~/.agent-stream/worktrees/<checkout hash>/<run id>/<name>/` holds the variant workspaces runs create (kept until you remove them with Manage Run Workspaces).
+
+## License
+
+MIT. See [LICENSE](LICENSE). The extension package also bundles Anthropic's Claude Agent SDK, which is not covered by this license: it is © Anthropic PBC and subject to Anthropic's own terms (https://code.claude.com/docs/en/legal-and-compliance).

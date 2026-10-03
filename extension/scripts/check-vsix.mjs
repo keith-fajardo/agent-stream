@@ -31,7 +31,7 @@ for (const name of names) {
   if (/\.(node|exe|dll|dylib|so)$/i.test(name)) problems.push(`contains a native file: ${name}`);
   if (/claude-agent-sdk-(darwin|linux|win32)/.test(name)) problems.push(`contains a per-platform Claude Code binary: ${name}`);
 }
-for (const required of ['extension/package.json', 'extension/dist/extension.cjs', 'extension/dist/webview/assets/index.js', 'extension/dist/webview/assets/index.css', 'extension/media/icon.svg']) {
+for (const required of ['extension/package.json', 'extension/dist/extension.cjs', 'extension/dist/webview/assets/index.js', 'extension/dist/webview/assets/index.css', 'extension/media/icon.svg', 'extension/LICENSE.txt']) {
   if (!names.includes(required)) problems.push(`missing ${required}`);
 }
 if (!names.includes('extension.vsixmanifest')) problems.push('missing extension.vsixmanifest');
