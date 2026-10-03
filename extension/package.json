@@ -28,10 +28,20 @@
     "configuration": {
       "title": "Agent Stream",
       "properties": {
+        "agentStream.provider": {
+          "type": "string",
+          "enum": ["claude", "copilot"],
+          "default": "claude",
+          "enumDescriptions": [
+            "Claude: your Claude subscription through Claude Code.",
+            "GitHub Copilot (preview): detected only; running steps isn't implemented yet."
+          ],
+          "description": "The AI provider that runs agent steps and the planner."
+        },
         "agentStream.claudePath": {
           "type": "string",
           "default": "",
-          "description": "Full path to Claude Code (claude, or claude.exe on Windows). Leave empty to find it automatically."
+          "description": "Full path to Claude Code (claude, or claude.exe on Windows). Leave empty to find it automatically. Claude provider only."
         },
         "agentStream.gitBashPath": {
           "type": "string",
@@ -98,8 +108,13 @@
     ],
     "commands": [
       {
+        "command": "agentStream.selectProvider",
+        "title": "Select Provider",
+        "category": "Agent Stream"
+      },
+      {
         "command": "agentStream.retrySignIn",
-        "title": "Retry Sign-in Check",
+        "title": "Check Again",
         "category": "Agent Stream",
         "icon": "$(refresh)"
       },

@@ -80,7 +80,7 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
       <div className="field">
         <label>Kind</label>
         <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as NodeKind })}>
-          <option value="agent">Agent: a Claude agent run</option>
+          <option value="agent">Agent: an AI agent run</option>
           <option value="command">Command: an exact shell command</option>
         </select>
       </div>

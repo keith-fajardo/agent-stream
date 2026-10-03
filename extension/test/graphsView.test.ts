@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GraphListItem, ProviderStatus } from '@agent-stream/shared';
-import { CHECKING, type Folder } from '../src/engines';
+import { checkingStatus, type Folder } from '../src/engines';
 import { FolderItem, GraphItem, GraphsView, RetryItem } from '../src/graphsView';
 
 const a: Folder = { key: 'file:///a', name: 'a', path: '/a' };
@@ -38,7 +38,8 @@ describe('GraphsView', () => {
 
   it('offers Retry when the sign-in check failed, but not while it runs', () => {
     expect(view([a], {}, { provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' }).getChildren()[0]).toBeInstanceOf(RetryItem);
-    expect(view([a], {}, CHECKING).getChildren()).toEqual([]);
+    expect(new RetryItem().label).toBe('Check again');
+    expect(view([a], {}, checkingStatus({ id: 'claude', name: 'Claude' })).getChildren()).toEqual([]);
   });
 
   it('announces a refresh', () => {

@@ -13,7 +13,7 @@ export function App() {
   return (
     <div className="app">
       <TopBar />
-      {status && !status.ok && <div className="banner">{status.error} Fix this, then use Retry in the Agent Stream sidebar.</div>}
+      {status && !status.ok && <div className="banner">{status.preview ? status.error : `${status.error} Fix this, then use Check again in the Agent Stream sidebar.`}</div>}
       <main className="main">
         <div className="workspace">
           <ReactFlowProvider>

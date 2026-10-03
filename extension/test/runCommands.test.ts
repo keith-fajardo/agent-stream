@@ -18,7 +18,7 @@ function setup() {
   const held = (ctx: { signal: AbortSignal }) =>
     new Promise<NodeOutcome>((resolve) => ctx.signal.addEventListener('abort', () => resolve({ ok: false, output: '', error: 'cancelled' })));
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 1 }),
+    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude' }),
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),

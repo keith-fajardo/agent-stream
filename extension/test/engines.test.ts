@@ -4,13 +4,26 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@agent-stream/engine';
 import type { ProviderStatus, ServerMessage } from '@agent-stream/shared';
-import { CHECKING, EngineManager, type EngineEvents, type Folder } from '../src/engines';
+import { testProvider } from './helpers';
+import { checkingStatus, isChecking, EngineManager, type EngineEvents, type Folder } from '../src/engines';
 
 const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
   return { key: `file://${path}`, name, path };
 };
+
+const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude' };
+function baseDeps(events: Partial<EngineEvents> = {}) {
+  return {
+    platform: 'darwin' as const,
+    env: {},
+    home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+    events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn(), ...events } as EngineEvents,
+    findClaude: (): Found => ({ ok: true, path: '/bin/claude' }),
+    checkAuth: async () => signedIn,
+  };
+}
 
 function setup(o: { found?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cs-home-'));
@@ -19,7 +32,7 @@ function setup(o: { found?: boolean } = {}) {
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2 }),
+    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude' }),
     platform: 'darwin',
     env: {},
     home,
@@ -38,21 +51,22 @@ function setup(o: { found?: boolean } = {}) {
 describe('EngineManager', () => {
   it('starts as "checking" and checks sign-in with the Claude Code it finds', async () => {
     const { manager, events, checkAuth } = setup();
-    expect(manager.status).toBe(CHECKING);
-    expect(await manager.checkSignIn()).toEqual(signedIn);
+    expect(isChecking(manager.status)).toBe(true);
+    expect(manager.status).toEqual(checkingStatus({ id: 'claude', name: 'Claude' }));
+    expect(await manager.checkProvider()).toEqual(signedIn);
     expect(checkAuth).toHaveBeenCalledWith('/bin/claude');
     expect(events.auth).toHaveBeenCalledWith(signedIn);
   });
 
   it('reports a missing Claude Code without running anything', async () => {
     const { manager, checkAuth } = setup({ found: false });
-    expect(await manager.checkSignIn()).toEqual({ provider: 'claude', ok: false, label: 'not signed in', error: 'no claude' });
+    expect(await manager.checkProvider()).toEqual({ provider: 'claude', ok: false, label: 'not signed in', error: 'no claude' });
     expect(checkAuth).not.toHaveBeenCalled();
   });
 
   it('creates one engine per folder and reports its graphs', async () => {
     const { manager, events } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const a = folder('a');
     const app = manager.get(a);
     expect(manager.get(a)).toBe(app);
@@ -63,7 +77,7 @@ describe('EngineManager', () => {
 
   it('disables only a folder whose project settings reroute Claude', async () => {
     const { manager } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const bad = folder('bad');
     mkdirSync(join(bad.path, '.claude'));
     writeFileSync(join(bad.path, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_API_KEY: 'x' } }));
@@ -74,30 +88,30 @@ describe('EngineManager', () => {
   it('passes a new sign-in state to engines that already exist', async () => {
     const { manager, setAuth } = setup();
     setAuth({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const msgs: ServerMessage[] = [];
     manager.get(folder('a')).connect({ send: (m) => void msgs.push(m) });
     setAuth(signedIn);
-    await manager.checkSignIn();
+    await manager.checkProvider();
     expect(msgs.at(-1)).toEqual({ type: 'auth', status: signedIn });
   });
 
   it('gives every engine the one Claude provider, and keeps it through a new check', async () => {
     const { manager } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const a = manager.get(folder('a'));
     const b = manager.get(folder('b'));
     expect(a.provider().id).toBe('claude');
     expect(b.provider()).toBe(a.provider());
     const before = a.provider();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     expect(a.provider()).toBe(before);
     expect(a.status()).toEqual(signedIn);
   });
 
   it('keeps approvals apart per folder even when graph ids match', async () => {
     const { manager, events } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const a = folder('a');
     const b = folder('b');
     for (const f of [a, b]) manager.get(f).broker.request({ runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Build', toolName: 'Bash', input: { command: 'x' } });
@@ -107,7 +121,7 @@ describe('EngineManager', () => {
 
   it('keeps variable values under the home folder, outside the project', async () => {
     const { manager, home } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     const a = folder('a');
     manager.get(a).values.set('g', 'name', 'v');
     const file = valuesFileFor(a.path, home);
@@ -118,7 +132,7 @@ describe('EngineManager', () => {
 
   it('disposes every engine', async () => {
     const { manager, apps } = setup();
-    await manager.checkSignIn();
+    await manager.checkProvider();
     manager.get(folder('a'));
     manager.get(folder('b'));
     const spies = apps.map((app) => vi.spyOn(app, 'dispose'));
@@ -131,7 +145,7 @@ describe('EngineManager', () => {
       const findGitBash = vi.fn(() => found);
       const seen: AppDeps[] = [];
       const manager = new EngineManager({
-        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2 }),
+        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude' }),
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
@@ -160,13 +174,35 @@ describe('EngineManager', () => {
     const { manager, events, checkAuth } = setup();
     let release!: (a: ProviderStatus) => void;
     checkAuth.mockImplementationOnce(() => new Promise<ProviderStatus>((r) => (release = r)));
-    const a = manager.checkSignIn();
-    const b = manager.checkSignIn();
+    const a = manager.checkProvider();
+    const b = manager.checkProvider();
     expect(await b).toEqual(signedIn);
     release({ provider: 'claude', ok: false, label: 'not signed in', error: 'old' });
     expect(await a).toEqual(signedIn);
     expect(manager.status).toEqual(signedIn);
-    expect(events.auth).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(events.auth).mock.calls.filter(([s]) => !isChecking(s))).toEqual([[signedIn]]);
     expect(events.auth).not.toHaveBeenCalledWith({ provider: 'claude', ok: false, label: 'not signed in', error: 'old' });
+  });
+
+  it('uses the provider named in the setting, and swaps when it changes', async () => {
+    let provider = 'claude';
+    const copilot = testProvider({ id: 'copilot', name: 'GitHub Copilot', status: async () => ({ provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', error: 'nope' }) });
+    const manager = new EngineManager({ ...baseDeps(), settings: () => ({ ...defaults, provider }), providers: { copilot: () => copilot } });
+    const app = manager.get(folder('a'));
+    await manager.checkProvider();
+    expect(app.provider().id).toBe('claude');
+    provider = 'copilot';
+    await manager.checkProvider();
+    expect(app.provider()).toBe(copilot);
+    expect(app.status()).toMatchObject({ provider: 'copilot', ok: false, error: 'nope' });
+  });
+
+  it('warns once about an unknown provider and uses Claude', async () => {
+    const warning = vi.fn();
+    const manager = new EngineManager({ ...baseDeps({ warning }), settings: () => ({ ...defaults, provider: 'gemini' }) });
+    await manager.checkProvider();
+    await manager.checkProvider();
+    expect(manager.currentProvider().id).toBe('claude');
+    expect(warning.mock.calls).toEqual([["Unknown agentStream.provider 'gemini'; using Claude."]]);
   });
 });

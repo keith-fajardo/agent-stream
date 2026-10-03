@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { relativeTime, statusLabel, type GraphListItem, type ProviderStatus } from '@agent-stream/shared';
-import { CHECKING, type Folder } from './engines';
+import { isChecking, type Folder } from './engines';
 
 export class FolderItem extends vscode.TreeItem {
   constructor(readonly folder: Folder) {
@@ -36,10 +36,10 @@ export class GraphItem extends vscode.TreeItem {
 
 export class RetryItem extends vscode.TreeItem {
   constructor() {
-    super('Retry sign-in check', vscode.TreeItemCollapsibleState.None);
+    super('Check again', vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon('refresh');
     this.contextValue = 'retry';
-    this.command = { command: 'agentStream.retrySignIn', title: 'Retry sign-in check' };
+    this.command = { command: 'agentStream.retrySignIn', title: 'Check again' };
   }
 }
 
@@ -65,7 +65,7 @@ export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
     if (parent instanceof FolderItem) return this.source.graphs(parent.folder).map((g) => new GraphItem(parent.folder, g, now));
     if (parent) return [];
     const status = this.source.status();
-    const top: vscode.TreeItem[] = status.ok || status === CHECKING ? [] : [new RetryItem()];
+    const top: vscode.TreeItem[] = status.ok || isChecking(status) ? [] : [new RetryItem()];
     const folders = this.source.folders();
     if (folders.length === 1) return [...top, ...this.source.graphs(folders[0]).map((g) => new GraphItem(folders[0], g, now))];
     return [...top, ...folders.map((f) => new FolderItem(f))];

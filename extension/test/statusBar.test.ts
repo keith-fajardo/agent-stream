@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHECKING } from '../src/engines';
+import { checkingStatus } from '../src/engines';
 import { statusBarText } from '../src/statusBar';
 
 describe('statusBarText', () => {
@@ -25,6 +25,6 @@ describe('statusBarText', () => {
   });
 
   it('shows the check in progress', () => {
-    expect(statusBarText(CHECKING).text).toBe('$(sync~spin) Agent Stream');
+    expect(statusBarText(checkingStatus({ id: 'claude', name: 'Claude' })).text).toBe('$(sync~spin) Agent Stream');
   });
 });

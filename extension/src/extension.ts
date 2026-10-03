@@ -1,14 +1,15 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { providerLabel, type HostCommand, type ProviderStatus } from '@agent-stream/shared';
+import { PROVIDER_IDS, providerLabel, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { graphCommands } from './commands';
-import { CHECKING, EngineManager, type EngineEvents, type Folder } from './engines';
+import { EngineManager, isChecking, type EngineEvents, type Folder } from './engines';
 import { folderFor, workspaceFolders } from './folders';
 import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
 import { GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
 import { runCommands } from './runCommands';
+import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
 import { statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
@@ -17,7 +18,7 @@ let engines: EngineManager | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.command = 'agentStream.signInDetails';
+  status.command = 'agentStream.selectProvider';
   context.subscriptions.push(status);
   const showAuth = (providerStatus: ProviderStatus) => {
     const t = statusBarText(providerStatus);
@@ -62,7 +63,7 @@ export async function activate(context: vscode.ExtensionContext) {
   events.graphs = () => graphsView.refresh();
   events.auth = (next) => {
     showAuth(next);
-    graphsTree.message = next.ok || next === CHECKING ? undefined : next.error;
+    graphsTree.message = next.ok || isChecking(next) ? undefined : next.error;
     graphsView.refresh();
   };
   const graph = graphCommands({
@@ -115,21 +116,37 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentStream.retrySignIn', () => manager.checkSignIn()),
+    vscode.commands.registerCommand('agentStream.retrySignIn', () => manager.checkProvider()),
+    vscode.commands.registerCommand('agentStream.selectProvider', () =>
+      selectProvider({
+        providers: PROVIDER_IDS.map((id) => manager.providerFor(id)),
+        current: () => manager.currentProvider().id,
+        pick: async (items, placeHolder) => vscode.window.showQuickPick(items, { placeHolder }),
+        recheck: () => manager.checkProvider(),
+        write: async (id: ProviderId) => {
+          const config = vscode.workspace.getConfiguration('agentStream');
+          const target = config.inspect<string>('provider')?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+          await config.update('provider', id, target);
+        },
+      }),
+    ),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('agentStream.provider') || e.affectsConfiguration('agentStream.claudePath')) void manager.checkProvider();
+    }),
     vscode.commands.registerCommand('agentStream.signInDetails', async () => {
       const current = manager.status;
       if (current.ok) {
         void vscode.window.showInformationMessage(`Agent Stream runs on ${providerLabel(current)}.`);
         return;
       }
-      if ((await vscode.window.showWarningMessage(current.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkSignIn();
+      if ((await vscode.window.showWarningMessage(current.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkProvider();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
       for (const f of e.removed) manager.remove(f.uri.toString());
     }),
   );
 
-  await manager.checkSignIn();
+  await manager.checkProvider();
   return { engines: manager, panels };
 }
 
