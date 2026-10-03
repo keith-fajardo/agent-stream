@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn(), loadViewState: vi.fn(), saveViewState: vi.fn() }));
 const { loadViewState, saveViewState } = await import('../src/bridge');
 const { dispatch, getState, resetStoreForTests } = await import('../src/store');
-const { DEFAULT_LAYOUT, clampLogs, clampSide, loadLayout, persistLayout } = await import('../src/panelLayout');
+const { DEFAULT_LAYOUT, clampLogs, clampSide, loadLayout, persistLayout, restoreLayout } = await import('../src/panelLayout');
 
 beforeEach(() => {
   vi.mocked(loadViewState).mockReset();
@@ -56,6 +56,12 @@ describe('panelLayout', () => {
     expect(() => persistLayout()).not.toThrow();
     spy.mockRestore();
     set.mockRestore();
+  });
+
+  it('applies the stored layout at boot, keeping a stored size larger than the tab (CSS clamps the render)', () => {
+    vi.mocked(loadViewState).mockReturnValue({ layout: { sideWidth: 5000, sideCollapsed: true } });
+    restoreLayout();
+    expect(getState().layout).toEqual({ ...DEFAULT_LAYOUT, sideWidth: 5000, sideCollapsed: true });
   });
 
   it('persists to the webview state and to the last used', () => {

@@ -1,6 +1,6 @@
 import { loadViewState, saveViewState } from './bridge';
 import type { PanelLayout } from './state';
-import { getState } from './store';
+import { dispatch, getState } from './store';
 
 export const SIDE_MIN = 280;
 export const SIDE_DEFAULT = 440;
@@ -52,6 +52,11 @@ function tabState(): Partial<PanelLayout> {
 /** This tab's own layout if it has one, else what was last used in any tab, else the defaults. */
 export function loadLayout(): PanelLayout {
   return { ...DEFAULT_LAYOUT, ...lastUsed(), ...tabState() };
+}
+
+/** Applies this tab's stored layout to the store at boot. */
+export function restoreLayout(): void {
+  dispatch({ kind: 'setLayout', layout: loadLayout() });
 }
 
 /** Called when a drag ends, a key is pressed or a panel is collapsed: remembers the layout for this tab and for new tabs. */

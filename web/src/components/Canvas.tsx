@@ -123,9 +123,9 @@ export function Canvas() {
           })
         }
         // A ghost (a removed step or connection) can't be edited: clicking it opens its change instead.
-        onNodeClick={(_e, n) => dispatch(n.data.ghost ? { kind: 'selectChange', key: changeKey({ kind: 'node', id: n.data.node.id }) } : { kind: 'selectNode', id: n.id })}
+        onNodeClick={(_e, n) => n.data.ghost ? actions.selectChange(changeKey({ kind: 'node', id: n.data.node.id })) : dispatch({ kind: 'selectNode', id: n.id })}
         onEdgeClick={(_e, edge) => {
-          if (edge.id.startsWith(GHOST_PREFIX)) dispatch({ kind: 'selectChange', key: changeKey({ kind: 'edge', id: edge.id.slice(GHOST_PREFIX.length) }) });
+          if (edge.id.startsWith(GHOST_PREFIX)) actions.selectChange(changeKey({ kind: 'edge', id: edge.id.slice(GHOST_PREFIX.length) }));
         }}
         onPaneClick={() => dispatch({ kind: 'selectNode' })}
         zoomOnDoubleClick={false}

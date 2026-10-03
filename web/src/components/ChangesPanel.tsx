@@ -78,11 +78,11 @@ export function ChangesPanel() {
               role="button"
               tabIndex={0}
               aria-expanded={selected === key}
-              onClick={() => dispatch({ kind: 'selectChange', key })}
+              onClick={() => actions.selectChange(key)}
               onKeyDown={(e) => {
                 if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                   e.preventDefault();
-                  dispatch({ kind: 'selectChange', key });
+                  actions.selectChange(key);
                 }
               }}
             >

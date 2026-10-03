@@ -10,6 +10,7 @@ const { dispatch, getState, resetStoreForTests } = await import('../src/store');
 const { RightPanel } = await import('../src/components/RightPanel');
 const { LogsPanel } = await import('../src/components/LogsPanel');
 const { MenuBar } = await import('../src/components/MenuBar');
+const { actions } = await import('../src/actions');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,7 +30,7 @@ const fire = (el: Element, type: string, init: MouseEventInit = {}) => act(async
 const key = (el: Element, k: string, shiftKey = false) => act(async () => void el.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true })));
 const drag = async (el: Element, from: number, to: number, axis: 'clientX' | 'clientY') => {
   await fire(el, 'pointerdown', { [axis]: from });
-  await fire(el, 'pointermove', { [axis]: to });
+  await fire(el, 'pointermove', { [axis]: to, buttons: 1 });
   await fire(el, 'pointerup', { [axis]: to });
 };
 const side = () => getState().layout.sideWidth;
@@ -71,11 +72,11 @@ describe('side panel', () => {
   it('widens when the handle is dragged left, and persists only on drag end', async () => {
     const h = handle('Resize side panel');
     await fire(h, 'pointerdown', { clientX: 500 });
-    await fire(h, 'pointermove', { clientX: 400 });
+    await fire(h, 'pointermove', { clientX: 400, buttons: 1 });
     expect(side()).toBe(540);
     expect(q('.side-panel').style.width).toBe('540px');
     expect(saveViewState).not.toHaveBeenCalled();
-    await fire(h, 'pointermove', { clientX: 380 });
+    await fire(h, 'pointermove', { clientX: 380, buttons: 1 });
     await fire(h, 'pointerup', { clientX: 380 });
     expect(side()).toBe(560);
     expect(saveViewState).toHaveBeenCalledTimes(1);
@@ -137,6 +138,84 @@ describe('side panel', () => {
   });
 });
 
+describe('pointer lifecycle', () => {
+  const setCapture = vi.fn();
+  const releaseCapture = vi.fn();
+  beforeEach(() => {
+    setCapture.mockClear();
+    releaseCapture.mockClear();
+    (HTMLElement.prototype as unknown as Record<string, unknown>).setPointerCapture = setCapture;
+    (HTMLElement.prototype as unknown as Record<string, unknown>).releasePointerCapture = releaseCapture;
+  });
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).setPointerCapture;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).releasePointerCapture;
+  });
+
+  it('captures the pointer on press and releases it on release', async () => {
+    const h = handle('Resize side panel');
+    await fire(h, 'pointerdown', { clientX: 500, button: 0, buttons: 1 });
+    expect(setCapture).toHaveBeenCalledTimes(1);
+    await fire(h, 'pointerup', { clientX: 500 });
+    expect(releaseCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the drag on cancel, persisting once, and a later move without a button does nothing', async () => {
+    const h = handle('Resize side panel');
+    await fire(h, 'pointerdown', { clientX: 500, button: 0, buttons: 1 });
+    await fire(h, 'pointermove', { clientX: 400, buttons: 1 });
+    expect(side()).toBe(540);
+    await fire(h, 'pointercancel');
+    expect(saveViewState).toHaveBeenCalledTimes(1);
+    expect(releaseCapture).toHaveBeenCalled();
+    await fire(h, 'lostpointercapture');
+    expect(saveViewState).toHaveBeenCalledTimes(1);
+    await fire(h, 'pointermove', { clientX: 100, buttons: 0 });
+    expect(side()).toBe(540);
+  });
+
+  it('stops a drag when a move arrives with no button held', async () => {
+    const h = handle('Resize side panel');
+    await fire(h, 'pointerdown', { clientX: 500, button: 0, buttons: 1 });
+    await fire(h, 'pointermove', { clientX: 100, buttons: 0 });
+    expect(side()).toBe(440);
+  });
+
+  it('ignores a right-button press', async () => {
+    const h = handle('Resize side panel');
+    await fire(h, 'pointerdown', { clientX: 500, button: 2, buttons: 2 });
+    await fire(h, 'pointermove', { clientX: 400, buttons: 2 });
+    expect(side()).toBe(440);
+    expect(setCapture).not.toHaveBeenCalled();
+  });
+});
+
+describe('accessibility and persistence extras', () => {
+  it('exposes the separators value range and the expand buttons state', async () => {
+    const h = handle('Resize side panel');
+    expect([h.getAttribute('aria-valuenow'), h.getAttribute('aria-valuemin'), h.getAttribute('aria-valuemax')]).toEqual(['440', '280', '700']);
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n1' }));
+    const l = handle('Resize logs panel');
+    expect([l.getAttribute('aria-valuemin'), l.getAttribute('aria-valuemax')]).toEqual(['120', '560']);
+    await act(async () => (container.querySelector('button[aria-label="Collapse logs panel"]') as HTMLButtonElement).click());
+    expect(container.querySelector('button[aria-label="Expand logs panel"]')!.getAttribute('aria-expanded')).toBe('false');
+    dispatch({ kind: 'setLayout', layout: { sideCollapsed: true } });
+    await act(async () => void 0);
+    expect(container.querySelector('.side-rail button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('persists when a change selection expands the collapsed panel', async () => {
+    dispatch({ kind: 'setLayout', layout: { sideCollapsed: true } });
+    actions.selectChange('node:n1');
+    expect(getState().layout.sideCollapsed).toBe(false);
+    expect(saveViewState).toHaveBeenCalledTimes(1);
+    dispatch({ kind: 'setLayout', layout: { sideCollapsed: true } });
+    actions.reviewChanges();
+    expect(getState().layout.sideCollapsed).toBe(false);
+    expect(saveViewState).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('logs panel', () => {
   beforeEach(async () => {
     await act(async () => dispatch({ kind: 'selectNode', id: 'n1' }));
@@ -152,7 +231,7 @@ describe('logs panel', () => {
   it('grows when the handle is dragged up, persisting on drag end only', async () => {
     const h = handle('Resize logs panel');
     await fire(h, 'pointerdown', { clientY: 500 });
-    await fire(h, 'pointermove', { clientY: 450 });
+    await fire(h, 'pointermove', { clientY: 450, buttons: 1 });
     expect(getState().layout.logsHeight).toBe(330);
     expect(q('.logs-panel').style.height).toBe('330px');
     expect(saveViewState).not.toHaveBeenCalled();

@@ -183,7 +183,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .ws-color-5 { --ws: var(--vscode-charts-yellow, #8a6d00); }
 .logs-workspace, .logs-waiting { margin-left: 8px; color: var(--muted); }
 
-.resize-handle { position: absolute; z-index: 6; background: transparent; }
+.resize-handle { position: absolute; z-index: 6; background: transparent; touch-action: none; user-select: none; }
 .resize-handle:hover, .resize-handle:focus-visible, .resize-handle:active { background: var(--accent); }
 .resize-side { left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
 .resize-logs { top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; }

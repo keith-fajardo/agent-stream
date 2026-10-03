@@ -33,7 +33,7 @@ export function NodePanel() {
         <div className="change-banner">
           <span>{changedSentence(changed.by, changed.fields ?? [])}</span>
           <span className="actions">
-            <button className="link" onClick={() => dispatch({ kind: 'selectChange', key: changeKey(changed) })}>
+            <button className="link" onClick={() => actions.selectChange(changeKey(changed))}>
               Show before/after
             </button>
             <button onClick={() => actions.acceptChange({ kind: 'node', id: node.id })}>Accept</button>

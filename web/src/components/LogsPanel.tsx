@@ -55,7 +55,7 @@ export function LogsPanel() {
       <section className="logs-panel collapsed" aria-label="Step logs (collapsed)">
         <header className="logs-head">
           <span>{title}</span>
-          <button className="link" aria-label="Expand logs panel" onClick={() => actions.toggleLogs()}>
+          <button className="link" aria-label="Expand logs panel" aria-expanded={false} onClick={() => actions.toggleLogs()}>
             ▴
           </button>
         </header>

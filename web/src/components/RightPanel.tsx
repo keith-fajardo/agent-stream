@@ -22,7 +22,7 @@ export function RightPanel() {
       <aside className="side-panel collapsed" aria-label="Side panel (collapsed)">
         <nav className="side-rail">
           {tabs.map(([t, label]) => (
-            <button key={t} onClick={() => show(t)}>
+            <button key={t} aria-expanded={false} onClick={() => show(t)}>
               {label}
             </button>
           ))}

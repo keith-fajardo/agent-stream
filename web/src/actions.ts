@@ -54,6 +54,12 @@ export const actions = {
   },
   reviewChanges(): void {
     dispatch({ kind: 'setTab', tab: 'changes' });
+    persistLayout();
+  },
+  /** Shows a change in the Changes tab, which expands a collapsed side panel. */
+  selectChange(key: string): void {
+    dispatch({ kind: 'selectChange', key });
+    persistLayout();
   },
   acceptChange(target: ChangeTarget): void {
     const { graph } = getState();
