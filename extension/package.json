@@ -1,7 +1,8 @@
 {
   "name": "agent-stream",
   "displayName": "Agent Stream",
-  "description": "Co-create a workflow graph with a Claude planner and run it step by step on your Claude subscription.",
+  "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude today, GitHub Copilot in preview.",
+  "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot"],
   "version": "0.2.0",
   "publisher": "agent-stream-local",
   "license": "UNLICENSED",
