@@ -108,6 +108,41 @@ describe('NodePanel Refine with planner', () => {
     await act(async () => root.unmount());
   });
 
+  it('splits the selected step, saving first when there are unsaved edits', async () => {
+    hello(true);
+    const a = await mount(step);
+    await act(async () => a.button('Split into steps')!.click());
+    expect(vi.mocked(post)).toHaveBeenCalledWith({ type: 'splitStep', nodeId: 'n1' });
+    expect(vi.mocked(send)).not.toHaveBeenCalled();
+    await act(async () => a.root.unmount());
+    const { el, root, button } = await mount(step);
+    const field = el.querySelector('textarea#node-description') as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Compare the tables.');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(button('Split into steps')).toBeUndefined();
+    await act(async () => button('Save and split')!.click());
+    expect(vi.mocked(send).mock.calls).toEqual([[{ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { description: 'Compare the tables.' } } }]]);
+    expect(vi.mocked(post)).toHaveBeenCalledWith({ type: 'splitStep', nodeId: 'n1' });
+    expect(vi.mocked(send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(post).mock.invocationCallOrder.at(-1)!);
+    await act(async () => root.unmount());
+  });
+
+  it('disables Split like Refine: title-only step, provider not signed in', async () => {
+    hello(true);
+    const titleOnly = await mount({ ...step, prompt: undefined });
+    expect(titleOnly.button('Split into steps')!.disabled).toBe(true);
+    expect(titleOnly.button('Split into steps')!.title).toBe('Write what the step should do first.');
+    await act(async () => titleOnly.root.unmount());
+    hello(false);
+    const signedOut = await mount(step);
+    expect(signedOut.button('Split into steps')!.disabled).toBe(true);
+    expect(signedOut.button('Split into steps')!.title).toBe('x');
+    await act(async () => signedOut.root.unmount());
+    hello(true);
+  });
+
   it('is disabled for a title-only step and when the provider is not signed in', async () => {
     hello(true);
     const titleOnly = await mount({ ...step, prompt: undefined });

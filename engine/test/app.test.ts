@@ -9,7 +9,7 @@ import type { NodeExecutor } from '../src/executors';
 import type { GitExec } from '../src/git';
 import { createClaudeProvider } from '../src/providers/claude';
 import type { PlannerTurn, PlannerTurnResult } from '../src/providers/types';
-import { refineRequest } from '../src/refine';
+import { refineRequest, splitRequest } from '../src/refine';
 import { RunStore } from '../src/runStore';
 import { variantPath } from '../src/variantWorkspaces';
 import { createWriteLeases, leaseFile, type WriteLeases } from '../src/writeLease';
@@ -515,6 +515,31 @@ describe('app', () => {
       await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n9'] });
       await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n1'] });
       expect(c.all('error').map((m) => m.message)).toEqual(['session "nope" not found', 'node n9 does not exist', 'Write what the step should do first.']);
+    });
+
+    it('splits a step as a planner turn: short line in the chat, full instruction to the provider', async () => {
+      const seen: PlannerTurn[] = [];
+      const { app, graphId } = setupWithGraph({ provider: testProvider({ planTurn: async (t) => (seen.push(t), { ok: true }) }) });
+      app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n3', title: 'Checks', kind: 'agent', prompt: 'check a and check b' } }, 'user');
+      const c = client(app);
+      await app.handle(c.client, { type: 'openChat', graphId, sessionId: 'default' });
+      await app.handle(c.client, { type: 'splitStep', graphId, sessionId: 'default', nodeId: 'n3' });
+      await flush();
+      expect(c.all('chatEntry').map((m) => m.entry).find((e) => e.role === 'user')?.text).toBe('Split n3');
+      expect(seen[0].prompt).toContain(splitRequest('n3').prompt);
+    });
+
+    it('refuses to split unknown graphs, sessions, missing steps, title-only steps and a disabled provider', async () => {
+      const { app, graphId } = setupWithGraph();
+      app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'Only a title', kind: 'agent' } }, 'user');
+      const c = client(app);
+      await app.handle(c.client, { type: 'splitStep', graphId: 'nope', sessionId: 'default', nodeId: 'n1' });
+      await app.handle(c.client, { type: 'splitStep', graphId, sessionId: 'nope', nodeId: 'n1' });
+      await app.handle(c.client, { type: 'splitStep', graphId, sessionId: 'default', nodeId: 'n9' });
+      await app.handle(c.client, { type: 'splitStep', graphId, sessionId: 'default', nodeId: 'n1' });
+      const errors = c.all('error').map((m) => m.message);
+      expect(errors.slice(1)).toEqual(['session "nope" not found', 'node n9 does not exist', 'Write what the step should do first.']);
+      expect(errors).toHaveLength(4);
     });
 
     it('refuses chat for an unknown session, and cleans every session when a graph is deleted', async () => {

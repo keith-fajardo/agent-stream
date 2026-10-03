@@ -58,6 +58,7 @@ export function buildMenus(s: State): Menu[] {
         item('Tidy layout', hasGraph, actions.tidy),
         SEPARATOR,
         item('Refine selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.refine([selectedNode!.id])),
+        item('Split selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.split(selectedNode!.id)),
         item(`Refine steps you changed (${changedIds.length})`, signedIn && changedIds.length > 0, () => actions.refine(changedIds)),
         SEPARATOR,
         item('Review agent changes…', changeCount > 0, actions.reviewChanges),

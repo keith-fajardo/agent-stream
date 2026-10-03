@@ -151,6 +151,9 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
         case 'setUpParallelTickets':
           d.setUpParallelTickets(d.panel.folder);
           return;
+        case 'splitStep':
+          d.app.handle(d.client, { type: 'splitStep', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeId: msg.nodeId }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
+          return;
         case 'refineSteps':
           d.app.handle(d.client, { type: 'refineSteps', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeIds: msg.nodeIds }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
           return;

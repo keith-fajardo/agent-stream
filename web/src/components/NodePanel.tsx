@@ -192,6 +192,22 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           {dirty ? 'Save and refine' : 'Refine with planner'}
         </button>
         <button
+          disabled={!status?.ok || !canRefine}
+          title={
+            !status?.ok
+              ? status?.error
+              : canRefine
+                ? 'Ask the planner to break this step into several connected steps'
+                : 'Write what the step should do first.'
+          }
+          onClick={() => {
+            if (dirty) save();
+            actions.split(node.id);
+          }}
+        >
+          {dirty ? 'Save and split' : 'Split into steps'}
+        </button>
+        <button
           disabled={!latest || running}
           title={latest ? `Run this step and everything after it again, reusing run ${latest.id} for the rest` : 'Run the graph once first'}
           onClick={actions.rerunFromSelected}

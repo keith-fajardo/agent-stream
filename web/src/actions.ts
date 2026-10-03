@@ -100,6 +100,10 @@ export const actions = {
   refine(nodeIds: string[]): void {
     post({ type: 'refineSteps', nodeIds });
   },
+  /** Asks the planner to split this step into connected steps; the extension runs it in the active session. */
+  split(nodeId: string): void {
+    post({ type: 'splitStep', nodeId });
+  },
   addVariable(): void {
     dispatch({ kind: 'openVariables', addRow: true });
   },

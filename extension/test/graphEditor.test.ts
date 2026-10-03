@@ -72,6 +72,13 @@ describe('graph tab messages', () => {
     expect(handle).toHaveBeenCalledWith(expect.anything(), { type: 'refineSteps', graphId: s.graph.id, sessionId: 'work', nodeIds: ['n1'] });
   });
 
+  it("asks the engine to split a step in the folder's active session", () => {
+    const s = setup();
+    const handle = vi.spyOn(s.app, 'handle').mockResolvedValue();
+    s.handler.handle({ type: 'splitStep', nodeId: 'n1' });
+    expect(handle).toHaveBeenCalledWith(expect.anything(), { type: 'splitStep', graphId: s.graph.id, sessionId: 'work', nodeId: 'n1' });
+  });
+
   it('connects the tab to its engine when its page is ready, once per page load', () => {
     const s = setup();
     const connect = s.app.connect.bind(s.app);

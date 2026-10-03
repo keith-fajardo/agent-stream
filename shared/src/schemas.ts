@@ -120,6 +120,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
   z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
+  z.object({ type: z.literal('splitStep'), graphId: z.string(), sessionId: z.string(), nodeId: z.string() }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('stopPlanner'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: z.enum(EFFORT_LEVELS).optional() }),
@@ -142,6 +143,7 @@ const webviewHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('chatCommand'), command: z.enum(['switchSession', 'newChat']) }),
   z.object({ type: z.literal('draftState'), dirty: z.boolean() }),
   z.object({ type: z.literal('refineSteps'), nodeIds: refineNodeIds }),
+  z.object({ type: z.literal('splitStep'), nodeId: z.string() }),
   z.object({ type: z.literal('setUpParallelTickets') }),
   z.object({ type: z.literal('openExternal'), url: z.string().max(4096) }),
 ]);

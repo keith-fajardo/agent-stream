@@ -39,7 +39,7 @@ import { GraphStore } from './graphStore';
 import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
-import { refineRequest } from './refine';
+import { refineRequest, splitRequest } from './refine';
 import { GIT_BASH_MISSING, type Found } from './platform';
 import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
@@ -510,6 +510,19 @@ export function createApp(d: AppDeps) {
         }
         if (!status.ok) return error(`Chat is disabled: ${status.error}`);
         const r = refineRequest(msg.nodeIds);
+        planner.send(msg.sessionId, msg.graphId, r.prompt, { display: r.display }).catch((e: unknown) => console.error('[agent-stream] planner error', e));
+        return;
+      }
+      case 'splitStep': {
+        const g = graphStore.load(msg.graphId);
+        if (!g.ok) return error(g.error);
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        const node = g.graph.nodes.find((n) => n.id === msg.nodeId);
+        if (!node) return error(`node ${msg.nodeId} does not exist`);
+        if (!refinable(node)) return error('Write what the step should do first.');
+        if (!status.ok) return error(`Chat is disabled: ${status.error}`);
+        const r = splitRequest(msg.nodeId);
         planner.send(msg.sessionId, msg.graphId, r.prompt, { display: r.display }).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
       }

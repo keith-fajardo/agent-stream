@@ -341,6 +341,7 @@ export type ClientMessage =
   | { type: 'openChat'; graphId: string; sessionId: string }
   | { type: 'chat'; graphId: string; sessionId: string; text: string }
   | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
+  | { type: 'splitStep'; graphId: string; sessionId: string; nodeId: string }
   /** Clears the conversation: its chat and the provider session. */
   | { type: 'newChat'; graphId: string; sessionId: string }
   /** Stops the conversation's running planner turn; nothing happens when none is running. */
@@ -371,6 +372,7 @@ export type WebviewHostMessage =
   | { type: 'chatCommand'; command: 'switchSession' | 'newChat' }
   | { type: 'draftState'; dirty: boolean }
   | { type: 'refineSteps'; nodeIds: string[] }
+  | { type: 'splitStep'; nodeId: string }
   | { type: 'setUpParallelTickets' }
   | { type: 'openExternal'; url: string };
 

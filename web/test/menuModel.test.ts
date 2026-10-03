@@ -69,6 +69,18 @@ describe('menus', () => {
     expect(vi.mocked(post).mock.calls).toEqual([[{ type: 'refineSteps', nodeIds: ['n1'] }], [{ type: 'refineSteps', nodeIds: ['n1', 'n4'] }]]);
   });
 
+  it('has Split selected step in Edit with the same enablement as Refine, and posts splitStep', () => {
+    const withNodes = { ...graph, nodes: [step('n1'), { ...step('n3'), prompt: undefined }] };
+    const edit = (extra: Partial<State>) => items(base({ graph: withNodes, ...extra }), 'edit');
+    expect(edit({})['Split selected step'].enabled).toBe(false);
+    expect(edit({ selectedNodeId: 'n1' })['Split selected step'].enabled).toBe(true);
+    expect(edit({ selectedNodeId: 'n3' })['Split selected step'].enabled).toBe(false);
+    expect(edit({ selectedNodeId: 'n1', status: { provider: 'claude', ok: false, label: 'not signed in', error: 'x' } })['Split selected step'].enabled).toBe(false);
+    vi.mocked(post).mockClear();
+    edit({ selectedNodeId: 'n1' })['Split selected step'].run();
+    expect(vi.mocked(post).mock.calls).toEqual([[{ type: 'splitStep', nodeId: 'n1' }]]);
+  });
+
   it('enables Run items by sign-in, run state, selection and history', () => {
     const idle = items(base(), 'run');
     expect([idle['Run…'].enabled, idle['Stop'].enabled, idle['Re-run from selected step…'].enabled]).toEqual([true, false, false]);
