@@ -216,3 +216,40 @@ describe('limits', () => {
     expect(await find(readOnlyTools(project({ 'a.ts': '' })), 'Glob').run({ pattern: '**' }, ac.signal)).toEqual({ text: 'Cancelled.', isError: true });
   });
 });
+
+describe('private folders: exceptions and edges', () => {
+  const refusal = { text: 'That folder holds Agent Stream run records and sessions, which are private.', isError: true };
+  const out = '.agent-stream/runs/r1/nodes/n1/output.md';
+  const cwd = project({ [out]: 'upstream result', '.agent-stream/runs/r1/run.json': 'x', '.agent-stream/runs/r1/events.jsonl': 'x', '.agent-stream/sessions/default/s.json': 'x' });
+
+  it('lets Read and a single-file Grep open an upstream output.md', async () => {
+    expect(await run(cwd, 'Read', { file_path: out })).toEqual({ text: '     1\tupstream result' });
+    expect(await run(cwd, 'Grep', { pattern: 'upstream', path: out })).toEqual({ text: `${join(...out.split('/'))}:1: upstream result` });
+  });
+
+  it('still refuses run.json, events.jsonl, sessions and search roots inside runs', async () => {
+    for (const f of ['.agent-stream/runs/r1/run.json', '.agent-stream/runs/r1/events.jsonl', '.agent-stream/sessions/default/s.json', '.agent-stream/runs/r1/nodes/n1/other.md', '.agent-stream/runs/r1/output.md']) {
+      expect(await run(cwd, 'Read', { file_path: f })).toEqual(refusal);
+    }
+    expect(await run(cwd, 'Grep', { pattern: 'x', path: '.agent-stream/runs/r1/run.json' })).toEqual(refusal);
+    expect(await run(cwd, 'Grep', { pattern: 'x', path: '.agent-stream/runs/r1/nodes/n1' })).toEqual(refusal);
+    expect(await run(cwd, 'Glob', { pattern: '**', path: '.agent-stream/runs/r1/nodes' })).toEqual(refusal);
+  });
+
+  it('refuses a missing private path without saying whether it exists', async () => {
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/nope/run.json' })).toEqual(refusal);
+  });
+
+  it.skipIf(process.platform !== 'win32' && process.platform !== 'darwin')('compares case-insensitively where the file system does', async () => {
+    expect(await run(cwd, 'Grep', { pattern: 'x', path: '.agent-stream/RUNS' })).toEqual(refusal);
+    expect(await run(cwd, 'Glob', { pattern: '**', path: '.Agent-Stream/Sessions' })).toEqual(refusal);
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/RUNS/r1/run.json' })).toEqual(refusal);
+  });
+
+  it('does not claim an exact total once Glob stops collecting at 10,000', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 10_050; i++) files[`f/${i}.txt`] = '';
+    const lines = (await run(project(files), 'Glob', { pattern: '**/*.txt' })).text.split('\n');
+    expect(lines.at(-1)).toBe('(Showing the newest 1000 of more than 10000 files.)');
+  }, 30_000);
+});

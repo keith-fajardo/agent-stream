@@ -54,11 +54,23 @@ const statOf = (p: string): Stats | undefined => {
 const isBinary = (buf: Buffer) => buf.subarray(0, BINARY_SNIFF_BYTES).includes(0);
 const posixRelative = (root: string, file: string) => relative(root, file).split(sep).join('/');
 
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+
 /** True for `.agent-stream/runs` or `.agent-stream/sessions` under any folder, and anything inside them. */
 function isPrivatePath(resolved: string): boolean {
-  const parts = resolved.split(sep);
+  const parts = (CASE_INSENSITIVE_FS ? resolved.toLowerCase() : resolved).split(sep);
   return parts.some((part, i) => part === '.agent-stream' && AGENT_STREAM_PRIVATE.has(parts[i + 1]));
 }
+
+/** `<…>/.agent-stream/runs/<run>/nodes/<node>/output.md`: the file a truncated upstream result points the step at. */
+function isUpstreamOutput(resolved: string): boolean {
+  const parts = (CASE_INSENSITIVE_FS ? resolved.toLowerCase() : resolved).split(sep);
+  const i = parts.length - 6;
+  return i >= 0 && parts[i] === '.agent-stream' && parts[i + 1] === 'runs' && parts[i + 3] === 'nodes' && parts[i + 5] === 'output.md';
+}
+
+/** Private, and not an upstream output.md that a step is told to read. */
+const refusedFile = (resolved: string) => isPrivatePath(resolved) && !isUpstreamOutput(resolved);
 
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 /** Agent Stream's own private folders, skipped wherever a `.agent-stream` folder is met. */
@@ -202,9 +214,9 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
   return [
     defineLoopTool('Read', 'Read a text file. Lines come numbered from 1; use offset and limit for long files.', readInput, async ({ file_path, offset, limit }) => {
       const file = toolPath(cwd, file_path);
+      if (refusedFile(file)) return { text: PRIVATE_FOLDER, isError: true };
       const st = statOf(file);
       if (!st) return { text: `File not found: ${file}`, isError: true };
-      if (isPrivatePath(file)) return { text: PRIVATE_FOLDER, isError: true };
       if (st.isDirectory()) return { text: `${file} is a folder, not a file. Use Glob to list it.`, isError: true };
       if (st.size > MAX_READ_BYTES) return { text: `${file} is larger than 2 MB; too big to read.`, isError: true };
       const buf = readFileSync(file);
@@ -228,7 +240,7 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
         return { text: `Invalid regular expression: ${(e as Error).message}`, isError: true };
       }
       const root = toolPath(cwd, path || '.');
-      if (isPrivatePath(root)) return { text: PRIVATE_FOLDER, isError: true };
+      if (refusedFile(root)) return { text: PRIVATE_FOLDER, isError: true };
       const st = statOf(root);
       if (!st) return { text: `Not found: ${root}`, isError: true };
       const outcome = await runGrepWorker(
@@ -262,15 +274,20 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
       if (!statOf(root)?.isDirectory()) return { text: `Folder not found: ${root}`, isError: true };
       const re = globToRegExp(pattern);
       const found: { file: string; mtime: number }[] = [];
+      let capped = false;
       for (const file of walk(root)) {
         if (signal.aborted) return { text: 'Cancelled.', isError: true };
         if (re.test(posixRelative(root, file))) found.push({ file, mtime: statOf(file)?.mtimeMs ?? 0 });
-        if (found.length >= MAX_GLOB_FOUND) break;
+        if (found.length >= MAX_GLOB_FOUND) {
+          capped = true;
+          break;
+        }
       }
       if (found.length === 0) return { text: 'No files found.' };
       found.sort((a, b) => b.mtime - a.mtime);
       const lines = found.slice(0, MAX_GLOB_RESULTS).map((f) => shown(cwd, f.file));
-      if (found.length > MAX_GLOB_RESULTS) lines.push(`(Showing the newest ${MAX_GLOB_RESULTS} of ${found.length} files.)`);
+      if (capped) lines.push(`(Showing the newest ${MAX_GLOB_RESULTS} of more than ${MAX_GLOB_FOUND} files.)`);
+      else if (found.length > MAX_GLOB_RESULTS) lines.push(`(Showing the newest ${MAX_GLOB_RESULTS} of ${found.length} files.)`);
       return { text: lines.join('\n') };
     }),
   ];
