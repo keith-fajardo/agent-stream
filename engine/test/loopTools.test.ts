@@ -169,3 +169,50 @@ describe('Grep', () => {
     expect(await run(cwd, 'Grep', { pattern: 'x', path: 'nope' })).toEqual({ text: `Not found: ${join(cwd, 'nope')}`, isError: true });
   });
 });
+
+describe('private Agent Stream folders', () => {
+  const refusal = { text: 'That folder holds Agent Stream run records and sessions, which are private.', isError: true };
+  const cwd = project({ '.agent-stream/runs/r1/run.json': 'secret', '.agent-stream/sessions/default/s.json': 'secret', 'src/a.ts': 'secret' });
+
+  it('refuses Grep, Glob and Read there, by relative, absolute and .. paths', async () => {
+    for (const path of ['.agent-stream/runs', '.agent-stream/sessions/default', 'src/../.agent-stream/runs/r1', join(cwd, '.agent-stream', 'runs')]) {
+      expect(await run(cwd, 'Grep', { pattern: 'secret', path })).toEqual(refusal);
+      expect(await run(cwd, 'Glob', { pattern: '**', path })).toEqual(refusal);
+    }
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/run.json' })).toEqual(refusal);
+    expect(await run(cwd, 'Read', { file_path: 'src/../.agent-stream/sessions/default/s.json' })).toEqual(refusal);
+    expect((await run(cwd, 'Read', { file_path: 'src/a.ts' })).isError).toBeUndefined();
+  });
+});
+
+describe('limits', () => {
+  it('refuses to Read a file over 2 MB', async () => {
+    const cwd = project({ 'big.txt': 'x'.repeat(2 * 1024 * 1024 + 1) });
+    expect(await run(cwd, 'Read', { file_path: 'big.txt' })).toEqual({ text: `${join(cwd, 'big.txt')} is larger than 2 MB; too big to read.`, isError: true });
+  });
+
+  it('stops a Grep pattern that backtracks catastrophically, at the deadline', async () => {
+    const cwd = project({ 'evil.txt': `${'a'.repeat(40)}b` });
+    const started = Date.now();
+    const r = await find(readOnlyTools(cwd, { grepTimeoutMs: 200 }), 'Grep').run({ pattern: '(a+)+$' }, signal);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('the pattern may be too slow');
+  });
+
+  it('stops a running Grep when the signal aborts', async () => {
+    const cwd = project({ 'evil.txt': `${'a'.repeat(40)}b` });
+    const ac = new AbortController();
+    const pending = find(readOnlyTools(cwd, { grepTimeoutMs: 60_000 }), 'Grep').run({ pattern: '(a+)+$' }, ac.signal);
+    setTimeout(() => ac.abort(), 100);
+    const started = Date.now();
+    expect(await pending).toEqual({ text: 'Cancelled.', isError: true });
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('cancels a Glob whose signal is already aborted', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    expect(await find(readOnlyTools(project({ 'a.ts': '' })), 'Glob').run({ pattern: '**' }, ac.signal)).toEqual({ text: 'Cancelled.', isError: true });
+  });
+});
