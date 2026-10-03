@@ -2,10 +2,13 @@ import { EFFORT_LEVELS, type ApprovalRequest, type EffortLevel, type GraphChange
 
 export const isEffortLevel = (value: unknown): value is EffortLevel => typeof value === 'string' && (EFFORT_LEVELS as readonly string[]).includes(value);
 
+/** Whether a provider honours the effort setting: Copilot has no effort levels. */
+export const supportsEffort = (provider: ProviderId): boolean => provider !== 'copilot';
+
 /** "Model: Opus · Effort: high": the run dialog's and run tooltip's line; a missing model or effort is Default. */
 export function modelLine(o: { model?: string; label?: string; effort?: EffortLevel; provider?: ProviderId }): string {
   // Copilot ignores effort, so a configured level isn't shown as if it applied.
-  return `Model: ${o.label ?? o.model ?? 'Default'} · Effort: ${o.provider === 'copilot' ? 'not supported' : (o.effort ?? 'Default')}`;
+  return `Model: ${o.label ?? o.model ?? 'Default'} · Effort: ${o.provider && !supportsEffort(o.provider) ? 'not supported' : (o.effort ?? 'Default')}`;
 }
 
 export function providerLabel(status: ProviderStatus): string {

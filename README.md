@@ -153,12 +153,12 @@ Agent Stream runs agent steps and the planner on your Copilot plan through VS Co
 - the variable values file and run records stay private.
 
 How Copilot behaves:
-- **Models:** the Model menus list the Copilot models that can call tools, with **Auto** first. **Default** means Auto. A model that is no longer available falls back to Auto, and the step's log says so. Copilot has no effort levels, so the Effort menu hides.
+- **Models:** the Model menus list the Copilot models that can call tools, with **Auto** first. Copilot's internal models (ids starting with `copilot-`) and models that can't call tools are hidden. **Default** means Auto. A model that is no longer available falls back to Auto, and the step's log says so. Copilot has no effort levels, so the Effort menu hides.
 - **Permission:** the first run or chat on Copilot shows VS Code's dialog asking whether Agent Stream may use Copilot. If you decline, the step fails and says how to allow it later (**Accounts › Manage Language Model Access**).
 - **Request cap:**
   - Each agent step may make up to `agentStream.copilot.maxRequestsPerStep` model requests (default 25), and each planner message up to `agentStream.copilot.maxRequestsPerTurn` (default 10).
   - The run dialog shows `Copilot requests per step: up to <n>`, and each step's log ends with `Copilot requests: <n> of <cap>`.
-  - Whether these requests count against your plan's premium requests depends on your Copilot plan. Agent Stream doesn't track it.
+  - Whether these requests count against your premium-request quota is not verified, and Agent Stream doesn't track it. Check your Copilot usage page. Each step's log shows how many Copilot requests it used.
 - **Long conversations:** when a conversation nears the model's input limit, older turns are summarised in one extra request, which counts toward the cap. If that isn't possible, they are dropped with a note.
 - **Planner chat:** the conversation is kept in your session (`.agent-stream/sessions/<id>/transcripts/`), so it continues after a VS Code reload. **New chat** deletes it.
 

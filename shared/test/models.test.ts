@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { isEffortLevel, modelLine } from '../src/format';
+import { isEffortLevel, modelLine, supportsEffort } from '../src/format';
 import { defaultEffortsFor, findModel, menuModels } from '../src/models';
 import type { ModelChoice } from '../src/types';
 import { parseWebviewMessage } from '../src/schemas';
+
+describe('supportsEffort', () => {
+  it('is false for Copilot only', () => {
+    expect(supportsEffort('copilot')).toBe(false);
+    expect(supportsEffort('claude')).toBe(true);
+  });
+});
 
 describe('modelLine', () => {
   it('names the model by its label, else its id, else Default', () => {
