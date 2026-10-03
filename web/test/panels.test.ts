@@ -126,6 +126,21 @@ describe('side panel', () => {
     expect([...container.querySelectorAll('.side-rail button')].map((b) => b.textContent)).toEqual(['Node', 'Graph', 'Changes (1)']);
   });
 
+  it('puts the collapse and expand toggle on the middle of the left edge, outside the tab bar', async () => {
+    const collapse = container.querySelector('button[aria-label="Collapse side panel"]') as HTMLButtonElement;
+    expect(collapse.classList.contains('edge-toggle')).toBe(true);
+    expect(collapse.closest('.tabs')).toBeNull();
+    expect(collapse.parentElement?.classList.contains('side-panel')).toBe(true);
+    await act(async () => collapse.click());
+    const expand = container.querySelector('button[aria-label="Expand side panel"]') as HTMLButtonElement;
+    expect(expand.classList.contains('edge-toggle')).toBe(true);
+    expect(expand.textContent).toBe('‹');
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => expand.click());
+    expect(getState().layout.sideCollapsed).toBe(false);
+    expect(saveViewState).toHaveBeenCalled();
+  });
+
   it('expands on the clicked tab', async () => {
     dispatch({ kind: 'setLayout', layout: { sideCollapsed: true } });
     await act(async () => void 0);

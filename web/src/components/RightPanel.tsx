@@ -20,6 +20,9 @@ export function RightPanel() {
   if (sideCollapsed)
     return (
       <aside className="side-panel collapsed" aria-label="Side panel (collapsed)">
+        <button className="edge-toggle" aria-label="Expand side panel" aria-expanded={false} onClick={() => actions.toggleSidePanel()}>
+          ‹
+        </button>
         <nav className="side-rail">
           {tabs.map(([t, label]) => (
             <button key={t} aria-expanded={false} onClick={() => show(t)}>
@@ -32,15 +35,15 @@ export function RightPanel() {
   return (
     <aside className="side-panel" style={{ width: sideWidth }}>
       <ResizeHandle panel="side" />
+      <button className="edge-toggle" aria-label="Collapse side panel" aria-expanded={true} onClick={() => actions.toggleSidePanel()}>
+        ›
+      </button>
       <nav className="tabs">
         {tabs.map(([t, label]) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => show(t)}>
             {label}
           </button>
         ))}
-        <button className="tabs-collapse" aria-label="Collapse side panel" onClick={() => actions.toggleSidePanel()}>
-          ›
-        </button>
       </nav>
       <div className="tab-body">{tab === 'node' ? <NodePanel /> : tab === 'graph' ? <GraphPanel /> : <ChangesPanel />}</div>
     </aside>
