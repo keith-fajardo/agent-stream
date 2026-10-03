@@ -14,7 +14,7 @@ import {
   type OnDelete,
   type XYPosition,
 } from '@xyflow/react';
-import { nextNodeId, type Op, type Position } from '@claude-stream/shared';
+import { nextNodeId, type Op, type Position } from '@agent-stream/shared';
 import { buildFlowEdges, buildFlowNodes } from '../flowNodes';
 import { actions, registerCanvas } from '../actions';
 import { send } from '../bridge';

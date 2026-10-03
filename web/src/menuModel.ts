@@ -1,4 +1,4 @@
-import type { HostCommand } from '@claude-stream/shared';
+import type { HostCommand } from '@agent-stream/shared';
 import { actions, graphApprovals } from './actions';
 import type { State, Tab } from './state';
 

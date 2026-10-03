@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { fmtDuration, type NodeEvent } from '@claude-stream/shared';
+import { fmtDuration, type NodeEvent } from '@agent-stream/shared';
 
 export const LOG_STREAM_CAP = 200_000;
 

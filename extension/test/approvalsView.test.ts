@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ApprovalRequest } from '@claude-stream/shared';
+import type { ApprovalRequest } from '@agent-stream/shared';
 import { ApprovalItem, approvalsBadge, ApprovalsView } from '../src/approvalsView';
 import type { Folder } from '../src/engines';
 
@@ -23,7 +23,7 @@ describe('ApprovalsView', () => {
     ]).getChildren();
     expect(items.map((i) => i.request.id)).toEqual(['first', 'later']);
     expect([items[0].label, items[0].description, items[0].contextValue]).toEqual(['n2 · Build new', 'Bash: dbt build', 'approval']);
-    expect(items[0].command).toEqual({ command: 'claudeStream.revealApproval', title: 'Show step', arguments: [items[0]] });
+    expect(items[0].command).toEqual({ command: 'agentStream.revealApproval', title: 'Show step', arguments: [items[0]] });
   });
 
   it('caps the tooltip at 2,000 characters', () => {

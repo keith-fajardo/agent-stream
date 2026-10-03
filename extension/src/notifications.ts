@@ -1,4 +1,4 @@
-import { approvalSentence, type ApprovalRequest } from '@claude-stream/shared';
+import { approvalSentence, type ApprovalRequest } from '@agent-stream/shared';
 import type { Folder, FolderApproval } from './engines';
 
 export type NotifierDeps = {

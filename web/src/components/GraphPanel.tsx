@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Graph } from '@claude-stream/shared';
+import type { Graph } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { useStore } from '../store';
 

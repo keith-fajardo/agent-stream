@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ApprovalRequest } from '@claude-stream/shared';
+import type { ApprovalRequest } from '@agent-stream/shared';
 import { describeApprovalInput } from '../approvalView';
 import { send } from '../bridge';
 import { dispatch } from '../store';

@@ -1,5 +1,5 @@
 import { graphlib, layout } from '@dagrejs/dagre';
-import type { Graph, Position } from '@claude-stream/shared';
+import type { Graph, Position } from '@agent-stream/shared';
 
 export const NODE_WIDTH = 220;
 export const NODE_HEIGHT = 70;

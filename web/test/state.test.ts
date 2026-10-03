@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyGraph, type Graph, type HostMessage, type RunMeta, type ServerMessage } from '@claude-stream/shared';
+import { emptyGraph, type Graph, type HostMessage, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 import { initialState, logKey, reduce, type Action, type State } from '../src/state';
 
 const T = 't';

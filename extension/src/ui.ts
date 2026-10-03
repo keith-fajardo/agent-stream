@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { Ui } from './commands';
 
-const filters = { 'Claude Stream graph': ['json'] };
+const filters = { 'Agent Stream graph': ['json'] };
 
 export const vscodeUi: Ui = {
   inputBox: async (o) => vscode.window.showInputBox({ prompt: o.prompt, value: o.value, validateInput: o.validate }),

@@ -1,4 +1,4 @@
-import type { ClientMessage, HostCommand, HostMessage, WebviewMessage } from '@claude-stream/shared';
+import type { ClientMessage, HostCommand, HostMessage, WebviewMessage } from '@agent-stream/shared';
 import { dispatch } from './store';
 
 type VsCodeApi = { postMessage(message: unknown): void };

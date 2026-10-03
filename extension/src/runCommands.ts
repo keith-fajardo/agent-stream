@@ -1,4 +1,4 @@
-import type { ApprovalRequest, HostMessage } from '@claude-stream/shared';
+import type { ApprovalRequest, HostMessage } from '@agent-stream/shared';
 import type { GraphTarget } from './commands';
 import type { EngineManager, Folder } from './engines';
 import type { GraphPanels } from './graphEditor';

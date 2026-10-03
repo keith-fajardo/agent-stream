@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { fmtDuration, statusLabel, type GraphNode, type NodeRunState } from '@claude-stream/shared';
+import { fmtDuration, statusLabel, type GraphNode, type NodeRunState } from '@agent-stream/shared';
 
 export type StepData = { node: GraphNode; state?: NodeRunState; waiting: boolean };
 export type StepFlowNode = Node<StepData, 'step'>;

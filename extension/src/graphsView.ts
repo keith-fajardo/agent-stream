@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { relativeTime, statusLabel, type AuthInfo, type GraphListItem } from '@claude-stream/shared';
+import { relativeTime, statusLabel, type AuthInfo, type GraphListItem } from '@agent-stream/shared';
 import { CHECKING, type Folder } from './engines';
 
 export class FolderItem extends vscode.TreeItem {
@@ -30,7 +30,7 @@ export class GraphItem extends vscode.TreeItem {
     this.description = graph.lastRun ? `${statusLabel(graph.lastRun.status)} · ${relativeTime(graph.lastRun.startedAt, now)}` : 'Never run';
     this.contextValue = 'graph';
     this.iconPath = new vscode.ThemeIcon('type-hierarchy');
-    this.command = { command: 'claudeStream.openGraph', title: 'Open', arguments: [{ folder, graphId: graph.id }] };
+    this.command = { command: 'agentStream.openGraph', title: 'Open', arguments: [{ folder, graphId: graph.id }] };
   }
 }
 
@@ -39,7 +39,7 @@ export class RetryItem extends vscode.TreeItem {
     super('Retry sign-in check', vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon('refresh');
     this.contextValue = 'retry';
-    this.command = { command: 'claudeStream.retrySignIn', title: 'Retry sign-in check' };
+    this.command = { command: 'agentStream.retrySignIn', title: 'Retry sign-in check' };
   }
 }
 

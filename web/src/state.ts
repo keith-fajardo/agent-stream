@@ -9,7 +9,7 @@ import type {
   RunMeta,
   RunPreview,
   RunSummary,
-} from '@claude-stream/shared';
+} from '@agent-stream/shared';
 
 export type Tab = 'chat' | 'node' | 'graph';
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
@@ -59,7 +59,7 @@ export type Action =
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
-export { contentSignature } from '@claude-stream/shared';
+export { contentSignature } from '@agent-stream/shared';
 
 export function reduce(state: State, action: Action): State {
   switch (action.kind) {

@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@claude-stream/engine';
-import type { AuthInfo, ServerMessage } from '@claude-stream/shared';
+import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@agent-stream/engine';
+import type { AuthInfo, ServerMessage } from '@agent-stream/shared';
 import { CHECKING, EngineManager, type EngineEvents, type Folder } from '../src/engines';
 
 const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max' };
@@ -98,9 +98,9 @@ describe('EngineManager', () => {
     const a = folder('a');
     manager.get(a).values.set('g', 'name', 'v');
     const file = valuesFileFor(a.path, home);
-    expect(file.startsWith(join(home, '.claude-stream', 'values'))).toBe(true);
+    expect(file.startsWith(join(home, '.agent-stream', 'values'))).toBe(true);
     expect(existsSync(file)).toBe(true);
-    expect(existsSync(join(a.path, '.claude-stream', 'values'))).toBe(false);
+    expect(existsSync(join(a.path, '.agent-stream', 'values'))).toBe(false);
   });
 
   it('disposes every engine', async () => {

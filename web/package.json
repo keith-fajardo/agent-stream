@@ -1,5 +1,5 @@
 {
-  "name": "@claude-stream/web",
+  "name": "@agent-stream/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@claude-stream/shared": "*",
+    "@agent-stream/shared": "*",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.12.0",
     "react": "^19.3.0",

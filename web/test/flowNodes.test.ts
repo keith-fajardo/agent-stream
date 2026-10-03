@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge as FlowEdge } from '@xyflow/react';
-import { applyOp, emptyGraph, type Graph, type Op, type Position, type RunMeta } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type Graph, type Op, type Position, type RunMeta } from '@agent-stream/shared';
 import { buildFlowEdges, buildFlowNodes } from '../src/flowNodes';
 import type { StepFlowNode } from '../src/components/StepNode';
 

@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { authLabel, type AuthInfo, type HostCommand } from '@claude-stream/shared';
+import { authLabel, type AuthInfo, type HostCommand } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { graphCommands } from './commands';
 import { CHECKING, EngineManager, type EngineEvents, type Folder } from './engines';
@@ -17,7 +17,7 @@ let engines: EngineManager | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.command = 'claudeStream.signInDetails';
+  status.command = 'agentStream.signInDetails';
   context.subscriptions.push(status);
   const showAuth = (auth: AuthInfo) => {
     const t = statusBarText(auth);
@@ -41,7 +41,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const panels = new GraphPanels();
   const runHostCommand = (command: HostCommand, panel: GraphPanel) =>
-    void vscode.commands.executeCommand(`claudeStream.${command}`, ...hostCommandArgs(command, panel));
+    void vscode.commands.executeCommand(`agentStream.${command}`, ...hostCommandArgs(command, panel));
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       GRAPH_VIEW_TYPE,
@@ -58,7 +58,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
   );
   const graphsView = new GraphsView({ folders: workspaceFolders, graphs: (f) => manager.get(f).listGraphs(), auth: () => manager.auth });
-  const graphsTree = vscode.window.createTreeView('claudeStream.graphs', { treeDataProvider: graphsView });
+  const graphsTree = vscode.window.createTreeView('agentStream.graphs', { treeDataProvider: graphsView });
   events.graphs = () => graphsView.refresh();
   events.auth = (auth) => {
     showAuth(auth);
@@ -75,10 +75,10 @@ export async function activate(context: vscode.ExtensionContext) {
       return p && { folder: p.folder, graphId: p.graphId };
     },
   });
-  for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`claudeStream.${name}`, run));
+  for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, run));
   context.subscriptions.push(graphsTree, vscode.workspace.onDidChangeWorkspaceFolders(() => graphsView.refresh()));
   const approvalsView = new ApprovalsView(() => manager.approvals());
-  const approvalsTree = vscode.window.createTreeView('claudeStream.approvals', { treeDataProvider: approvalsView });
+  const approvalsTree = vscode.window.createTreeView('agentStream.approvals', { treeDataProvider: approvalsView });
   const decideApproval = (folder: Folder, id: string, decision: 'approve' | 'deny') =>
     manager.get(folder).broker.decide(id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
   const notifier = new ApprovalNotifier({
@@ -99,9 +99,9 @@ export async function activate(context: vscode.ExtensionContext) {
     pickGraph: graph.pickGraph,
     openAndSend: (t, msg) => openAndSend(panels, t.folder, t.graphId, msg),
     info: (message) => void vscode.window.showInformationMessage(message),
-    showSidebar: () => void vscode.commands.executeCommand('workbench.view.extension.claudeStream'),
+    showSidebar: () => void vscode.commands.executeCommand('workbench.view.extension.agentStream'),
   });
-  for (const [name, command] of Object.entries(run)) context.subscriptions.push(vscode.commands.registerCommand(`claudeStream.${name}`, command));
+  for (const [name, command] of Object.entries(run)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, command));
   context.subscriptions.push(approvalsTree);
   events.confirmRun = (folder, graphId, fromNodeId, sourceRunId) => {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
@@ -115,11 +115,11 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudeStream.retrySignIn', () => manager.checkSignIn()),
-    vscode.commands.registerCommand('claudeStream.signInDetails', async () => {
+    vscode.commands.registerCommand('agentStream.retrySignIn', () => manager.checkSignIn()),
+    vscode.commands.registerCommand('agentStream.signInDetails', async () => {
       const auth = manager.auth;
       if (auth.ok) {
-        void vscode.window.showInformationMessage(`Claude Stream runs on ${authLabel(auth)}.`);
+        void vscode.window.showInformationMessage(`Agent Stream runs on ${authLabel(auth)}.`);
         return;
       }
       if ((await vscode.window.showWarningMessage(auth.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkSignIn();

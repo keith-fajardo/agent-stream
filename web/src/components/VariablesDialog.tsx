@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { variableNameProblem, type Op, type VariableDef } from '@claude-stream/shared';
+import { variableNameProblem, type Op, type VariableDef } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type ApprovalRequest, type Graph, type RunMeta, type ServerMessage } from '@claude-stream/shared';
+import { emptyGraph, type ApprovalRequest, type Graph, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { sendHost } = await import('../src/bridge');

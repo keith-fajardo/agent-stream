@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 export type Settings = { claudePath: string; gitBashPath: string; maxParallel: number };
 
 export function readSettings(): Settings {
-  const config = vscode.workspace.getConfiguration('claudeStream');
+  const config = vscode.workspace.getConfiguration('agentStream');
   const max = Number(config.get('maxParallel', 3));
   return {
     claudePath: String(config.get('claudePath', '')).trim(),

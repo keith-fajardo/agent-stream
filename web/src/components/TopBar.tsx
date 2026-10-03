@@ -1,4 +1,4 @@
-import { statusLabel } from '@claude-stream/shared';
+import { statusLabel } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { useStore } from '../store';

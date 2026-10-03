@@ -1,4 +1,4 @@
-import type { ApprovalRequest, HostCommand } from '@claude-stream/shared';
+import type { ApprovalRequest, HostCommand } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions } from './layout';
 import type { State, Tab } from './state';

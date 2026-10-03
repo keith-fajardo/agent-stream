@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { GraphNode, NodeKind, NodePatch } from '@claude-stream/shared';
+import type { GraphNode, NodeKind, NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { useStore } from '../store';

@@ -23,7 +23,7 @@ export function webviewHtml(p: WebviewPage): string {
     `<meta http-equiv="Content-Security-Policy" content="${csp}" />`,
     '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
     `<link rel="stylesheet" href="${escapeHtml(p.styleUri)}" />`,
-    '<title>Claude Stream</title>',
+    '<title>Agent Stream</title>',
     '</head>',
     `<body data-graph-id="${escapeHtml(p.graphId)}" data-minimap="${p.minimap}">`,
     '<div id="root"></div>',

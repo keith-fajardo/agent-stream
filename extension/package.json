@@ -1,9 +1,9 @@
 {
-  "name": "claude-stream",
-  "displayName": "Claude Stream",
+  "name": "agent-stream",
+  "displayName": "Agent Stream",
   "description": "Co-create a workflow graph with a Claude planner and run it step by step on your Claude subscription.",
   "version": "0.2.0",
-  "publisher": "claude-stream-local",
+  "publisher": "agent-stream-local",
   "license": "UNLICENSED",
   "icon": "media/icon.png",
   "repository": {
@@ -22,23 +22,23 @@
   ],
   "main": "./dist/extension.cjs",
   "activationEvents": [
-    "workspaceContains:.claude-stream/graphs/*.json"
+    "workspaceContains:.agent-stream/graphs/*.json"
   ],
   "contributes": {
     "configuration": {
-      "title": "Claude Stream",
+      "title": "Agent Stream",
       "properties": {
-        "claudeStream.claudePath": {
+        "agentStream.claudePath": {
           "type": "string",
           "default": "",
           "description": "Full path to Claude Code (claude, or claude.exe on Windows). Leave empty to find it automatically."
         },
-        "claudeStream.gitBashPath": {
+        "agentStream.gitBashPath": {
           "type": "string",
           "default": "",
           "description": "Windows only: full path to Git Bash (bash.exe), used for command steps. Leave empty to find it automatically."
         },
-        "claudeStream.maxParallel": {
+        "agentStream.maxParallel": {
           "type": "integer",
           "default": 3,
           "minimum": 1,
@@ -49,11 +49,11 @@
     },
     "customEditors": [
       {
-        "viewType": "claudeStream.graph",
-        "displayName": "Claude Stream Graph",
+        "viewType": "agentStream.graph",
+        "displayName": "Agent Stream Graph",
         "selector": [
           {
-            "filenamePattern": "**/.claude-stream/graphs/*.json"
+            "filenamePattern": "**/.agent-stream/graphs/*.json"
           }
         ],
         "priority": "default"
@@ -62,199 +62,199 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "claudeStream",
-          "title": "Claude Stream",
+          "id": "agentStream",
+          "title": "Agent Stream",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "claudeStream": [
+      "agentStream": [
         {
-          "id": "claudeStream.graphs",
+          "id": "agentStream.graphs",
           "name": "Graphs"
         },
         {
-          "id": "claudeStream.approvals",
+          "id": "agentStream.approvals",
           "name": "Approvals"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "claudeStream.graphs",
-        "contents": "Open a folder to use Claude Stream.\n[Open Folder](command:vscode.openFolder)",
+        "view": "agentStream.graphs",
+        "contents": "Open a folder to use Agent Stream.\n[Open Folder](command:vscode.openFolder)",
         "when": "workbenchState == empty"
       },
       {
-        "view": "claudeStream.graphs",
-        "contents": "No graphs yet.\n[New Graph](command:claudeStream.newGraph)\n[Import Graph](command:claudeStream.importGraph)",
+        "view": "agentStream.graphs",
+        "contents": "No graphs yet.\n[New Graph](command:agentStream.newGraph)\n[Import Graph](command:agentStream.importGraph)",
         "when": "workbenchState != empty"
       },
       {
-        "view": "claudeStream.approvals",
+        "view": "agentStream.approvals",
         "contents": "Nothing is waiting for approval."
       }
     ],
     "commands": [
       {
-        "command": "claudeStream.retrySignIn",
+        "command": "agentStream.retrySignIn",
         "title": "Retry Sign-in Check",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(refresh)"
       },
       {
-        "command": "claudeStream.signInDetails",
+        "command": "agentStream.signInDetails",
         "title": "Show Sign-in Details",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.newGraph",
+        "command": "agentStream.newGraph",
         "title": "New Graph",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(add)"
       },
       {
-        "command": "claudeStream.openGraph",
+        "command": "agentStream.openGraph",
         "title": "Open Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.importGraph",
+        "command": "agentStream.importGraph",
         "title": "Import Graph",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(cloud-download)"
       },
       {
-        "command": "claudeStream.exportGraph",
+        "command": "agentStream.exportGraph",
         "title": "Export Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.renameGraph",
+        "command": "agentStream.renameGraph",
         "title": "Rename Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.duplicateGraph",
+        "command": "agentStream.duplicateGraph",
         "title": "Duplicate Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.deleteGraph",
+        "command": "agentStream.deleteGraph",
         "title": "Delete Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.runGraph",
+        "command": "agentStream.runGraph",
         "title": "Run Graph",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.stopRun",
+        "command": "agentStream.stopRun",
         "title": "Stop Run",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.editVariables",
+        "command": "agentStream.editVariables",
         "title": "Edit Variables",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.approveAll",
+        "command": "agentStream.approveAll",
         "title": "Approve All",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(check-all)"
       },
       {
-        "command": "claudeStream.approve",
+        "command": "agentStream.approve",
         "title": "Approve",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(check)"
       },
       {
-        "command": "claudeStream.deny",
+        "command": "agentStream.deny",
         "title": "Deny",
-        "category": "Claude Stream",
+        "category": "Agent Stream",
         "icon": "$(close)"
       },
       {
-        "command": "claudeStream.revealApproval",
+        "command": "agentStream.revealApproval",
         "title": "Show Step",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       },
       {
-        "command": "claudeStream.showSidebar",
+        "command": "agentStream.showSidebar",
         "title": "Show Sidebar",
-        "category": "Claude Stream"
+        "category": "Agent Stream"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "claudeStream.newGraph",
-          "when": "view == claudeStream.graphs",
+          "command": "agentStream.newGraph",
+          "when": "view == agentStream.graphs",
           "group": "navigation@1"
         },
         {
-          "command": "claudeStream.importGraph",
-          "when": "view == claudeStream.graphs",
+          "command": "agentStream.importGraph",
+          "when": "view == agentStream.graphs",
           "group": "navigation@2"
         },
         {
-          "command": "claudeStream.approveAll",
-          "when": "view == claudeStream.approvals",
+          "command": "agentStream.approveAll",
+          "when": "view == agentStream.approvals",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
-          "command": "claudeStream.openGraph",
-          "when": "view == claudeStream.graphs && viewItem == graph",
+          "command": "agentStream.openGraph",
+          "when": "view == agentStream.graphs && viewItem == graph",
           "group": "1_open@1"
         },
         {
-          "command": "claudeStream.renameGraph",
-          "when": "view == claudeStream.graphs && viewItem == graph",
+          "command": "agentStream.renameGraph",
+          "when": "view == agentStream.graphs && viewItem == graph",
           "group": "2_edit@1"
         },
         {
-          "command": "claudeStream.duplicateGraph",
-          "when": "view == claudeStream.graphs && viewItem == graph",
+          "command": "agentStream.duplicateGraph",
+          "when": "view == agentStream.graphs && viewItem == graph",
           "group": "2_edit@2"
         },
         {
-          "command": "claudeStream.exportGraph",
-          "when": "view == claudeStream.graphs && viewItem == graph",
+          "command": "agentStream.exportGraph",
+          "when": "view == agentStream.graphs && viewItem == graph",
           "group": "3_share@1"
         },
         {
-          "command": "claudeStream.deleteGraph",
-          "when": "view == claudeStream.graphs && viewItem =~ /^graph/",
+          "command": "agentStream.deleteGraph",
+          "when": "view == agentStream.graphs && viewItem =~ /^graph/",
           "group": "4_delete@1"
         },
         {
-          "command": "claudeStream.approve",
-          "when": "view == claudeStream.approvals && viewItem == approval",
+          "command": "agentStream.approve",
+          "when": "view == agentStream.approvals && viewItem == approval",
           "group": "inline@1"
         },
         {
-          "command": "claudeStream.deny",
-          "when": "view == claudeStream.approvals && viewItem == approval",
+          "command": "agentStream.deny",
+          "when": "view == agentStream.approvals && viewItem == approval",
           "group": "inline@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "claudeStream.approve",
+          "command": "agentStream.approve",
           "when": "false"
         },
         {
-          "command": "claudeStream.deny",
+          "command": "agentStream.deny",
           "when": "false"
         },
         {
-          "command": "claudeStream.revealApproval",
+          "command": "agentStream.revealApproval",
           "when": "false"
         }
       ]
@@ -269,8 +269,8 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@claude-stream/engine": "*",
-    "@claude-stream/shared": "*"
+    "@agent-stream/engine": "*",
+    "@agent-stream/shared": "*"
   },
   "devDependencies": {
     "@types/vscode": "~1.100.0",

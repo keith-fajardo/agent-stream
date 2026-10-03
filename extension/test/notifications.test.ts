@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ApprovalRequest } from '@claude-stream/shared';
+import type { ApprovalRequest } from '@agent-stream/shared';
 import type { Folder, FolderApproval } from '../src/engines';
 import { ApprovalNotifier } from '../src/notifications';
 

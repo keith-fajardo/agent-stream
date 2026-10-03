@@ -1,5 +1,5 @@
 import { MarkerType, type Edge as FlowEdge } from '@xyflow/react';
-import type { ApprovalRequest, Graph, Position, RunMeta } from '@claude-stream/shared';
+import type { ApprovalRequest, Graph, Position, RunMeta } from '@agent-stream/shared';
 import type { StepFlowNode } from './components/StepNode';
 import { layoutPositions } from './layout';
 

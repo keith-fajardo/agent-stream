@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { fmtDuration, statusLabel } from '@claude-stream/shared';
+import { fmtDuration, statusLabel } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';

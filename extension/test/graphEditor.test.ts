@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createApp } from '@claude-stream/engine';
-import type { HostMessage, ServerMessage } from '@claude-stream/shared';
+import { createApp } from '@agent-stream/engine';
+import type { HostMessage, ServerMessage } from '@agent-stream/shared';
 import type { Folder } from '../src/engines';
 import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, openAndSend } from '../src/graphEditor';
 
@@ -175,20 +175,20 @@ describe('hostCommandArgs', () => {
 
 describe('graphIdFromPath', () => {
   it('accepts graph files only', () => {
-    expect(graphIdFromPath('/w/.claude-stream/graphs/dbt-parity.json')).toBe('dbt-parity');
-    expect(graphIdFromPath('C:\\w\\.claude-stream\\graphs\\x.json')).toBe('x');
+    expect(graphIdFromPath('/w/.agent-stream/graphs/dbt-parity.json')).toBe('dbt-parity');
+    expect(graphIdFromPath('C:\\w\\.agent-stream\\graphs\\x.json')).toBe('x');
     expect(graphIdFromPath('/w/other/x.json')).toBeUndefined();
-    expect(graphIdFromPath('/w/.claude-stream/graphs/Bad Name.json')).toBeUndefined();
+    expect(graphIdFromPath('/w/.agent-stream/graphs/Bad Name.json')).toBeUndefined();
   });
 });
 
 describe('graphTarget', () => {
   it('accepts only graphs at the folder root', () => {
-    expect(graphTarget('/ws', '/ws/.claude-stream/graphs/g.json')).toBe('g');
-    expect(graphTarget('C:\\ws', 'C:\\ws\\.claude-stream\\graphs\\g.json')).toBe('g');
-    expect(graphTarget('/ws', '/ws/sub/.claude-stream/graphs/x.json')).toBeUndefined();
-    expect(graphTarget('/ws', '/ws/node_modules/p/.claude-stream/graphs/x.json')).toBeUndefined();
-    expect(graphTarget('/ws', '/ws/.claude-stream/graphs/Bad Name.json')).toBeUndefined();
-    expect(graphTarget('/ws', '/other/.claude-stream/graphs/g.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/.agent-stream/graphs/g.json')).toBe('g');
+    expect(graphTarget('C:\\ws', 'C:\\ws\\.agent-stream\\graphs\\g.json')).toBe('g');
+    expect(graphTarget('/ws', '/ws/sub/.agent-stream/graphs/x.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/node_modules/p/.agent-stream/graphs/x.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/.agent-stream/graphs/Bad Name.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/other/.agent-stream/graphs/g.json')).toBeUndefined();
   });
 });

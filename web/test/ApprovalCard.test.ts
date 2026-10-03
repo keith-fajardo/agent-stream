@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import type { ApprovalRequest } from '@claude-stream/shared';
+import type { ApprovalRequest } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { ApprovalCard } = await import('../src/components/ApprovalCard');

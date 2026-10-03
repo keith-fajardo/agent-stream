@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createApp } from '@claude-stream/engine';
-import { MAX_IMPORT_CHARS, type AuthInfo } from '@claude-stream/shared';
+import { createApp } from '@agent-stream/engine';
+import { MAX_IMPORT_CHARS, type AuthInfo } from '@agent-stream/shared';
 import { graphCommands, type GraphTarget, type Ui } from '../src/commands';
 import { EngineManager, type Folder } from '../src/engines';
 
@@ -75,7 +75,7 @@ describe('graph commands', () => {
     const s = setup([]);
     await s.commands.newGraph();
     await s.commands.importGraph();
-    const message = "Open a folder first. Claude Stream keeps graphs in the folder's .claude-stream folder.";
+    const message = "Open a folder first. Agent Stream keeps graphs in the folder's .agent-stream folder.";
     expect(s.ui.error.mock.calls).toEqual([[message], [message]]);
     expect(s.ui.inputBox).not.toHaveBeenCalled();
     expect(s.ui.openFile).not.toHaveBeenCalled();
@@ -127,10 +127,10 @@ describe('graph commands', () => {
     let written = '';
     s.ui.saveFile.mockResolvedValueOnce({ write: async (content: string) => void (written = content) });
     await s.commands.exportGraph({ folder: s.folders[0], graphId: g.id });
-    expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, 'parity.claude-stream.json'));
+    expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, 'parity.agent-stream.json'));
     expect(JSON.parse(written).graph.variables).toEqual([{ name: 'schema', description: '' }]);
     expect(written).not.toContain('secret-schema');
-    expect(s.ui.info).toHaveBeenCalledWith('Exported parity.claude-stream.json. Variable values were left out.');
+    expect(s.ui.info).toHaveBeenCalledWith('Exported parity.agent-stream.json. Variable values were left out.');
   });
 
   it('renames starting from the current name', async () => {

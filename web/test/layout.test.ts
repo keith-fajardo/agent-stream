@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type Graph, type Op } from '@agent-stream/shared';
 import { layoutPositions } from '../src/layout';
 
 function graphOf(ops: Op[]): Graph {

@@ -15,8 +15,8 @@ const executable = await downloadAndUnzipVSCode('stable');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function sampleWorkspace() {
-  const ws = mkdtempSync(join(tmpdir(), 'claude-stream-shots-'));
-  const data = join(ws, '.claude-stream');
+  const ws = mkdtempSync(join(tmpdir(), 'agent-stream-shots-'));
+  const data = join(ws, '.agent-stream');
   mkdirSync(join(data, 'graphs'), { recursive: true });
   const at = new Date().toISOString();
   const node = (id, title, kind, text, x, y) => ({ id, title, kind, [kind === 'agent' ? 'prompt' : 'command']: text, position: { x, y }, createdBy: 'user', updatedBy: 'user', updatedAt: at });
@@ -88,11 +88,11 @@ const inTab = (js) => `(() => { const f = document.querySelector('iframe'); cons
 async function shoot(theme, label) {
   const ws = sampleWorkspace();
   // Variable values live outside the project, where the extension reads them.
-  const valuesDir = join(homedir(), '.claude-stream', 'values');
+  const valuesDir = join(homedir(), '.agent-stream', 'values');
   const file = join(valuesDir, createHash('sha256').update(realpathSync(ws)).digest('hex').slice(0, 16) + '.json');
   mkdirSync(valuesDir, { recursive: true, mode: 0o700 });
   writeFileSync(file, JSON.stringify({ version: 1, graphs: { 'dbt-parity': { target: 'dev' } } }), { mode: 0o600 });
-  const userData = mkdtempSync(join(tmpdir(), 'claude-stream-ud-'));
+  const userData = mkdtempSync(join(tmpdir(), 'agent-stream-ud-'));
   mkdirSync(join(userData, 'User'), { recursive: true });
   writeFileSync(join(userData, 'User', 'settings.json'), JSON.stringify({ 'workbench.colorTheme': theme, 'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false }));
   const port = 9300 + Math.floor(Math.random() * 500);
@@ -121,14 +121,14 @@ async function shoot(theme, label) {
     // Wait for the extension: the status bar shows the plan (or the signed-out text) once the sign-in check ends.
     await until(() => dom(`[...document.querySelectorAll('.statusbar-item')].some((e) => /Claude (?!Stream)\\S|not signed in/i.test(e.textContent))`), 'the status bar to show the Claude plan');
     // Open the sidebar from the activity bar.
-    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Claude Stream'))?.click()`);
+    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Agent Stream'))?.click()`);
     await until(() => dom(`/Graphs/.test(document.querySelector('.sidebar')?.textContent ?? '') && /dbt parity orders/.test(document.querySelector('.sidebar')?.textContent ?? '')`), 'the Graphs view to list the graph');
     // Open the graph like a user: through the Explorer tree (Ctrl+Shift+E first).
     await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Explorer'))?.click()`);
-    await until(() => dom(`(() => { const row = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => r.textContent.includes('dbt-parity.json')); if (row) { row.click(); return true; } const dir = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => /claude-stream|graphs/.test(r.textContent) && r.getAttribute('aria-expanded') === 'false'); dir?.click(); return false; })()`), 'dbt-parity.json in the Explorer');
+    await until(() => dom(`(() => { const row = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => r.textContent.includes('dbt-parity.json')); if (row) { row.click(); return true; } const dir = [...document.querySelectorAll('.explorer-folders-view .monaco-list-row')].find((r) => /agent-stream|graphs/.test(r.textContent) && r.getAttribute('aria-expanded') === 'false'); dir?.click(); return false; })()`), 'dbt-parity.json in the Explorer');
     await until(() => dom(`!!document.querySelector('.tab[aria-label*="dbt-parity"] , .tab[data-resource-name*="dbt-parity"]') && !!document.querySelector('.webview')`), 'the graph tab');
     // Show the sidebar again (the Explorer replaced it), and dismiss the notice about --disable-extensions.
-    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Claude Stream'))?.click(); document.querySelectorAll('.notifications-toasts .codicon-notifications-clear, .notifications-toasts .codicon-close').forEach((e) => e.click())`);
+    await dom(`[...document.querySelectorAll('.activitybar a[aria-label]')].find((a) => a.getAttribute('aria-label').startsWith('Agent Stream'))?.click(); document.querySelectorAll('.notifications-toasts .codicon-notifications-clear, .notifications-toasts .codicon-close').forEach((e) => e.click())`);
     // Reach the tab's page and wait for the top bar.
     const evalTab = async (js) => {
       // The url of a frame is blank when it attaches, so try every frame until the page answers.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AuthInfo, GraphListItem } from '@claude-stream/shared';
+import type { AuthInfo, GraphListItem } from '@agent-stream/shared';
 import { CHECKING, type Folder } from '../src/engines';
 import { FolderItem, GraphItem, GraphsView, RetryItem } from '../src/graphsView';
 
@@ -23,7 +23,7 @@ describe('GraphsView', () => {
       ['Demo', 'Never run', 'graph'],
       ['x', "Can't be read", 'graphUnreadable'],
     ]);
-    expect(items[0].command).toEqual({ command: 'claudeStream.openGraph', title: 'Open', arguments: [{ folder: a, graphId: 'p' }] });
+    expect(items[0].command).toEqual({ command: 'agentStream.openGraph', title: 'Open', arguments: [{ folder: a, graphId: 'p' }] });
     expect([items[0].folder, items[0].graphId]).toEqual([a, 'p']);
     expect(items[2].command).toBeUndefined();
     expect(items[2].tooltip).toBe('invalid JSON: Unexpected end');

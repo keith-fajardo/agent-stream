@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
-import type { GraphNode, NodeRunState } from '@claude-stream/shared';
+import type { GraphNode, NodeRunState } from '@agent-stream/shared';
 import { StepNode, type StepFlowNode } from '../src/components/StepNode';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

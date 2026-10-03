@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { approvalSummary, type ApprovalRequest } from '@claude-stream/shared';
+import { approvalSummary, type ApprovalRequest } from '@agent-stream/shared';
 import type { Folder, FolderApproval } from './engines';
 
 const TOOLTIP_CHARS = 2000;
@@ -16,7 +16,7 @@ export class ApprovalItem extends vscode.TreeItem {
     this.tooltip = full.length > TOOLTIP_CHARS ? `${full.slice(0, TOOLTIP_CHARS)}…` : full;
     this.contextValue = 'approval';
     this.iconPath = new vscode.ThemeIcon('question');
-    this.command = { command: 'claudeStream.revealApproval', title: 'Show step', arguments: [this] };
+    this.command = { command: 'agentStream.revealApproval', title: 'Show step', arguments: [this] };
   }
 }
 

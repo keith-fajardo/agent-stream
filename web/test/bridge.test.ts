@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { emptyGraph } from '@claude-stream/shared';
+import { emptyGraph } from '@agent-stream/shared';
 
 const posted: unknown[] = [];
 (globalThis as { acquireVsCodeApi?: () => unknown }).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => posted.push(m) });

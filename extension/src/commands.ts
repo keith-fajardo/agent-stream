@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import type { App } from '@claude-stream/engine';
-import { MAX_IMPORT_CHARS } from '@claude-stream/shared';
+import type { App } from '@agent-stream/engine';
+import { MAX_IMPORT_CHARS } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 
 export type GraphTarget = { folder: Folder; graphId: string };
@@ -26,7 +26,7 @@ export type CommandDeps = {
 };
 
 const blankName = (value: string) => (value.trim() ? undefined : 'A graph needs a name.');
-const NO_FOLDER = "Open a folder first. Claude Stream keeps graphs in the folder's .claude-stream folder.";
+const NO_FOLDER = "Open a folder first. Agent Stream keeps graphs in the folder's .agent-stream folder.";
 
 /** Graph management (spec §5). Each runs from the sidebar, the tab's File menu (with its graph) or the Command Palette. */
 export function graphCommands(d: CommandDeps) {

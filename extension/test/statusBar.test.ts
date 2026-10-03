@@ -6,18 +6,18 @@ describe('statusBarText', () => {
   it('shows the plan when signed in with the subscription', () => {
     expect(statusBarText({ ok: true, plan: 'max', email: 'me@example.com' })).toEqual({
       text: '$(check) Claude Max',
-      tooltip: 'Claude Stream runs on your Claude Max subscription (me@example.com).',
+      tooltip: 'Agent Stream runs on your Claude Max subscription (me@example.com).',
     });
   });
 
   it('warns otherwise, with the reason in the tooltip', () => {
     expect(statusBarText({ ok: false, error: 'Not signed in to Claude Code.' })).toEqual({
-      text: '$(warning) Claude Stream: not signed in',
+      text: '$(warning) Agent Stream: not signed in',
       tooltip: 'Not signed in to Claude Code.',
     });
   });
 
   it('shows the check in progress', () => {
-    expect(statusBarText(CHECKING).text).toBe('$(sync~spin) Claude Stream');
+    expect(statusBarText(CHECKING).text).toBe('$(sync~spin) Agent Stream');
   });
 });

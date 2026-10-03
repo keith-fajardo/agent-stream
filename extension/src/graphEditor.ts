@@ -1,20 +1,20 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { isGraphId, type App, type Client } from '@claude-stream/engine';
-import { parseWebviewMessage, type HostCommand, type HostMessage } from '@claude-stream/shared';
+import { isGraphId, type App, type Client } from '@agent-stream/engine';
+import { parseWebviewMessage, type HostCommand, type HostMessage } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 import { folderUri } from './folders';
 import { escapeHtml, webviewHtml } from './webviewHtml';
 
-export const GRAPH_VIEW_TYPE = 'claudeStream.graph';
+export const GRAPH_VIEW_TYPE = 'agentStream.graph';
 
-/** `<folder>/.claude-stream/graphs/<id>.json` → id; undefined for any other file. */
+/** `<folder>/.agent-stream/graphs/<id>.json` → id; undefined for any other file. */
 export function graphIdFromPath(p: string): string | undefined {
-  const m = /[\\/]\.claude-stream[\\/]graphs[\\/]([^\\/]+)\.json$/.exec(p);
+  const m = /[\\/]\.agent-stream[\\/]graphs[\\/]([^\\/]+)\.json$/.exec(p);
   return m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
-/** The graph id when `filePath` is exactly `<folderPath>/.claude-stream/graphs/<id>.json`; nested copies belong to no engine. */
+/** The graph id when `filePath` is exactly `<folderPath>/.agent-stream/graphs/<id>.json`; nested copies belong to no engine. */
 export function graphTarget(folderPath: string, filePath: string): string | undefined {
   const segments = (p: string) => p.replace(/\\/g, '/').split('/').filter(Boolean);
   const base = segments(folderPath);
@@ -22,7 +22,7 @@ export function graphTarget(folderPath: string, filePath: string): string | unde
   if (file.length !== base.length + 3 || !base.every((seg, i) => seg === file[i])) return undefined;
   const [dir, graphs, name] = file.slice(base.length);
   const m = /^(.+)\.json$/.exec(name);
-  return dir === '.claude-stream' && graphs === 'graphs' && m && isGraphId(m[1]) ? m[1] : undefined;
+  return dir === '.agent-stream' && graphs === 'graphs' && m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
 export const panelKey = (folderKey: string, graphId: string): string => `${folderKey}|${graphId}`;
@@ -106,7 +106,7 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
   return {
     handle(raw) {
       const parsed = parseWebviewMessage(raw);
-      if (!parsed.ok) return fail(`claude-stream ignored a malformed message: ${parsed.error}`);
+      if (!parsed.ok) return fail(`Agent Stream ignored a malformed message: ${parsed.error}`);
       if (parsed.kind === 'engine') {
         d.app.handle(d.client, parsed.msg).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
         return;
@@ -165,7 +165,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
     const folder = this.d.folderFor(document.uri);
     const graphId = folder && graphTarget(folder.path, document.uri.fsPath);
     if (!folder || !graphId) {
-      webview.html = messagePage(`This file isn't a graph in this workspace folder. Graphs live in .claude-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`);
+      webview.html = messagePage(`This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`);
       return;
     }
     const app = this.d.engines.get(folder);
@@ -205,7 +205,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
   }
 }
 
-/** What a tab's menu passes to `claudeStream.<command>`: Open… must show the picker, New/Import act on the folder. */
+/** What a tab's menu passes to `agentStream.<command>`: Open… must show the picker, New/Import act on the folder. */
 export function hostCommandArgs(command: HostCommand, panel: { folder: Folder; graphId: string }): unknown[] {
   if (command === 'openGraph' || command === 'showSidebar') return [];
   if (command === 'newGraph' || command === 'importGraph') return [{ folder: panel.folder }];
@@ -213,7 +213,7 @@ export function hostCommandArgs(command: HostCommand, panel: { folder: Folder; g
 }
 
 export function graphUri(folder: Folder, graphId: string): vscode.Uri {
-  return vscode.Uri.joinPath(folderUri(folder), '.claude-stream', 'graphs', `${graphId}.json`);
+  return vscode.Uri.joinPath(folderUri(folder), '.agent-stream', 'graphs', `${graphId}.json`);
 }
 
 export async function openGraphTab(folder: Folder, graphId: string): Promise<void> {

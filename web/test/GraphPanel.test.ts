@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type Graph } from '@claude-stream/shared';
+import { emptyGraph, type Graph } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { send } = await import('../src/bridge');
