@@ -23,6 +23,7 @@ Install Agent Stream from the VS Code Marketplace, or from an `agent-stream-<ver
   - **Sessions:** New Session, click to switch, right-click for Rename, Duplicate, Delete.
   - **Approvals:** Approve, Deny, Approve all.
 - **Chat view:** the **Agent Stream Chat** view on the right, next to VS Code's own Chat. It shows the planner conversation for the graph tab you're on, in the current session. Describe a goal; the planner reads your repo (read-only) and draws the plan. **New chat** starts over; the session button switches session.
+- **Model and effort:** the chat header's **Model** menu picks the model for this conversation (**Default**, or one the provider lists), and **Effort** its effort level when that model offers levels. The choice is kept with the conversation in the session (New chat keeps it) and applies from the next message. **Default** uses the `agentStream.model` / `agentStream.effort` settings, or Claude Code's own default when they are empty. Runs use those settings, read once when the run starts: the run dialog and the run's tooltip show `Model: … · Effort: …`. Set them with **Agent Stream: Select Model**; the provider's status bar tooltip shows them. A model or effort is never written into a graph or an export. An effort level the chosen model doesn't offer is left out.
 - **Graph tab:** the canvas, the logs of the selected step underneath, and Node · Graph on the right (plus a Changes tab while agent changes wait for review). The menu bar has File, Edit, Run, Variables and View, with View › Chat opening the chat view.
 - **Work sessions:**
   - A session is a named set of open graph tabs plus its own planner conversations.
@@ -130,6 +131,8 @@ Recommended workflow:
 - `agentStream.provider` — `claude` (default) or `copilot` (preview).
 - `agentStream.claudePath` — Claude provider only. Claude Code's full path if it isn't found automatically.
 - `agentStream.gitBashPath` — Windows: Git Bash's full path if it isn't found automatically.
+- `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): Claude Code's default.
+- `agentStream.effort` — the effort level for the same: `low`, `medium`, `high`, `xhigh` or `max`. Empty (default): the model's own level.
 - `agentStream.maxParallel` — how many steps of a run may run at once (default 3). Steps that can change files still take turns within each workspace.
 
 ## Providers
