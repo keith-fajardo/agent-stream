@@ -12,13 +12,31 @@ export function ChatPanel() {
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const stopButton = useRef<HTMLButtonElement>(null);
-  const wasBusy = useRef(busy);
-  // Busy: focus Stop so Esc and Enter work right after a mouse-clicked Send. Idle again: back to the message box.
+  const sendButton = useRef<HTMLButtonElement>(null);
+  const prev = useRef({ busy, key: `${target?.graphId}/${target?.sessionId}` });
+  // True while Stop holds focus. A blur with no relatedTarget (e.g. Stop unmounting) leaves it set on purpose.
+  const stopFocused = useRef(false);
+  // Only on a busy transition (never on mount or a session switch) and only if focus is already in the chat:
+  // just sent (box/Send focused) -> Stop, so Esc/Enter work after a mouse-clicked Send; Stop focused -> back to the box.
   useEffect(() => {
-    if (busy) stopButton.current?.focus();
-    else if (wasBusy.current) box.current?.focus();
-    wasBusy.current = busy;
-  }, [busy]);
+    const key = `${target?.graphId}/${target?.sessionId}`;
+    const was = prev.current;
+    prev.current = { busy, key };
+    if (was.key !== key || was.busy === busy) return;
+    const active = document.activeElement;
+    if (busy) {
+      stopFocused.current = false;
+      if (active && (active === box.current || active === sendButton.current || active === stopButton.current)) {
+        // React may reuse the focused Send node as Stop, in which case focus() fires no event.
+        stopButton.current?.focus();
+        stopFocused.current = document.activeElement === stopButton.current;
+      }
+    } else if (stopFocused.current) {
+      stopFocused.current = false;
+      // React may reuse the same <button> node for Send, so focus can still sit on it rather than fall to body.
+      if (!active || active === document.body || active === sendButton.current) box.current?.focus();
+    }
+  }, [busy, target?.graphId, target?.sessionId]);
   // Block body on purpose: Chrome 154+ returns a Promise from scrollIntoView(), and an
   // effect must not return anything but a cleanup function.
   useEffect(() => {
@@ -65,18 +83,24 @@ export function ChatPanel() {
           placeholder={canType ? 'Ask the planner… (Enter to send, Shift+Enter for a new line)' : status?.error ?? 'Chat is unavailable.'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault();
               submit();
             }
           }}
         />
         {busy ? (
-          <button ref={stopButton} aria-label="Stop the planner" title="Stop the planner (Esc)" disabled={!target} onClick={stop}>
+          <button
+            ref={stopButton}
+            onFocus={() => (stopFocused.current = true)}
+            onBlur={(e) => {
+              if (e.relatedTarget) stopFocused.current = false;
+            }}
+            aria-label="Stop the planner" title="Stop the planner (Esc)" disabled={!target} onClick={stop}>
             ■ Stop
           </button>
         ) : (
-          <button className="primary" disabled={!canType || !text.trim()} onClick={submit}>
+          <button ref={sendButton} className="primary" disabled={!canType || !text.trim()} onClick={submit}>
             Send
           </button>
         )}

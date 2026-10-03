@@ -108,12 +108,57 @@ describe('ChatApp', () => {
 
     it('moves focus to Stop when the planner becomes busy and back to the message box when it stops', async () => {
       const el = await open(false);
-      const box = el.querySelector('textarea')!;
+      const box = await type(el, 'plan it');
       await act(async () => sendButton(el)!.focus());
       await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: true } }));
       expect(document.activeElement).toBe(stopButton(el));
       await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: false } }));
       expect(document.activeElement).toBe(box);
+    });
+
+    const busyMsg = (busy: boolean) => ({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy } }) as const;
+    const outsideInput = () => {
+      const other = document.createElement('input');
+      document.body.append(other);
+      other.focus();
+      return other;
+    };
+
+    it('does not move focus when mounting with an already-busy session', async () => {
+      const other = outsideInput();
+      await open(true);
+      expect(document.activeElement).toBe(other);
+    });
+
+    it('does not steal focus when busy flips while focus is outside the chat', async () => {
+      const el = await open(false);
+      const other = outsideInput();
+      await act(async () => dispatch(busyMsg(true)));
+      expect(stopButton(el)).not.toBeNull();
+      expect(document.activeElement).toBe(other);
+      await act(async () => dispatch(busyMsg(false)));
+      expect(document.activeElement).toBe(other);
+    });
+
+    it('does not move focus from the message box when the planner starts without a send, or on a session switch', async () => {
+      const el = await open(false);
+      const box = el.querySelector('textarea')!;
+      await act(async () => box.focus());
+      await act(async () => {
+        dispatch({ kind: 'server', msg: { type: 'chatTarget', target: { ...target, sessionId: 's2', sessionName: 'Two' } } });
+        dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 's2', chat: [], busy: true } });
+      });
+      expect(document.activeElement).toBe(box);
+    });
+
+    it('does not send on Enter during an IME composition', async () => {
+      const el = await open(false);
+      const box = await type(el, 'にほん');
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })));
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true })));
+      expect(posted).toEqual([]);
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      expect(posted).toHaveLength(1);
     });
 
     it('does not stop the planner on Escape during an IME composition', async () => {
