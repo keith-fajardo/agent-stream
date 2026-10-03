@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ApprovalBroker } from '../src/approvals';
-import { createPlannerGate, createStepGate } from '../src/providers/toolGate';
+import { createPlannerGate, createStepGate, withDecide } from '../src/providers/toolGate';
 
 const VALUES = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
 const PROJECT = resolve('/', 'work', 'proj');
@@ -61,5 +61,12 @@ describe('planner gate', () => {
     expect(await gate.decide('add_node', { kind: 'agent', title: 't' })).toEqual({ allow: true, by: 'graphTool' });
     expect(await gate.decide('Bash', { command: 'ls' })).toEqual({ allow: false, reason: 'The planner can only read files and edit the graph.' });
     expect(await gate.decide('Grep', { pattern: 'x', path: '/' })).toMatchObject({ allow: false });
+  });
+});
+
+describe('decide', () => {
+  it('fails closed when the privacy check throws', async () => {
+    const gate = withDecide({ privacy: () => { throw new Error('boom'); }, isReadOnly: () => false, approve: async () => ({ allow: true, by: 'user' }) });
+    expect(await gate.decide('Bash', {})).toEqual({ allow: false, reason: 'Agent Stream could not ask for approval: boom' });
   });
 });

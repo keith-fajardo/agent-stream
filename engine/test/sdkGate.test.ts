@@ -1,10 +1,10 @@
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CanUseTool, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import { toSdkGate } from '../src/providers/claude/sdkGate';
-import { createStepGate, type StepGateOptions } from '../src/providers/toolGate';
+import { createStepGate, type StepGateOptions, type ToolGate } from '../src/providers/toolGate';
 
 const makeApprovalGate = (options: StepGateOptions) => toSdkGate(createStepGate(options));
 
@@ -165,5 +165,35 @@ describe('approval gate', () => {
     expect((result as any).behavior).toBe('deny');
     expect((result as any).message).toBe('The approval request expired or was withdrawn.');
     expect(broker.pending()).toEqual([]);
+  });
+});
+
+describe('sdk gate over a stub ToolGate (fails closed)', () => {
+  const stub = (over: Partial<ToolGate> = {}): ToolGate => ({
+    privacy: () => null,
+    isReadOnly: () => false,
+    approve: async () => ({ allow: true, by: 'user' }),
+    decide: async () => ({ allow: true, by: 'user' }),
+    ...over,
+  });
+  const signal = new AbortController().signal;
+  const run = (g: ToolGate, input: HookInput) => toSdkGate(g).hooks.PreToolUse[0].hooks[0](input, 'tu', { signal });
+
+  it('denies from the hook when the privacy check throws', async () => {
+    const out = await run(stub({ privacy: () => { throw new Error('boom'); } }), preToolUse('Bash', {}));
+    expect(decisionOf(out)).toEqual({ hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Agent Stream could not ask for approval: boom' });
+  });
+
+  it('denies from canUseTool when approve rejects', async () => {
+    const g = toSdkGate(stub({ approve: async () => { throw new Error('boom'); } }));
+    const out = await g.canUseTool('Bash', {}, { signal, toolUseID: 'x', requestId: 'r' } as Parameters<CanUseTool>[2]);
+    expect(out).toEqual({ behavior: 'deny', message: 'Agent Stream could not ask for approval: boom' });
+  });
+
+  it('never calls approve for a private path or a read-only tool', async () => {
+    const approve = vi.fn(async () => ({ allow: true as const, by: 'user' as const }));
+    expect(decisionOf(await run(stub({ approve, privacy: () => 'private' }), preToolUse('Read', {})))?.permissionDecision).toBe('deny');
+    expect(await run(stub({ approve, isReadOnly: () => true }), preToolUse('Read', {}))).toEqual({});
+    expect(approve).not.toHaveBeenCalled();
   });
 });

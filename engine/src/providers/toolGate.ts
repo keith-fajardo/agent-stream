@@ -38,14 +38,23 @@ function denialReason(d: Decision, runStopped: boolean = false): string {
   return 'Denied by the user.';
 }
 
-function withDecide(base: Omit<ToolGate, 'decide'>): ToolGate {
+/** The refusal every gate falls back to when it cannot decide: fail closed. */
+export function couldNotAsk(error: unknown): string {
+  return `Agent Stream could not ask for approval: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+export function withDecide(base: Omit<ToolGate, 'decide'>): ToolGate {
   return {
     ...base,
     async decide(toolName, input, signal) {
-      const reason = base.privacy(toolName, input);
-      if (reason) return { allow: false, reason };
-      if (base.isReadOnly(toolName)) return { allow: true, by: 'readOnly' };
-      return base.approve(toolName, input, signal);
+      try {
+        const reason = base.privacy(toolName, input);
+        if (reason) return { allow: false, reason };
+        if (base.isReadOnly(toolName)) return { allow: true, by: 'readOnly' };
+        return await base.approve(toolName, input, signal);
+      } catch (error) {
+        return { allow: false, reason: couldNotAsk(error) };
+      }
     },
   };
 }
@@ -95,7 +104,7 @@ export function createStepGate(o: StepGateOptions): ToolGate {
         const d = await ask(toolName, input, signal);
         return d.decision === 'approve' ? { allow: true, by: 'user' } : { allow: false, reason: denialReason(d, o.signal.aborted) };
       } catch (error) {
-        return { allow: false, reason: `Agent Stream could not ask for approval: ${error instanceof Error ? error.message : String(error)}` };
+        return { allow: false, reason: couldNotAsk(error) };
       }
     },
   });
