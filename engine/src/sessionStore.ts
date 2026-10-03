@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Session, SessionListItem, SessionPlannerState, SessionResult, SessionTab } from '@agent-stream/shared';
@@ -81,6 +81,7 @@ export class SessionStore extends EventEmitter {
   create(name: string, id?: string): Session {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('A session needs a name.');
+    if (id !== undefined && existsSync(this.dir(id))) throw new Error(`session "${id}" already exists`);
     const at = this.clock();
     const session: Session = { id: id ?? this.uniqueId(trimmed), name: trimmed, createdAt: at, updatedAt: at, tabs: [], planner: {} };
     this.save(session);
@@ -90,7 +91,10 @@ export class SessionStore extends EventEmitter {
 
   ensureDefault(): Session {
     const r = this.load(DEFAULT_SESSION_ID);
-    return r.ok ? r.session : this.create('Default', DEFAULT_SESSION_ID);
+    if (r.ok) return r.session;
+    // An unreadable default is left untouched: use the newest readable session, else make a fresh one.
+    const readable = this.list().find((i) => !i.problem);
+    return readable ? this.get(readable.id) : this.create('Default', existsSync(this.dir(DEFAULT_SESSION_ID)) ? undefined : DEFAULT_SESSION_ID);
   }
 
   rename(id: string, name: string): SessionResult {
@@ -189,7 +193,13 @@ export type MigrationIo = { writeGraph: (path: string, content: string) => void 
 export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: MigrationIo = { writeGraph: writeFileAtomic }): string[] {
   const warnings: string[] = [];
   if (!existsSync(paths.graphsDir)) return warnings;
-  store.ensureDefault();
+  let target: string;
+  try {
+    target = store.ensureDefault().id;
+  } catch (e) {
+    warnings.push(`Could not prepare the Default session for older planner conversations (${(e as Error).message}); they stay where they are and will be retried next time.`);
+    return warnings;
+  }
   const ids = readdirSync(paths.graphsDir)
     .filter((f) => f.endsWith('.json') && !f.endsWith('.chat.jsonl') && !f.endsWith('.ops.jsonl'))
     .map((f) => f.slice(0, -'.json'.length))
@@ -198,20 +208,23 @@ export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: Migr
     try {
       const legacyChat = join(paths.graphsDir, `${id}.chat.jsonl`);
       if (existsSync(legacyChat)) {
-        const dest = join(paths.sessionsDir, DEFAULT_SESSION_ID, 'chats', `${id}.chat.jsonl`);
-        mkdirSync(join(paths.sessionsDir, DEFAULT_SESSION_ID, 'chats'), { recursive: true });
+        const dest = join(paths.sessionsDir, target, 'chats', `${id}.chat.jsonl`);
+        mkdirSync(join(paths.sessionsDir, target, 'chats'), { recursive: true });
         if (!existsSync(dest)) renameSync(legacyChat, dest);
         else {
-          writeFileAtomic(dest, readFileSync(legacyChat, 'utf8') + readFileSync(dest, 'utf8'));
+          const legacy = readFileSync(legacyChat, 'utf8');
+          const current = readFileSync(dest, 'utf8');
+          // A crash after the merge but before the removal leaves dest already starting with the legacy lines.
+          if (!current.startsWith(legacy)) writeFileAtomic(dest, legacy + (legacy && !legacy.endsWith('\n') ? '\n' : '') + current);
           rmSync(legacyChat, { force: true });
         }
       }
       const graphFile = join(paths.graphsDir, `${id}.json`);
       const raw = JSON.parse(readFileSync(graphFile, 'utf8')) as Record<string, unknown>;
       if (!('plannerSessionId' in raw) && !('plannerOpCursor' in raw)) continue;
-      const existing = store.plannerState(DEFAULT_SESSION_ID, id);
+      const existing = store.plannerState(target, id);
       if (existing.sessionId === undefined && existing.opCursor === undefined) {
-        store.setPlannerState(DEFAULT_SESSION_ID, id, {
+        store.setPlannerState(target, id, {
           ...(typeof raw.plannerSessionId === 'string' && { sessionId: raw.plannerSessionId }),
           provider: 'claude',
           ...(typeof raw.plannerOpCursor === 'number' && { opCursor: raw.plannerOpCursor }),
@@ -220,7 +233,7 @@ export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: Migr
       const { plannerSessionId: _s, plannerOpCursor: _c, ...definition } = raw;
       io.writeGraph(graphFile, `${JSON.stringify(definition, null, 2)}\n`);
     } catch (e) {
-      warnings.push(`Could not move the planner conversation of graph ${id} into the Default session (${(e as Error).message}); it stays where it is and will be retried next time.`);
+      warnings.push(`Could not finish moving the planner conversation of graph ${id} into the Default session (${(e as Error).message}); it will be retried next time.`);
     }
   }
   return warnings;

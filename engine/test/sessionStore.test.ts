@@ -68,6 +68,36 @@ describe('SessionStore', () => {
   });
 });
 
+describe('ensureDefault with an unreadable default session', () => {
+  it('never overwrites it and falls back to another readable session', () => {
+    const { paths, store } = setup();
+    const other = store.create('Other');
+    mkdirSync(join(paths.sessionsDir, 'default'), { recursive: true });
+    writeFileSync(join(paths.sessionsDir, 'default', 'session.json'), '{ nope');
+    expect(store.ensureDefault().id).toBe(other.id);
+    expect(readFileSync(join(paths.sessionsDir, 'default', 'session.json'), 'utf8')).toBe('{ nope');
+  });
+
+  it('creates default-2 when nothing else is readable, and refuses an explicit id that exists', () => {
+    const { paths, store } = setup();
+    mkdirSync(join(paths.sessionsDir, 'default'), { recursive: true });
+    writeFileSync(join(paths.sessionsDir, 'default', 'session.json'), '{ nope');
+    expect(store.ensureDefault()).toMatchObject({ id: 'default-2', name: 'Default' });
+    expect(() => store.create('X', 'default')).toThrow('session "default" already exists');
+  });
+
+  it('migrates into the fallback session', () => {
+    const { paths, store } = setup();
+    const other = store.create('Other');
+    mkdirSync(join(paths.sessionsDir, 'default'), { recursive: true });
+    writeFileSync(join(paths.sessionsDir, 'default', 'session.json'), '{ nope');
+    writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ id: 'g1' }));
+    writeFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), `${JSON.stringify(entry('one'))}\n`);
+    expect(migrateLegacy(paths, store)).toEqual([]);
+    expect(store.chatLog(other.id).read('g1').map((e) => e.text)).toEqual(['one']);
+  });
+});
+
 describe('migrateLegacy', () => {
   function legacyGraph(paths: ReturnType<typeof tmpProject>, id: string) {
     writeFileSync(join(paths.graphsDir, `${id}.json`), JSON.stringify({ id, name: id, goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: 't', plannerSessionId: 'sess-1', plannerOpCursor: 4 }));
@@ -109,5 +139,37 @@ describe('migrateLegacy', () => {
     store.chatLog(DEFAULT_SESSION_ID).append('g1', entry('three'));
     migrateLegacy(paths, store);
     expect(store.chatLog(DEFAULT_SESSION_ID).read('g1').map((e) => e.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('does not duplicate lines when a crash left both the merged dest and the legacy file', () => {
+    const { paths, store } = setup();
+    legacyGraph(paths, 'g1');
+    store.ensureDefault();
+    const dir = join(paths.sessionsDir, DEFAULT_SESSION_ID, 'chats');
+    mkdirSync(dir, { recursive: true });
+    const legacy = readFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), 'utf8');
+    writeFileSync(join(dir, 'g1.chat.jsonl'), legacy + `${JSON.stringify(entry('three'))}\n`);
+    migrateLegacy(paths, store);
+    expect(store.chatLog(DEFAULT_SESSION_ID).read('g1').map((e) => e.text)).toEqual(['one', 'two', 'three']);
+    expect(existsSync(join(paths.graphsDir, 'g1.chat.jsonl'))).toBe(false);
+  });
+
+  it('keeps every entry when the legacy chat has no trailing newline', () => {
+    const { paths, store } = setup();
+    legacyGraph(paths, 'g1');
+    writeFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), `${JSON.stringify(entry('one'))}\n${JSON.stringify(entry('two'))}`);
+    store.ensureDefault();
+    store.chatLog(DEFAULT_SESSION_ID).append('g1', entry('three'));
+    migrateLegacy(paths, store);
+    expect(store.chatLog(DEFAULT_SESSION_ID).read('g1').map((e) => e.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('warns once and stops when the Default session cannot be prepared', () => {
+    const { paths, store } = setup();
+    legacyGraph(paths, 'g1');
+    store.ensureDefault = () => {
+      throw new Error('nope');
+    };
+    expect(migrateLegacy(paths, store)).toEqual([expect.stringMatching(/Could not prepare the Default session.*nope.*retried next time/)]);
   });
 });
