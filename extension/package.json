@@ -49,6 +49,21 @@
           "default": "",
           "description": "Windows only: full path to Git Bash (bash.exe), used for command steps. Leave empty to find it automatically."
         },
+        "agentStream.model": {
+          "type": "string",
+          "default": "",
+          "description": "The model agent steps in runs use, and planner conversations that haven't chosen their own (an alias such as sonnet, or a full model id). Leave empty for Claude Code's default. Agent Stream: Select Model lists the models."
+        },
+        "agentStream.effort": {
+          "type": "string",
+          "enum": ["", "low", "medium", "high", "xhigh", "max"],
+          "default": "",
+          "enumDescriptions": [
+            "Default: the model's own effort level.",
+            "Low", "Medium", "High", "Extra high", "Max"
+          ],
+          "description": "The effort level for agent steps in runs and for planner conversations that haven't chosen their own. Leave empty for the model's default. Ignored for a model that doesn't offer the level."
+        },
         "agentStream.maxParallel": {
           "type": "integer",
           "default": 3,
@@ -129,6 +144,11 @@
       {
         "command": "agentStream.selectProvider",
         "title": "Select Provider",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.selectModel",
+        "title": "Select Model",
         "category": "Agent Stream"
       },
       {

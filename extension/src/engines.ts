@@ -152,6 +152,11 @@ export class EngineManager {
       leases: this.leases,
       git: this.d.git,
       home: this.d.home,
+      // Read when a run starts and per planner turn, so a settings change reaches the next one.
+      modelDefaults: () => {
+        const { model, effort } = this.d.settings();
+        return { ...(model && { model }), ...(effort && { effort }) };
+      },
     });
     // Registered before connecting: `hello` arrives synchronously and listeners may call get() again.
     const entry: Entry = { folder, app, detach: () => {} };

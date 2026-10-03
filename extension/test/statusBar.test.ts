@@ -25,6 +25,12 @@ describe('statusBarText', () => {
     });
   });
 
+  it('names the default model and effort in the tooltip', () => {
+    const ok: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' };
+    expect(statusBarText(ok, { model: 'sonnet', effort: 'high' }).tooltip).toBe('Agent Stream runs on Claude Max (me@example.com).\nDefault model: sonnet · Effort: high');
+    expect(statusBarText(ok, { model: '', effort: '' }).tooltip).toBe('Agent Stream runs on Claude Max (me@example.com).\nDefault model: Default · Effort: Default');
+  });
+
   it('shows the check in progress', () => {
     expect(statusBarText(checkingStatus({ id: 'claude', name: 'Claude' })).text).toBe('$(sync~spin) Agent Stream');
   });

@@ -85,6 +85,18 @@ describe('ChatViewController', () => {
     expect(s.switchSession).toHaveBeenCalledWith(s.folder);
   });
 
+  it("forwards the conversation's model choice to the engine, and only for the conversation it shows", async () => {
+    const s = setup();
+    s.chat.activate({ folder: s.folder, graphId: s.g1 }, [{ folder: s.folder, graphId: s.g1 }]);
+    s.chat.handle({ type: 'setPlannerModel', graphId: s.g1, sessionId: 'default', model: 'sonnet', effort: 'high' });
+    await vi.waitFor(() => expect(s.posted.at(-1)).toEqual({ type: 'plannerModel', graphId: s.g1, sessionId: 'default', model: 'sonnet', effort: 'high' }));
+    expect(s.app.sessionStore.plannerState('default', s.g1)).toMatchObject({ model: 'sonnet', effort: 'high' });
+    s.handle.mockClear();
+    s.chat.handle({ type: 'setPlannerModel', graphId: s.g2, sessionId: 'default', model: 'haiku' });
+    expect(s.handle).not.toHaveBeenCalled();
+    expect(s.posted.at(-1)).toEqual({ type: 'error', message: 'This chat is no longer open.' });
+  });
+
   it('refuses chat for a conversation it is not showing', () => {
     const s = setup();
     s.chat.activate({ folder: s.folder, graphId: s.g1 }, [{ folder: s.folder, graphId: s.g1 }]);

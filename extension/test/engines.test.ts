@@ -6,6 +6,7 @@ import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@a
 import type { ProviderStatus, ServerMessage } from '@agent-stream/shared';
 import { noGit, testProvider } from './helpers';
 import { checkingStatus, isChecking, EngineManager, type EngineEvents, type Folder } from '../src/engines';
+import type { Settings } from '../src/settings';
 
 const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
 const folder = (name: string): Folder => {
@@ -13,7 +14,7 @@ const folder = (name: string): Folder => {
   return { key: `file://${path}`, name, path };
 };
 
-const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude' };
+const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const };
 function baseDeps(events: Partial<EngineEvents> = {}) {
   return {
     platform: 'darwin' as const,
@@ -33,7 +34,7 @@ function setup(o: { found?: boolean } = {}) {
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude' }),
+    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude', model: '', effort: '' as const }),
     platform: 'darwin',
     env: {},
     home,
@@ -159,7 +160,7 @@ describe('EngineManager', () => {
       const findGitBash = vi.fn(() => found);
       const seen: AppDeps[] = [];
       const manager = new EngineManager({
-        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude' }),
+        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude', model: '', effort: '' as const }),
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
@@ -242,5 +243,24 @@ describe('engines and the checkout', () => {
     expect(seen[0].leases).toBe(seen[1].leases);
     expect(seen[0].git).toBe(noGit);
     expect(seen[0].home).toBe(home);
+  });
+});
+
+describe('engines and the default model', () => {
+  it("gives every engine the settings' current model and effort, read when asked", () => {
+    const seen: AppDeps[] = [];
+    let settings: Settings = { ...defaults, model: 'sonnet', effort: 'high' };
+    const manager = new EngineManager({
+      ...baseDeps(),
+      settings: () => settings,
+      createApp: (deps) => {
+        seen.push(deps);
+        return createApp(deps);
+      },
+    });
+    manager.get(folder('a'));
+    expect(seen[0].modelDefaults?.()).toEqual({ model: 'sonnet', effort: 'high' });
+    settings = { ...settings, model: '', effort: '' };
+    expect(seen[0].modelDefaults?.()).toEqual({});
   });
 });

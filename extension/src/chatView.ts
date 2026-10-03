@@ -64,7 +64,7 @@ export class ChatViewController {
       });
       return;
     }
-    if (msg.type === 'chat') {
+    if (msg.type === 'chat' || msg.type === 'setPlannerModel') {
       if (!t || msg.graphId !== t.graphId || msg.sessionId !== t.sessionId) return this.post({ type: 'error', message: 'This chat is no longer open.' });
       void this.d.app(t.folder).handle(this.client, msg);
       return;

@@ -12,6 +12,7 @@ import { FolderItem, GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
 import { parallelCommands, realParallelFs } from './parallelTickets';
 import { runCommands } from './runCommands';
+import { selectModel } from './selectModel';
 import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
 import { SessionManager, sessionStatusFolder, type GraphTabInfo } from './sessions';
@@ -26,7 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
   status.command = 'agentStream.selectProvider';
   context.subscriptions.push(status);
   const showAuth = (providerStatus: ProviderStatus) => {
-    const t = statusBarText(providerStatus);
+    const t = statusBarText(providerStatus, readSettings());
     status.text = t.text;
     status.tooltip = t.tooltip;
     status.show();
@@ -346,8 +347,27 @@ export async function activate(context: vscode.ExtensionContext) {
         },
       }),
     ),
+    vscode.commands.registerCommand('agentStream.selectModel', () =>
+      selectModel({
+        models: async () => (await manager.currentProvider().listModels?.()) ?? [],
+        current: () => {
+          const { model, effort } = readSettings();
+          return { model, effort };
+        },
+        ui: vscodeUi,
+        write: async (model, effort) => {
+          // The same target the provider command uses: the workspace when it already sets the value, else the user settings.
+          const config = vscode.workspace.getConfiguration('agentStream');
+          const target = (key: string) => (config.inspect<string>(key)?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+          await config.update('model', model, target('model'));
+          await config.update('effort', effort, target('effort'));
+        },
+      }),
+    ),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('agentStream.provider') || e.affectsConfiguration('agentStream.claudePath')) void manager.checkProvider();
+      // Runs and planner turns read the defaults when they start; only the tooltip needs refreshing.
+      else if (e.affectsConfiguration('agentStream.model') || e.affectsConfiguration('agentStream.effort')) showAuth(manager.status);
     }),
     vscode.commands.registerCommand('agentStream.signInDetails', () =>
       signInDetails(manager.status, {

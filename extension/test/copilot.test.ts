@@ -27,4 +27,13 @@ describe('Copilot provider (scaffold)', () => {
     expect(await p.planTurn({} as never)).toEqual({ ok: false, error: COPILOT_NOT_IMPLEMENTED });
     expect(api.selectChatModels).not.toHaveBeenCalled();
   });
+  it('lists the detected models as unavailable, with no effort levels, without a model request', async () => {
+    const api = { selectChatModels: vi.fn(async () => [{ id: 'gpt-5', name: 'GPT-5' }, { name: 'Claude Sonnet' }, { id: 'gpt-5', name: 'GPT-5' }]) };
+    expect(await createCopilotProvider(api).listModels!()).toEqual([
+      { value: 'gpt-5', label: 'GPT-5', efforts: [], unavailable: true },
+      { value: 'Claude Sonnet', label: 'Claude Sonnet', efforts: [], unavailable: true },
+    ]);
+    expect(await createCopilotProvider(undefined).listModels!()).toEqual([]);
+    expect(await createCopilotProvider(lm(async () => { throw new Error('no consent'); })).listModels!()).toEqual([]);
+  });
 });

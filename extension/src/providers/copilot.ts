@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import type { AgentProvider } from '@agent-stream/engine';
-import type { ProviderStatus } from '@agent-stream/shared';
+import type { ModelChoice, ProviderStatus } from '@agent-stream/shared';
 
 export const COPILOT_NOT_IMPLEMENTED = "Copilot support isn't implemented yet. Switch to Claude with Agent Stream: Select Provider.";
 export const COPILOT_UNAVAILABLE = "GitHub Copilot isn't available. Install the GitHub Copilot extension and sign in, or switch to Claude with Agent Stream: Select Provider.";
 
-export type LmApi = { selectChatModels(selector: { vendor: string }): Thenable<readonly { name: string }[]> };
+export type LmApi = { selectChatModels(selector: { vendor: string }): Thenable<readonly { id?: string; name: string }[]> };
 
 /**
  * GitHub Copilot through VS Code's Language Model API (provider spec §3.5). This round only
@@ -32,6 +32,20 @@ export function createCopilotProvider(...args: [lm?: LmApi]): AgentProvider {
         return { provider: 'copilot', ok: false, preview: true, label: 'Copilot (preview)', detail: `Models: ${names}. Running steps with Copilot isn't implemented yet.`, error: COPILOT_NOT_IMPLEMENTED };
       } catch (e) {
         return unavailable(e instanceof Error ? e.message : String(e));
+      }
+    },
+    /** The detected models, each unavailable (running isn't implemented) and without effort levels. Never a model request. */
+    async listModels(): Promise<ModelChoice[]> {
+      if (!lm?.selectChatModels) return [];
+      try {
+        const out = new Map<string, ModelChoice>();
+        for (const m of await lm.selectChatModels({ vendor: 'copilot' })) {
+          const value = m.id ?? m.name;
+          if (!out.has(value)) out.set(value, { value, label: m.name, efforts: [], unavailable: true });
+        }
+        return [...out.values()];
+      } catch {
+        return [];
       }
     },
     runStep: async () => ({ ok: false, output: '', error: COPILOT_NOT_IMPLEMENTED }),
