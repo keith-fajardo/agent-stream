@@ -41,6 +41,8 @@ async function checkAgentStep(app) {
 exports.run = async function run() {
   const live = process.env.AGENT_STREAM_LIVE === '1';
   if (!live) console.log('Skipping the agent-step check (set AGENT_STREAM_LIVE=1)');
+  // runTest.mjs gives the extension host a temp home folder, so nothing below touches the real one.
+  assert.ok(fs.realpathSync(os.homedir()).startsWith(fs.realpathSync(os.tmpdir())), 'the test runs with a temp home folder');
   const ext = vscode.extensions.getExtension('agent-stream-local.agent-stream');
   assert.ok(ext, 'the extension is installed');
   const api = await ext.activate();
@@ -60,6 +62,20 @@ exports.run = async function run() {
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', 'demo.json'));
   const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'a plain open to show the graph tab');
   await waitFor(() => reopened.isLoaded, 'the reopened tab to load its graph');
+
+  // Where the graph works (spec §7): the tab's engine sends the checkout after hello and on request. The sample
+  // workspace is a temp folder outside Git, and nothing here creates a worktree.
+  const where = [];
+  const whereClient = { send: (m) => where.push(m) };
+  const detachWhere = app.connect(whereClient);
+  const firstCheckout = await waitFor(() => where.find((m) => m.type === 'checkout'), 'the checkout message');
+  assert.equal(firstCheckout.info.git, false);
+  assert.equal(firstCheckout.info.root, fs.realpathSync(wf.uri.fsPath));
+  await app.handle(whereClient, { type: 'inspectCheckout' });
+  assert.equal(where.filter((m) => m.type === 'checkout').length, 2);
+  detachWhere();
+  const registered = await vscode.commands.getCommands(true);
+  for (const id of ['agentStream.setUpParallelTickets', 'agentStream.newAbTestGraph', 'agentStream.manageRunWorkspaces']) assert.ok(registered.includes(id), `${id} is registered`);
 
   // Providers: GitHub Copilot is selectable. In CI and in this fresh profile there is no signed-in
   // Copilot, so its status can't run, and a run is refused with the provider's own reason.
@@ -144,6 +160,8 @@ exports.run = async function run() {
     const run = await waitFor(() => msgs.filter((m) => m.type === 'run').map((m) => m.run).find((r) => r.status !== 'running'), 'the run to finish');
     assert.equal(run.status, 'succeeded');
     assert.equal(app.runStore.readOutput(run.id, 'n1'), 'hello world\n');
+    // The command step changed files, so the run took the write lease; its folder is under the test's temp home, not the real one.
+    assert.ok(fs.existsSync(path.join(os.homedir(), '.agent-stream', 'locks')), 'the lease folder is under the temp home');
   } finally {
     app.values.deleteGraph('demo');
     fs.rmSync(valuesFile, { force: true });
