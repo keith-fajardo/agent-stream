@@ -45,6 +45,7 @@ import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { needsCheckoutLease, Runner } from './runner';
+import { buildRunReport } from './runReport';
 import { RunStore } from './runStore';
 import { createStepGraphTools } from './stepGraphTools';
 import { migrateLegacy, SessionStore } from './sessionStore';
@@ -662,10 +663,39 @@ export function createApp(d: AppDeps) {
       case 'getNodeLogs':
         client.send({ type: 'nodeLogs', runId: msg.runId, nodeId: msg.nodeId, events: runStore.readEvents(msg.runId, msg.nodeId) });
         return;
+      case 'exportRunReport': {
+        const r = runReport(msg.graphId, msg.runId);
+        if (!r.ok) return error(r.error);
+        client.send({ type: 'runReport', runId: msg.runId, markdown: r.markdown, suggestedName: r.suggestedName });
+        return;
+      }
       case 'decide':
         broker.decide(msg.approvalId, msg.decision === 'approve' ? { decision: 'approve' } : { decision: 'deny', note: msg.note });
         return;
     }
+  }
+
+  /**
+   * A run's Markdown report (one audit trail per run), built from the run record, its step logs and outputs only:
+   * never the variable values file or the environment.
+   */
+  function runReport(graphId: string, runId: string): { ok: true; markdown: string; suggestedName: string } | { ok: false; error: string } {
+    const run = runner.get(runId) ?? runStore.get(runId);
+    if (!run || run.graphId !== graphId) return { ok: false, error: `run ${runId} not found` };
+    const g = graphStore.load(graphId);
+    const steps = Object.fromEntries(
+      run.snapshot.nodes.map((n) => {
+        let outputPath: string | undefined;
+        try {
+          outputPath = runStore.outputRelPath(run.id, n.id);
+        } catch {
+          outputPath = undefined;
+        }
+        return [n.id, { events: runStore.readEvents(run.id, n.id), output: runStore.readOutput(run.id, n.id), outputPath }];
+      }),
+    );
+    const markdown = buildRunReport({ graphName: g.ok ? g.graph.name : run.snapshot.name, run, steps, now: clock() });
+    return { ok: true, markdown, suggestedName: `${graphId}-run-${run.id}.md` };
   }
 
   /** Every variant workspace this folder's runs recorded and haven't removed, newest run first (spec §5.5, ruling R16). */
@@ -717,6 +747,7 @@ export function createApp(d: AppDeps) {
     importGraph,
     runWorkspaces,
     markWorkspaceRemoved,
+    runReport,
     listSessions,
     createSession,
     renameSession,

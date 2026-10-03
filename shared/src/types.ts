@@ -331,6 +331,8 @@ export type ServerMessage =
   | { type: 'checkout'; info: CheckoutInfo; lease?: LeaseHolder }
   /** A run was refused because another run is changing files in this checkout (spec §4.5). Not an error. */
   | { type: 'runBlocked'; graphId: string; message: string; holder: LeaseHolder; otherWindow: boolean; checkout: CheckoutInfo; canSetUpTickets: boolean }
+  /** The Markdown run report asked for with exportRunReport, and the file name to suggest when saving it. */
+  | { type: 'runReport'; runId: string; markdown: string; suggestedName: string }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
@@ -356,6 +358,8 @@ export type ClientMessage =
   | { type: 'stopRun'; runId: string }
   | { type: 'selectRun'; runId: string }
   | { type: 'getNodeLogs'; runId: string; nodeId: string }
+  /** Asks for the run's Markdown report; the engine answers with runReport. */
+  | { type: 'exportRunReport'; graphId: string; runId: string }
   | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string };
 
 /** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
@@ -373,6 +377,8 @@ export type WebviewHostMessage =
   | { type: 'draftState'; dirty: boolean }
   | { type: 'refineSteps'; nodeIds: string[] }
   | { type: 'splitStep'; nodeId: string }
+  /** Export Run Report: the extension saves the selected run's report to a file and opens it. */
+  | { type: 'exportRunReport'; runId: string }
   | { type: 'setUpParallelTickets' }
   | { type: 'openExternal'; url: string };
 

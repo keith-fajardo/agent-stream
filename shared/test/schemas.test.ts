@@ -57,6 +57,13 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'host', command: 'focusChat' }).ok).toBe(true);
   });
 
+  it('parses exportRunReport as a tab message and as an engine message', () => {
+    expect(parseWebviewMessage({ type: 'exportRunReport', runId: 'r1' })).toEqual({ ok: true, kind: 'host', msg: { type: 'exportRunReport', runId: 'r1' } });
+    const engine = { type: 'exportRunReport', graphId: 'g', runId: 'r1' };
+    expect(parseWebviewMessage(engine)).toEqual({ ok: true, kind: 'engine', msg: engine });
+    expect(parseWebviewMessage({ type: 'exportRunReport' }).ok).toBe(false);
+  });
+
   it('parses splitStep as a tab message and as an engine message', () => {
     expect(parseWebviewMessage({ type: 'splitStep', nodeId: 'n1' })).toEqual({ ok: true, kind: 'host', msg: { type: 'splitStep', nodeId: 'n1' } });
     const engine = { type: 'splitStep', graphId: 'g', sessionId: 's', nodeId: 'n1' };

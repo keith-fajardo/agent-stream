@@ -139,6 +139,46 @@ describe('app', () => {
     expect(a.of('graphOpened')[0]).toMatchObject({ graph: { id: g.id }, runs: [{ id: runId }], run: { id: runId } });
   });
 
+  it('exports a run report with a suggested file name, leaving out saved values and the environment', async () => {
+    const { app, client } = setup(signedIn, instant, (name) => (name === 'SECRET_ENV' ? 'env-secret-xyz' : undefined));
+    const a = client();
+    const g = app.graphStore.create('Parity');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'schema' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addVariable', name: 'password' }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'Build', kind: 'agent', prompt: 'Build {{ schema }}' } }, 'user');
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'schema', value: 'dev' });
+    // Saved but used by no step: it never appears in what ran, so it must not appear in the report.
+    await app.handle(a.c, { type: 'setVariableValue', graphId: g.id, name: 'password', value: 'hunter2-saved' });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const runId = a.of('run')[0].run.id;
+    await app.handle(a.c, { type: 'exportRunReport', graphId: g.id, runId });
+    const report = a.of('runReport')[0];
+    expect(report).toMatchObject({ type: 'runReport', runId, suggestedName: `${g.id}-run-${runId}.md` });
+    expect(report.markdown).toContain('# Run report: Parity');
+    expect(report.markdown).toContain('### n1 · Build — Succeeded');
+    expect(report.markdown).toContain('Build dev');
+    expect(report.markdown).toContain('out-n1');
+    expect(report.markdown).not.toContain('hunter2-saved');
+    expect(report.markdown).not.toContain('env-secret-xyz');
+    expect(app.runReport(g.id, runId)).toEqual({ ok: true, markdown: expect.any(String), suggestedName: report.suggestedName });
+  });
+
+  it('reports an unknown run, or a run of another graph, as an error', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+    await app.handle(a.c, { type: 'exportRunReport', graphId: g.id, runId: '20261003-100000-abcd' });
+    await app.handle(a.c, { type: 'exportRunReport', graphId: g.id, runId: '../../etc' });
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const runId = a.of('run')[0].run.id;
+    await app.handle(a.c, { type: 'exportRunReport', graphId: 'other', runId });
+    expect(a.of('error').map((m) => m.message)).toEqual(['run 20261003-100000-abcd not found', 'run ../../etc not found', `run ${runId} not found`]);
+    expect(a.of('runReport')).toEqual([]);
+  });
+
   it('refuses to start a run when the graph changed after the user reviewed it', async () => {
     const { app, client } = setup();
     const a = client();

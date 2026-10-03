@@ -258,6 +258,9 @@ function reduceServer(state: State, msg: HostMessage): State {
         msg.preview.fromNodeId === state.confirm.fromNodeId
         ? { ...state, preview: msg.preview }
         : state;
+    case 'runReport':
+      // The extension saves the report itself; a tab has nothing to show.
+      return state;
     case 'error':
       return { ...state, toast: msg.message };
     case 'revealNode':

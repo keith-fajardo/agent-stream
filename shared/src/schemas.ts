@@ -131,6 +131,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('stopRun'), runId: z.string() }),
   z.object({ type: z.literal('selectRun'), runId: z.string() }),
   z.object({ type: z.literal('getNodeLogs'), runId: z.string(), nodeId: z.string() }),
+  z.object({ type: z.literal('exportRunReport'), graphId: z.string(), runId: z.string() }),
   z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional() }),
 ]);
 
@@ -144,6 +145,7 @@ const webviewHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('draftState'), dirty: z.boolean() }),
   z.object({ type: z.literal('refineSteps'), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('splitStep'), nodeId: z.string() }),
+  z.object({ type: z.literal('exportRunReport'), runId: z.string() }),
   z.object({ type: z.literal('setUpParallelTickets') }),
   z.object({ type: z.literal('openExternal'), url: z.string().max(4096) }),
 ]);
