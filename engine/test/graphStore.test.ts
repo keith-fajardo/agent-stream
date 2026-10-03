@@ -126,7 +126,7 @@ describe('GraphStore', () => {
 
 describe('ChatLog', () => {
   it('appends and reads entries per graph', () => {
-    const log = new ChatLog(tmpProject());
+    const log = new ChatLog(tmpProject().graphsDir);
     log.append('g', { at: 't1', role: 'user', text: 'hi' });
     log.append('g', { at: 't2', role: 'assistant', text: 'hello' });
     expect(log.read('g').map((e) => e.text)).toEqual(['hi', 'hello']);
@@ -136,7 +136,7 @@ describe('ChatLog', () => {
 
   it('skips unparseable lines such as merge-conflict markers', () => {
     const paths = tmpProject();
-    const log = new ChatLog(paths);
+    const log = new ChatLog(paths.graphsDir);
     log.append('g', { at: 't1', role: 'user', text: 'hi' });
     appendFileSync(join(paths.graphsDir, 'g.chat.jsonl'), '<<<<<<< HEAD\n');
     log.append('g', { at: 't2', role: 'assistant', text: 'hello' });
@@ -180,11 +180,11 @@ describe('ChatLog', () => {
       const store = new GraphStore(paths, fixedClock());
       const { id } = store.create('G');
       store.apply(id, { type: 'setGoal', goal: 'x' }, 'user');
-      new ChatLog(paths).append(id, { at: 't', role: 'user', text: 'hi' });
+      new ChatLog(paths.graphsDir).append(id, { at: 't', role: 'user', text: 'hi' });
       expect(store.delete(id)).toEqual({ ok: true });
       expect(store.list()).toEqual([]);
       expect(store.load(id)).toEqual({ ok: false, error: `graph "${id}" not found` });
-      expect(new ChatLog(paths).read(id)).toEqual([]);
+      expect(new ChatLog(paths.graphsDir).read(id)).toEqual([]);
       expect(store.delete(id)).toEqual({ ok: false, error: `graph "${id}" not found` });
     });
 

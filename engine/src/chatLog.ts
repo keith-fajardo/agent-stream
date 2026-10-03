@@ -1,23 +1,27 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChatEntry } from '@agent-stream/shared';
 import { readJsonLines } from './fsutil';
-import { isGraphId, type ProjectPaths } from './paths';
+import { isGraphId } from './paths';
 
 export class ChatLog {
-  constructor(private paths: ProjectPaths) {}
+  constructor(private dir: string) {}
 
   private file(graphId: string): string {
-    return join(this.paths.graphsDir, `${graphId}.chat.jsonl`);
+    return join(this.dir, `${graphId}.chat.jsonl`);
   }
 
   append(graphId: string, entry: ChatEntry): void {
     if (!isGraphId(graphId)) throw new Error(`invalid graph id "${graphId}"`);
+    mkdirSync(this.dir, { recursive: true });
     appendFileSync(this.file(graphId), `${JSON.stringify(entry)}\n`);
   }
 
   read(graphId: string): ChatEntry[] {
-    if (!isGraphId(graphId)) return [];
-    return readJsonLines<ChatEntry>(this.file(graphId));
+    return isGraphId(graphId) ? readJsonLines<ChatEntry>(this.file(graphId)) : [];
+  }
+
+  clear(graphId: string): void {
+    if (isGraphId(graphId)) rmSync(this.file(graphId), { force: true });
   }
 }

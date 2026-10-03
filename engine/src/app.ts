@@ -71,7 +71,7 @@ export function createApp(d: AppDeps) {
   if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
   ensureDataDirs(paths);
   const graphStore = new GraphStore(paths, clock);
-  const chatLog = new ChatLog(paths);
+  const chatLog = new ChatLog(paths.graphsDir);
   const runStore = new RunStore(paths);
   const platform = d.platform ?? process.platform;
   const env = d.env ?? envLookup(process.env, platform);

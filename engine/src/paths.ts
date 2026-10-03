@@ -1,19 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string };
+export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string; sessionsDir: string };
 
 export function projectPaths(root: string): ProjectPaths {
   const dataDir = join(root, '.agent-stream');
-  return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs') };
+  return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs'), sessionsDir: join(dataDir, 'sessions') };
 }
 
-/** Variable values live outside the project (see valuesFileFor), so only run records need ignoring. */
-const GITIGNORE_LINES = ['runs/'];
+/** Run records and personal work sessions stay out of git. */
+const GITIGNORE_LINES = ['runs/', 'sessions/'];
 
 export function ensureDataDirs(paths: ProjectPaths): void {
   mkdirSync(paths.graphsDir, { recursive: true });
   mkdirSync(paths.runsDir, { recursive: true });
+  mkdirSync(paths.sessionsDir, { recursive: true });
   const gitignore = join(paths.dataDir, '.gitignore');
   const existing = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : '';
   const present = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
@@ -27,5 +28,9 @@ const GRAPH_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 /** Graph ids become file names, so they are restricted to a safe slug alphabet. */
 export function isGraphId(id: string): boolean {
+  return GRAPH_ID_RE.test(id);
+}
+
+export function isSessionId(id: string): boolean {
   return GRAPH_ID_RE.test(id);
 }

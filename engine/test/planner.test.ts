@@ -37,7 +37,7 @@ function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
   const paths = tmpProject();
   const graphStore = new GraphStore(paths, fixedClock());
   const runStore = new RunStore(paths);
-  const chatLog = new ChatLog(paths);
+  const chatLog = new ChatLog(paths.graphsDir);
   const graphId = graphStore.create('G').id;
   const provider = fakeProvider(turns, over);
   const planner = new Planner({

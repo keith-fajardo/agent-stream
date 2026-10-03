@@ -176,6 +176,12 @@ export type ChatEntry = { at: string; role: ChatRole; text: string };
 
 export type ProviderId = 'claude' | 'copilot';
 export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
+
+export type SessionTab = { graphId: string; group: number; index: number };
+export type SessionPlannerState = { sessionId?: string; provider?: ProviderId; opCursor?: number };
+export type Session = { id: string; name: string; createdAt: string; updatedAt: string; tabs: SessionTab[]; activeGraphId?: string; planner: Record<string, SessionPlannerState> };
+export type SessionListItem = { id: string; name: string; updatedAt?: string; tabCount: number; problem?: string };
+export type SessionResult = { ok: true; session: Session } | { ok: false; error: string };
 /** Display names, for places that only have a ProviderId (run records). */
 export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: 'Claude', copilot: 'GitHub Copilot' };
 
