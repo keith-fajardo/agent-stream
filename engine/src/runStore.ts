@@ -78,7 +78,7 @@ export class RunStore {
       .reverse()
       .map((id) => this.get(id))
       .filter((m): m is RunMeta => !!m && m.graphId === graphId)
-      .map(({ id, graphId: g, status, startedAt, endedAt, provider, amendments }) => ({
+      .map(({ id, graphId: g, status, startedAt, endedAt, provider, amendments, checkout, waitingFor }) => ({
         id,
         graphId: g,
         status,
@@ -86,6 +86,8 @@ export class RunStore {
         endedAt,
         ...(provider && { provider }),
         ...(amendments?.length && { amendments: amendments.length }),
+        ...(checkout && { checkout }),
+        ...(waitingFor && { waitingFor }),
       }));
   }
 
@@ -132,6 +134,7 @@ export class RunStore {
       }
       meta.status = 'interrupted';
       meta.endedAt = now;
+      delete meta.waitingFor;
       this.save(meta);
       recovered.push(id);
     }

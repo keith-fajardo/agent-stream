@@ -213,3 +213,23 @@ describe('client state', () => {
     });
   });
 });
+
+describe('checkout and blocked runs', () => {
+  const info = { git: false as const, root: '/p', reason: 'Not a Git repository' };
+  const holder = { runId: '20261003-090000-aaaa', graphId: 'other', folder: '/p', pid: 1, startedAt: 't' };
+
+  it('keeps the latest checkout and lease', () => {
+    const s = apply(server({ type: 'checkout', info, lease: holder }));
+    expect(s.checkout).toEqual({ info, lease: holder });
+    expect(reduce(s, server({ type: 'checkout', info })).checkout).toEqual({ info });
+  });
+
+  it("shows a blocked run for this graph with the start it refused, and forgets it on close", () => {
+    const start = { graphId: 'a', reviewed: 'sig', fromNodeId: undefined, sourceRunId: undefined };
+    const blocked = { type: 'runBlocked' as const, graphId: 'a', message: 'no', holder, otherWindow: false, checkout: info, canSetUpTickets: false };
+    const s = apply(opened(graph('a')), { kind: 'startRequested', start }, server(blocked));
+    expect(s.blocked).toEqual({ message: 'no', canSetUpTickets: false, start });
+    expect(reduce(s, { kind: 'closeBlocked' }).blocked).toBeUndefined();
+    expect(apply(opened(graph('b')), server(blocked)).blocked).toBeUndefined();
+  });
+});

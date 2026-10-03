@@ -6,3 +6,4 @@ export * from './format';
 export * from './variables';
 export * from './changes';
 export * from './access';
+export * from './checkout';

@@ -123,4 +123,16 @@ describe('RunStore', () => {
     expect(latest.get('a')?.id).toBe('20261002-100000-bbbb');
     expect(latest.get('b')?.id).toBe('20261001-120000-cccc');
   });
+
+  it('lists where a run ran and what it waits for, and forgets the wait when it recovers an interrupted run', () => {
+    const store = new RunStore(tmpProject());
+    const checkout = { root: '/work/app', branch: 'main', head: 'a1b2c3d4', linkedWorktree: false };
+    const waitingFor = { runId: '20261003-090000-aaaa', graphId: 'other', folder: '/work/app' };
+    const run: RunMeta = { ...meta('20261003-100000-bbbb', 'g', 'running'), checkout, waitingFor };
+    store.create(run);
+    expect(store.list(run.graphId)[0]).toMatchObject({ id: run.id, checkout, waitingFor });
+    store.recoverInterrupted('2026-10-03T11:00:00.000Z');
+    expect(store.get(run.id)).not.toHaveProperty('waitingFor');
+    expect(store.get(run.id)?.checkout).toEqual(checkout);
+  });
 });

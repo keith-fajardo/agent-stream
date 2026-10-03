@@ -3,9 +3,11 @@ import type {
   ApprovalRequest,
   ChatEntry,
   ChatTarget,
+  CheckoutInfo,
   Graph,
   GraphListItem,
   HostMessage,
+  LeaseHolder,
   NodeEvent,
   ProviderStatus,
   RunMeta,
@@ -16,6 +18,9 @@ import { changeKey } from './changeLabels';
 
 export type Tab = 'node' | 'graph' | 'changes';
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
+export type StartRequest = { graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string };
+/** A start the engine refused because another run is changing files in this checkout (spec §7). */
+export type Blocked = { message: string; canSetUpTickets: boolean; start?: StartRequest };
 
 export type State = {
   connected: boolean;
@@ -28,6 +33,11 @@ export type State = {
   changes: AgentChange[];
   /** The change picked in the Changes tab, as `node:<id>` or `edge:<id>`. */
   selectedChange?: string;
+  /** Where this folder's graphs work and who holds its write lease. */
+  checkout?: { info: CheckoutInfo; lease?: LeaseHolder };
+  /** The last Start the run dialog sent: Run after it finishes re-sends it. */
+  lastStart?: StartRequest;
+  blocked?: Blocked;
   /** An Accept all / Revert all waiting for the user's confirmation. */
   changeConfirm?: 'accept' | 'revert';
   runs: RunSummary[];
@@ -70,7 +80,9 @@ export type Action =
   | { kind: 'setMinimap'; value: boolean }
   | { kind: 'toggleLogs' }
   | { kind: 'openVariables'; focus?: string; addRow?: boolean }
-  | { kind: 'closeVariables' };
+  | { kind: 'closeVariables' }
+  | { kind: 'startRequested'; start: StartRequest }
+  | { kind: 'closeBlocked' };
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
@@ -113,6 +125,10 @@ export function reduce(state: State, action: Action): State {
       return { ...state, variablesDialog: { ...(action.focus !== undefined && { focus: action.focus }), ...(action.addRow && { addRow: true }) } };
     case 'closeVariables':
       return { ...state, variablesDialog: undefined };
+    case 'startRequested':
+      return { ...state, lastStart: action.start };
+    case 'closeBlocked':
+      return { ...state, blocked: undefined };
     case 'server':
       return reduceServer(state, action.msg);
   }
@@ -145,7 +161,7 @@ function reduceServer(state: State, msg: HostMessage): State {
         ...state,
         ...reviewing(state, msg.changes),
         // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
-        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined }),
+        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined }),
         graph: msg.graph,
         baseline: msg.baseline,
         changes: msg.changes,
@@ -197,6 +213,12 @@ function reduceServer(state: State, msg: HostMessage): State {
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chatBusy: msg.busy } : state;
     case 'sessions':
       return state;
+    case 'checkout':
+      return { ...state, checkout: { info: msg.info, ...(msg.lease && { lease: msg.lease }) } };
+    case 'runBlocked':
+      return msg.graphId === current
+        ? { ...state, blocked: { message: msg.message, canSetUpTickets: msg.canSetUpTickets, ...(state.lastStart?.graphId === msg.graphId && { start: state.lastStart }) } }
+        : state;
     case 'confirmRun':
       return msg.graphId === current ? { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId } } : state;
     case 'variableValues':

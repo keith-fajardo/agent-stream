@@ -85,6 +85,11 @@ describe('parseWebviewMessage', () => {
     }
     expect(parseWebviewMessage({ type: 'chat', graphId: 'g', text: 'hi' }).ok).toBe(false);
   });
+  it('accepts inspectCheckout, a sequential startRun and the setUpParallelTickets host message', () => {
+    expect(parseWebviewMessage({ type: 'inspectCheckout' })).toEqual({ ok: true, kind: 'engine', msg: { type: 'inspectCheckout' } });
+    expect(parseWebviewMessage({ type: 'startRun', graphId: 'g', reviewed: 's', sequential: true })).toMatchObject({ ok: true, kind: 'engine', msg: { sequential: true } });
+    expect(parseWebviewMessage({ type: 'setUpParallelTickets' })).toEqual({ ok: true, kind: 'host', msg: { type: 'setUpParallelTickets' } });
+  });
 });
 
 describe('graph files from before work sessions', () => {

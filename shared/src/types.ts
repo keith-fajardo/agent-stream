@@ -154,7 +154,36 @@ export type RunPreview = {
   variables: { name: string; value: string }[];
   /** Start must send this back; the engine refuses if a re-render differs. */
   signature: string;
+  /** Shown, never block (spec §4.7): writers that take turns, uncommitted changes left out of workspaces. */
+  notes?: string[];
+  /** The checkout the run will use: the dialog's Checkout line. */
+  checkout?: CheckoutInfo;
 };
+
+/** Where a folder's graphs work (spec §3.2). `root` is a real path: the Git top-level, or the folder itself outside Git. */
+export type CheckoutInfo =
+  | { git: false; root: string; reason: string }
+  | {
+      git: true;
+      root: string;
+      linkedWorktree: boolean;
+      /** Absent when HEAD is detached. */
+      branch?: string;
+      /** Absent before the first commit. */
+      head?: string;
+      /** Tracked files modified or staged. */
+      dirty: boolean;
+      worktrees: { path: string; branch?: string; head?: string; current: boolean }[];
+    };
+
+/** The run changing files in a checkout (spec §4.2). */
+export type LeaseHolder = { runId: string; graphId: string; folder: string; pid: number; startedAt: string };
+/** Where a run ran, recorded when it starts. */
+export type RunCheckout = { root: string; branch?: string; head?: string; linkedWorktree: boolean };
+/** A variant workspace a run created (spec §4.3a); `removed` once Manage Run Workspaces removed it. */
+export type RunWorkspace = { path: string; head: string; removed?: boolean };
+/** The run whose lease a sequential run's write-capable steps wait for. */
+export type WaitingFor = { runId: string; graphId: string; folder: string };
 
 export type RunMeta = {
   id: string;
@@ -171,13 +200,19 @@ export type RunMeta = {
   provider?: ProviderId;
   /** Graph changes a step agent made to this run while it ran, each approved by the user. */
   amendments?: RunAmendment[];
+  /** Where the run ran, recorded when it started. */
+  checkout?: RunCheckout;
+  /** One entry per variant workspace the run created. */
+  workspaces?: Record<string, RunWorkspace>;
+  /** Set while the run's write-capable steps wait for another run's write lease. */
+  waitingFor?: WaitingFor;
 };
 
 /** One approved change a step agent made to a run in progress: `byNodeId` asked, `nodeId` is the step added or changed. */
 export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summary: string };
 
 /** `amendments`: how many changes step agents made to the run, when there were any. */
-export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number };
+export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number; checkout?: RunCheckout; waitingFor?: WaitingFor };
 
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
@@ -264,6 +299,10 @@ export type ServerMessage =
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }
   | { type: 'variableValues'; graphId: string; values: Record<string, string> }
+  /** Where this folder's graphs work and who holds its write lease: after hello, on request, and when a run starts, ends or stops waiting. */
+  | { type: 'checkout'; info: CheckoutInfo; lease?: LeaseHolder }
+  /** A run was refused because another run is changing files in this checkout (spec §4.5). Not an error. */
+  | { type: 'runBlocked'; graphId: string; message: string; holder: LeaseHolder; otherWindow: boolean; checkout: CheckoutInfo; canSetUpTickets: boolean }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
@@ -277,7 +316,8 @@ export type ClientMessage =
   /** Clears the conversation: its chat and the provider session. */
   | { type: 'newChat'; graphId: string; sessionId: string }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
-  | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string; sequential?: boolean }
+  | { type: 'inspectCheckout' }
   | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestId?: string }
   | { type: 'setVariableValue'; graphId: string; name: string; value: string }
   | { type: 'stopRun'; runId: string }
@@ -298,7 +338,8 @@ export type WebviewHostMessage =
   | { type: 'setMinimap'; value: boolean }
   | { type: 'chatCommand'; command: 'switchSession' | 'newChat' }
   | { type: 'draftState'; dirty: boolean }
-  | { type: 'refineSteps'; nodeIds: string[] };
+  | { type: 'refineSteps'; nodeIds: string[] }
+  | { type: 'setUpParallelTickets' };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 
