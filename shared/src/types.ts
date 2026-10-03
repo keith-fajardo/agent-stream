@@ -67,9 +67,24 @@ export type Op =
   | { type: 'renameVariable'; name: string; newName: string }
   | { type: 'setVariableDescription'; name: string; description: string }
   | { type: 'deleteVariable'; name: string }
-  | { type: 'moveNode'; id: string; position: Position };
+  | { type: 'moveNode'; id: string; position: Position }
+  /** Review of agent changes (agent changes spec §3.4): applied by the graph store, which keeps the baseline. */
+  | { type: 'acceptChange'; target: ChangeTarget }
+  | { type: 'revertChange'; target: ChangeTarget };
 
-export type OpRecord = { at: string; by: Actor; op: Op };
+/** Which agent made an edit: the planner (in a work session) or an agent step during a run. */
+export type ChangeSource = { kind: 'planner'; sessionId?: string } | { kind: 'step'; runId: string; nodeId: string };
+
+export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource };
+
+export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
+
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec';
+
+/** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
+export type AgentChange =
+  | { kind: 'node'; change: 'added' | 'changed' | 'removed'; id: string; title: string; fields?: ChangedField[]; by?: ChangeSource; at?: string }
+  | { kind: 'edge'; change: 'added' | 'removed'; id: string; from: string; to: string; by?: ChangeSource; at?: string };
 
 export type GraphResult = { ok: true; graph: Graph } | { ok: false; error: string };
 
@@ -200,15 +215,16 @@ export type ProviderStatus = {
   preview?: boolean;
 };
 
-export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string } };
+export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number };
 
 export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
   | { type: 'hello'; status: ProviderStatus; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
   | { type: 'graphDeleted'; graphId: string }
-  | { type: 'graphOpened'; graph: Graph; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }
-  | { type: 'graph'; graph: Graph }
+  /** `baseline` is the user's graph before pending agent changes (absent when there are none); `changes` lists them. */
+  | { type: 'graphOpened'; graph: Graph; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string>; baseline?: Graph; changes: AgentChange[] }
+  | { type: 'graph'; graph: Graph; baseline?: Graph; changes: AgentChange[] }
   | { type: 'opRejected'; graphId: string; error: string }
   | { type: 'runs'; graphId: string; runs: RunSummary[] }
   | { type: 'run'; run: RunMeta; select?: boolean }

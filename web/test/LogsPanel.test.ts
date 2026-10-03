@@ -39,7 +39,7 @@ const text = () => container.textContent ?? '';
 
 beforeEach(async () => {
   vi.mocked(send).mockClear();
-  server({ type: 'graphOpened', graph, runs: [], run, variableValues: {} });
+  server({ type: 'graphOpened', changes: [], graph, runs: [], run, variableValues: {} });
   server({ type: 'approvals', approvals: [] });
   dispatch({ kind: 'selectNode' });
   container = document.createElement('div');

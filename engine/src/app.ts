@@ -2,6 +2,7 @@ import type { renameSync } from 'node:fs';
 import {
   refinable,
   validateRunnable,
+  type AgentChange,
   type ApprovalRequest,
   type ProviderStatus,
   type ChatEntry,
@@ -10,6 +11,7 @@ import {
   type GraphListItem,
   type GraphResult,
   type NodeEvent,
+  type NodeStatus,
   type NodeRunState,
   type Op,
   type RunMeta,
@@ -36,6 +38,9 @@ import { RunStore } from './runStore';
 import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
+
+/** Run states in which a step's definition may still be read: a revert must wait for them. */
+const IN_PROGRESS = new Set<NodeStatus | undefined>(['queued', 'running', 'waiting_approval']);
 
 export const CHANGED_SINCE_REVIEW = 'Something changed since you reviewed this run (a step, a variable or an environment variable). Review it again.';
 
@@ -218,7 +223,7 @@ export function createApp(d: AppDeps) {
     if (op.type === 'renameVariable') values.rename(graphId, op.name, op.newName);
     if (op.type === 'deleteVariable') values.delete(graphId, op.name);
   });
-  graphStore.on('changed', (graph: Graph) => broadcast({ type: 'graph', graph }));
+  graphStore.on('changed', (graph: Graph) => broadcast({ type: 'graph', graph, ...review(graph.id) }));
   runner.on('run', (run: RunMeta) => {
     broadcast({ type: 'run', run });
     broadcast({ type: 'runs', graphId: run.graphId, runs: runStore.list(run.graphId) });
@@ -241,10 +246,29 @@ export function createApp(d: AppDeps) {
     return { ok: true, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem }) };
   }
 
+  /** The pending agent changes and the baseline they are against, for graphOpened and graph. */
+  function review(graphId: string): { baseline?: Graph; changes: AgentChange[] } {
+    const base = graphStore.baseline(graphId);
+    return { ...(base.ok && base.graph && { baseline: base.graph }), changes: graphStore.agentChanges(graphId) };
+  }
+
   function opened(graph: Graph): ServerMessage {
     const runs = runStore.list(graph.id);
     const run = runner.activeFor(graph.id) ?? (runs[0] ? runStore.get(runs[0].id) : undefined);
-    return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id) };
+    return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id), ...review(graph.id) };
+  }
+
+  /** A revert would change a step that a run in progress is about to run or is running. */
+  function revertBlockedByRun(graphId: string, op: Op): boolean {
+    if (op.type !== 'revertChange') return false;
+    const run = runner.activeFor(graphId);
+    if (!run) return false;
+    const busy = (id: string) => IN_PROGRESS.has(run.nodes[id]?.status);
+    const { target } = op;
+    if (target.kind === 'all') return Object.keys(run.nodes).some(busy);
+    if (target.kind === 'node') return busy(target.id);
+    const edge = graphStore.agentChanges(graphId).find((c): c is Extract<AgentChange, { kind: 'edge' }> => c.kind === 'edge' && c.id === target.id);
+    return !!edge && (busy(edge.from) || busy(edge.to));
   }
 
   /** The provider or its status changed (settings, Check again): new runs and planner turns use it; running ones keep theirs. */
@@ -261,7 +285,12 @@ export function createApp(d: AppDeps) {
 
   function startupWarnings(): string[] {
     values.get('');
-    return values.problem ? [...migrationWarnings, values.problem] : migrationWarnings;
+    const warnings = values.problem ? [...migrationWarnings, values.problem] : [...migrationWarnings];
+    for (const g of graphStore.list()) {
+      const base = graphStore.baseline(g.id);
+      if (!base.ok) warnings.push(base.error);
+    }
+    return warnings;
   }
 
   function connect(client: Client): () => void {
@@ -289,6 +318,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'op': {
+        if (revertBlockedByRun(msg.graphId, msg.op)) return client.send({ type: 'opRejected', graphId: msg.graphId, error: 'Stop the run first.' });
         const r = graphStore.apply(msg.graphId, msg.op, 'user');
         if (!r.ok) client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
         return;

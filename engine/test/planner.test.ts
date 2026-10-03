@@ -87,6 +87,17 @@ describe('Planner', () => {
     expect(s.busy).toEqual([true, false]);
   });
 
+  it('attributes the planner’s graph edits to its work session', async () => {
+    const s = setup([
+      async (t) => {
+        await t.tools.find((x) => x.name === 'add_node')!.run({ kind: 'agent', title: 'Plan', prompt: 'p' });
+        return { ok: true, sessionId: 'sess-1' };
+      },
+    ]);
+    await s.planner.send('a', s.graphId, 'Plan it');
+    expect(s.graphStore.readOps(s.graphId)).toMatchObject([{ by: 'agent', source: { kind: 'planner', sessionId: 'a' } }]);
+  });
+
   it('logs a short display line for the user while the provider gets the full text', async () => {
     const s = setup([ran()]);
     await s.planner.send('a', s.graphId, 'long text', { display: 'short' });
@@ -377,5 +388,14 @@ describe('describeOp for variables', () => {
     expect(describeOp({ type: 'renameVariable', name: 'schema', newName: 'target' })).toBe('renamed variable schema to target');
     expect(describeOp({ type: 'setVariableDescription', name: 'schema', description: 'x' })).toBe('changed the description of variable schema');
     expect(describeOp({ type: 'deleteVariable', name: 'schema' })).toBe('deleted variable schema');
+  });
+});
+
+describe('describeOp for reviewed agent changes', () => {
+  it('names what the user accepted or reverted', () => {
+    expect(describeOp({ type: 'acceptChange', target: { kind: 'node', id: 'n2' } })).toBe('accepted the agent change to n2');
+    expect(describeOp({ type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } })).toBe('reverted the agent change to n1->n2');
+    expect(describeOp({ type: 'acceptChange', target: { kind: 'all' } })).toBe('accepted all agent changes');
+    expect(describeOp({ type: 'revertChange', target: { kind: 'all' } })).toBe('reverted all agent changes');
   });
 });

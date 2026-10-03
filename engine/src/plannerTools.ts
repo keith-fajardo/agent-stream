@@ -1,5 +1,5 @@
 import { z, type ZodRawShape } from 'zod';
-import type { Graph, Op } from '@agent-stream/shared';
+import type { ChangeSource, Graph, Op } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
 import type { GraphTool, ToolReply } from './providers/types';
@@ -9,6 +9,8 @@ export type PlannerToolDeps = {
   graphStore: GraphStore;
   runStore: RunStore;
   graphId: string;
+  /** Which agent the edits are recorded as: the planner in its work session. */
+  source: ChangeSource;
   /** Opens the run confirmation dialog in the graph's tab; returns an error message or null. */
   requestRun: (fromNodeId?: string) => string | null;
 };
@@ -44,9 +46,9 @@ export function summarizeGraph(graph: Graph) {
   };
 }
 
-/** The planner edits the graph only through these tools; every change is tagged `agent`. */
+/** The planner edits the graph only through these tools; every change is tagged `agent`, from `d.source`. */
 export function graphTools(d: PlannerToolDeps): GraphTool[] {
-  const apply = (op: Op) => d.graphStore.apply(d.graphId, op, 'agent');
+  const apply = (op: Op) => d.graphStore.apply(d.graphId, op, 'agent', d.source);
   const outcome = (r: { ok: true } | { ok: false; error: string }, success: string) => (r.ok ? reply(success) : reply(r.error, true));
 
   return [

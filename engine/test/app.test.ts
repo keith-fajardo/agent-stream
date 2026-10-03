@@ -734,4 +734,77 @@ describe('app', () => {
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The variable values file \(.+\) could not be read/)]);
     });
   });
+
+  describe('agent changes', () => {
+    const planner = { kind: 'planner', sessionId: 'default' } as const;
+
+    it('opens a graph with its agent changes and baseline, and broadcasts new changes', async () => {
+      const { app, client } = setup();
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+      await app.handle(a.c, { type: 'openGraph', graphId: g.id });
+      expect(a.of('graphOpened').at(-1)?.changes).toEqual([]);
+      expect(a.of('graphOpened').at(-1)).not.toHaveProperty('baseline');
+      app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { prompt: 'agent prompt' } }, 'agent', planner);
+      const change = { kind: 'node', change: 'changed', id: 'n1', title: 'a', fields: ['prompt'], by: planner, at: expect.any(String) };
+      expect(a.of('graph').at(-1)).toMatchObject({ graph: { nodes: [{ prompt: 'agent prompt' }] }, baseline: { nodes: [{ prompt: 'p' }] } });
+      expect(a.of('graph').at(-1)?.changes).toEqual([change]);
+      await app.handle(a.c, { type: 'openGraph', graphId: g.id });
+      expect(a.of('graphOpened').at(-1)).toMatchObject({ baseline: { nodes: [{ prompt: 'p' }] } });
+      expect(a.of('graphOpened').at(-1)?.changes).toEqual([change]);
+      expect(app.listGraphs()).toEqual([{ id: g.id, name: 'G', updatedAt: expect.any(String), agentChanges: 1 }]);
+      await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'acceptChange', target: { kind: 'node', id: 'n1' } } });
+      expect(a.of('graph').at(-1)?.changes).toEqual([]);
+      expect(a.of('graph').at(-1)).not.toHaveProperty('baseline');
+    });
+
+    it('refuses to revert a step of a run in progress', async () => {
+      const waiting: (() => void)[] = [];
+      const releaseAll = () => waiting.splice(0).forEach((release) => release());
+      const { app, client } = setup(signedIn, () => new Promise((resolve) => waiting.push(() => resolve({ ok: true, output: '' }))));
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'build', kind: 'command', command: 'x' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'test', kind: 'command', command: 'y' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'lint', kind: 'command', command: 'z' } }, 'user');
+      await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+      await vi.waitFor(() => expect(app.runner.activeFor(g.id)?.nodes.n1.status).toBe('running'));
+      expect(app.runner.activeFor(g.id)?.nodes.n2.status).toBe('queued');
+      app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { command: 'x2' } }, 'agent', planner);
+      app.graphStore.apply(g.id, { type: 'updateNode', id: 'n2', patch: { command: 'y2' } }, 'agent', planner);
+      app.graphStore.apply(g.id, { type: 'connect', from: 'n2', to: 'n3' }, 'agent', planner);
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'later', kind: 'command', command: 'w' } }, 'agent', planner);
+      const revert = (target: { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' }) =>
+        app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'revertChange', target } });
+      await revert({ kind: 'node', id: 'n1' });
+      await revert({ kind: 'node', id: 'n2' });
+      await revert({ kind: 'edge', id: 'n2->n3' });
+      await revert({ kind: 'all' });
+      expect(a.of('opRejected')).toEqual(Array(4).fill({ type: 'opRejected', graphId: g.id, error: 'Stop the run first.' }));
+      expect(app.graphStore.get(g.id).nodes.map((n) => n.command)).toEqual(['x2', 'y2', 'z', 'w']);
+      // A step the run doesn't include can be reverted meanwhile; accepting is always allowed.
+      await revert({ kind: 'node', id: 'n4' });
+      await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'acceptChange', target: { kind: 'node', id: 'n2' } } });
+      expect(a.of('opRejected')).toHaveLength(4);
+      expect(app.graphStore.agentChanges(g.id).map((c) => c.id)).toEqual(['n1', 'n2->n3']);
+      releaseAll();
+      await vi.waitFor(() => expect(app.runner.activeFor(g.id)?.nodes.n2.status).toBe('running'));
+      releaseAll();
+      await vi.waitFor(() => expect(app.runner.activeFor(g.id)).toBeUndefined());
+      await revert({ kind: 'all' });
+      expect(a.of('opRejected')).toHaveLength(4);
+      expect(app.graphStore.agentChanges(g.id)).toEqual([]);
+    });
+
+    it('warns at startup about a baseline it cannot read', () => {
+      const paths = tmpProject();
+      writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify(emptyGraph('g1', 'G', 't')));
+      writeFileSync(join(paths.graphsDir, 'g1.baseline.json'), '{ nope');
+      const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+      expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The agent-change baseline .+g1\.baseline\.json could not be read \(/)]);
+      expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
+    });
+  });
 });

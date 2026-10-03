@@ -62,6 +62,10 @@ export function describeOp(op: Op): string {
       return `deleted variable ${op.name}`;
     case 'moveNode':
       return `moved ${op.id}`;
+    case 'acceptChange':
+      return op.target.kind === 'all' ? 'accepted all agent changes' : `accepted the agent change to ${op.target.id}`;
+    case 'revertChange':
+      return op.target.kind === 'all' ? 'reverted all agent changes' : `reverted the agent change to ${op.target.id}`;
   }
 }
 
@@ -167,7 +171,13 @@ export class Planner extends EventEmitter {
       resume = sameProvider ? state.sessionId : undefined;
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
-      const tools = graphTools({ graphStore: this.d.graphStore, runStore: this.d.runStore, graphId, requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId) });
+      const tools = graphTools({
+        graphStore: this.d.graphStore,
+        runStore: this.d.runStore,
+        graphId,
+        source: { kind: 'planner', sessionId },
+        requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
+      });
       const r = await provider.planTurn({
         prompt: userEditsPreamble(ops.slice(state.opCursor ?? 0)) + text,
         systemAppend: PLANNER_APPEND,

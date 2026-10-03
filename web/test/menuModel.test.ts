@@ -14,7 +14,7 @@ const server = (msg: ServerMessage) => ({ kind: 'server' as const, msg });
 const base = (extra: Partial<State> = {}): State => ({
   ...[
     server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] }),
-    server({ type: 'graphOpened', graph, runs: [], variableValues: {} }),
+    server({ type: 'graphOpened', changes: [], graph, runs: [], variableValues: {} }),
   ].reduce(reduce, initialState),
   ...extra,
 });

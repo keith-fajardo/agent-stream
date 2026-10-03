@@ -1,6 +1,7 @@
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { NewNodeInput } from '@agent-stream/shared';
 import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
 import { fixedClock, tmpProject } from './helpers';
@@ -189,5 +190,219 @@ describe('ChatLog', () => {
       expect(imported.ok && imported.graph.id).toBe('parity-2');
       expect(store.importGraph('nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });
     });
+  });
+});
+
+/** A store with one graph holding `nodes` (and `edges`), all made by the user. */
+function withGraph(nodes: NewNodeInput[], edges: [string, string][] = []) {
+  const paths = tmpProject();
+  const store = new GraphStore(paths, fixedClock());
+  const { id } = store.create('G');
+  for (const node of nodes) store.apply(id, { type: 'addNode', node }, 'user');
+  for (const [from, to] of edges) store.apply(id, { type: 'connect', from, to }, 'user');
+  return { store, id, paths, baselineFile: join(paths.graphsDir, `${id}.baseline.json`) };
+}
+
+const step = (id: string, over: Partial<NewNodeInput> = {}): NewNodeInput => ({ id, title: id, kind: 'agent', prompt: `do ${id}`, ...over });
+
+describe('agent changes against the baseline', () => {
+  it('creates the baseline on the first agent edit; user edits go to both', () => {
+    const { store, id } = withGraph([{ id: 'n1', title: 'One', kind: 'agent', prompt: 'p' }]);
+    expect(store.baseline(id)).toEqual({ ok: true });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'agent prompt' } }, 'agent', { kind: 'planner', sessionId: 'default' });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Renamed by me' } }, 'user');
+    const changes = store.agentChanges(id);
+    expect(changes).toEqual([{ kind: 'node', change: 'changed', id: 'n1', title: 'Renamed by me', fields: ['prompt'], by: { kind: 'planner', sessionId: 'default' }, at: expect.any(String) }]);
+    const base = store.baseline(id);
+    expect(base.ok && base.graph?.nodes.map((n) => [n.title, n.prompt])).toEqual([['Renamed by me', 'p']]);
+    expect(store.readOps(id).at(-2)).toMatchObject({ by: 'agent', source: { kind: 'planner', sessionId: 'default' } });
+    expect(store.readOps(id).at(-1)).not.toHaveProperty('source');
+  });
+
+  it('keeps an agent-added step marked when the user edits it', () => {
+    const { store, id } = withGraph([]);
+    store.apply(id, { type: 'addNode', node: { id: 'n1', title: 'Install deps', kind: 'command', command: 'npm ci' } }, 'agent', { kind: 'step', runId: 'r1', nodeId: 'n2' });
+    expect(store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Install' } }, 'user').ok).toBe(true);
+    expect(store.get(id).nodes[0]).toMatchObject({ id: 'n1', title: 'Install', updatedBy: 'user' });
+    expect(store.agentChanges(id)).toMatchObject([{ kind: 'node', change: 'added', id: 'n1', title: 'Install', by: { kind: 'step', runId: 'r1', nodeId: 'n2' } }]);
+    const base = store.baseline(id);
+    expect(base.ok && base.graph?.nodes).toEqual([]);
+  });
+
+  it('accepts and reverts per change and in full, and drops the baseline once they match', () => {
+    const { store, id, paths } = withGraph([{ id: 'n1', title: 'One', kind: 'agent', prompt: 'p' }]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'addNode', node: { id: 'n2', title: 'Two', kind: 'agent', prompt: 'q' } }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user').ok).toBe(true);
+    expect(store.get(id).nodes.find((n) => n.id === 'n1')?.prompt).toBe('p');
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
+    expect(store.agentChanges(id)).toEqual([]);
+    expect(existsSync(join(paths.graphsDir, `${id}.baseline.json`))).toBe(false);
+  });
+
+  it('treats an unreadable baseline as no changes and lets Accept all rewrite it', () => {
+    const { store, id, baselineFile } = withGraph([step('n1')]);
+    writeFileSync(baselineFile, '{ nope');
+    const base = store.baseline(id);
+    expect(base.ok).toBe(false);
+    expect(!base.ok && base.error).toMatch(/baseline/);
+    expect(store.agentChanges(id)).toEqual([]);
+    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String) }]);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user')).toEqual({ ok: false, error: 'There are no agent changes to review.' });
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
+    expect(existsSync(baselineFile)).toBe(false);
+    expect(store.baseline(id)).toEqual({ ok: true });
+    // The next agent edit starts a fresh baseline.
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'new' } }, 'agent', { kind: 'planner' });
+    expect(store.agentChanges(id)).toMatchObject([{ id: 'n1', change: 'changed', fields: ['prompt'] }]);
+  });
+
+  it('deletes the baseline with its graph', () => {
+    const { store, id, baselineFile } = withGraph([step('n1')]);
+    store.apply(id, { type: 'deleteNode', id: 'n1' }, 'agent', { kind: 'planner' });
+    expect(existsSync(baselineFile)).toBe(true);
+    expect(store.delete(id)).toEqual({ ok: true });
+    expect(existsSync(baselineFile)).toBe(false);
+    expect(store.baseline(id)).toEqual({ ok: true });
+  });
+
+  it('lists the number of agent changes, and never lists a baseline as a graph', () => {
+    const { store, id } = withGraph([step('n1')]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Agent title' } }, 'agent', { kind: 'planner' });
+    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String), agentChanges: 1 }]);
+  });
+
+  it('has no baseline and no changes when nothing an agent did differs', () => {
+    const { store, id, baselineFile } = withGraph([step('n1')]);
+    store.apply(id, { type: 'setGoal', goal: 'agent goal' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 5, y: 5 } }, 'agent');
+    expect(existsSync(baselineFile)).toBe(false);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    expect(existsSync(baselineFile)).toBe(true);
+    // The user undoing it by hand makes the graph match its baseline again.
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'do n1' } }, 'user');
+    expect(existsSync(baselineFile)).toBe(false);
+  });
+
+  it('attributes each change to the latest agent op that touched it', () => {
+    const { store, id } = withGraph([step('n1'), step('n2'), step('n3')], [['n1', 'n2']]);
+    const planner = { kind: 'planner', sessionId: 'a' } as const;
+    const runStep = { kind: 'step', runId: 'r1', nodeId: 'n1' } as const;
+    store.apply(id, { type: 'updateNode', id: 'n3', patch: { prompt: 'first' } }, 'agent', planner);
+    store.apply(id, { type: 'updateNode', id: 'n3', patch: { prompt: 'second' } }, 'agent', runStep);
+    store.apply(id, { type: 'disconnect', from: 'n1', to: 'n2' }, 'agent', planner);
+    store.apply(id, { type: 'connect', from: 'n2', to: 'n3' }, 'agent', runStep);
+    store.apply(id, { type: 'updateNode', id: 'n3', patch: { title: 'Mine' } }, 'user');
+    expect(store.agentChanges(id)).toEqual([
+      { kind: 'node', change: 'changed', id: 'n3', title: 'Mine', fields: ['prompt'], by: runStep, at: expect.any(String) },
+      { kind: 'edge', change: 'removed', id: 'n1->n2', from: 'n1', to: 'n2', by: planner, at: expect.any(String) },
+      { kind: 'edge', change: 'added', id: 'n2->n3', from: 'n2', to: 'n3', by: runStep, at: expect.any(String) },
+    ]);
+  });
+
+  it('reverts a removed step with its connections, and an added step with its connections', () => {
+    const { store, id } = withGraph([step('n1'), step('n2', { position: { x: 1, y: 2 } }), step('n3')], [['n1', 'n2'], ['n2', 'n3']]);
+    store.apply(id, { type: 'deleteNode', id: 'n2' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'addNode', node: step('n4') }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'connect', from: 'n1', to: 'n4' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'connect', from: 'n4', to: 'n3' }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n2' } }, 'user').ok).toBe(true);
+    let g = store.get(id);
+    expect(g.nodes.find((n) => n.id === 'n2')).toMatchObject({ title: 'n2', prompt: 'do n2', position: { x: 1, y: 2 } });
+    expect(g.edges.map((e) => e.id).sort()).toEqual(['n1->n2', 'n1->n4', 'n2->n3', 'n4->n3']);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n4' } }, 'user').ok).toBe(true);
+    g = store.get(id);
+    expect(g.nodes.map((n) => n.id).sort()).toEqual(['n1', 'n2', 'n3']);
+    expect(g.edges.map((e) => e.id).sort()).toEqual(['n1->n2', 'n2->n3']);
+    expect(store.agentChanges(id)).toEqual([]);
+    expect(store.baseline(id)).toEqual({ ok: true });
+    expect(store.readOps(id).at(-1)).toMatchObject({ by: 'user', op: { type: 'revertChange', target: { kind: 'node', id: 'n4' } } });
+  });
+
+  it('reverts a changed step to its baseline fields, keeping where it is', () => {
+    const { store, id } = withGraph([step('n1', { kind: 'command', command: 'make', prompt: undefined, timeoutSec: 30 })]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Agent', description: 'why', command: 'make all', timeoutSec: 60 } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 7, y: 8 } }, 'user');
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user').ok).toBe(true);
+    const n1 = store.get(id).nodes[0];
+    expect(n1).toEqual({ id: 'n1', title: 'n1', kind: 'command', command: 'make', timeoutSec: 30, position: { x: 7, y: 8 }, createdBy: 'user', updatedBy: 'user', updatedAt: expect.any(String) });
+  });
+
+  it('accepts and reverts single connections', () => {
+    const { store, id } = withGraph([step('n1'), step('n2'), step('n3')], [['n1', 'n2']]);
+    store.apply(id, { type: 'disconnect', from: 'n1', to: 'n2' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'connect', from: 'n2', to: 'n3' }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } }, 'user').ok).toBe(true);
+    expect(store.get(id).edges.map((e) => e.id).sort()).toEqual(['n1->n2', 'n2->n3']);
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'edge', id: 'n2->n3' } }, 'user').ok).toBe(true);
+    expect(store.agentChanges(id)).toEqual([]);
+    store.apply(id, { type: 'connect', from: 'n1', to: 'n3' }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n3' } }, 'user').ok).toBe(true);
+    expect(store.get(id).edges.map((e) => e.id).sort()).toEqual(['n1->n2', 'n2->n3']);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n3' } }, 'user')).toEqual({ ok: false, error: 'There are no agent changes to review.' });
+  });
+
+  it('accepts one step into the baseline and leaves the rest marked', () => {
+    const { store, id } = withGraph([step('n1'), step('n2')]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { command: 'x' } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'deleteNode', id: 'n2' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'addNode', node: step('n3') }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n2' } }, 'user').ok).toBe(true);
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n3' } }, 'user').ok).toBe(true);
+    expect(store.agentChanges(id)).toMatchObject([{ id: 'n1', change: 'changed', fields: ['command'] }]);
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n9' } }, 'user')).toEqual({ ok: false, error: 'node n9 does not exist' });
+  });
+
+  it('reverts everything to the baseline, keeping where the steps are', () => {
+    const { store, id } = withGraph([step('n1'), step('n2')], [['n1', 'n2']]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Agent', description: 'why' } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'deleteNode', id: 'n2' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'addNode', node: step('n3') }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 40, y: 40 } }, 'user');
+    store.rename(id, 'Renamed');
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
+    const g = store.get(id);
+    expect(g.name).toBe('Renamed');
+    expect(g.nodes.map((n) => [n.id, n.title, n.description, n.position])).toEqual([
+      ['n1', 'n1', undefined, { x: 40, y: 40 }],
+      ['n2', 'n2', undefined, undefined],
+    ]);
+    expect(g.edges.map((e) => e.id)).toEqual(['n1->n2']);
+    expect(g.nodeSeq).toBe(3);
+    expect(store.agentChanges(id)).toEqual([]);
+    expect(store.baseline(id)).toEqual({ ok: true });
+  });
+
+  it('refuses a revert that would make a cycle, and changes nothing', () => {
+    const { store, id, baselineFile } = withGraph([step('n1'), step('n2')], [['n1', 'n2']]);
+    store.apply(id, { type: 'disconnect', from: 'n1', to: 'n2' }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'connect', from: 'n2', to: 'n1' }, 'user');
+    const before = readFileSync(baselineFile, 'utf8');
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } }, 'user')).toEqual({ ok: false, error: 'the graph has a cycle' });
+    expect(store.get(id).edges.map((e) => e.id)).toEqual(['n2->n1']);
+    expect(readFileSync(baselineFile, 'utf8')).toBe(before);
+  });
+
+  it('emits the change for review ops like any other edit', () => {
+    const { store, id } = withGraph([step('n1')]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    const changed = vi.fn();
+    const op = vi.fn();
+    store.on('changed', changed);
+    store.on('op', op);
+    const accept = { type: 'acceptChange', target: { kind: 'all' } } as const;
+    store.apply(id, accept, 'user');
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(op).toHaveBeenCalledWith(id, accept);
+    expect(store.readOps(id).at(-1)).toMatchObject({ by: 'user', op: accept });
+  });
+
+  it('duplicates without the baseline', () => {
+    const { store, id } = withGraph([step('n1')]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    const copy = store.duplicate(id);
+    if (!copy.ok) throw new Error(copy.error);
+    expect(store.baseline(copy.graph.id)).toEqual({ ok: true });
+    expect(store.agentChanges(copy.graph.id)).toEqual([]);
   });
 });

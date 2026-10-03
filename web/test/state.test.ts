@@ -17,7 +17,7 @@ const run = (id: string, graphId: string, status: RunMeta['status'] = 'running')
 });
 const server = (msg: HostMessage): Action => ({ kind: 'server', msg });
 const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOpened' }>> = {}): Action =>
-  server({ type: 'graphOpened', graph: g, runs: [], variableValues: {}, ...extra });
+  server({ type: 'graphOpened', changes: [], graph: g, runs: [], variableValues: {}, ...extra });
 const apply = (...actions: Action[]): State => actions.reduce(reduce, initialState);
 
 describe('client state', () => {
@@ -40,8 +40,8 @@ describe('client state', () => {
 
   it('applies graph updates only to the open graph', () => {
     const s = apply(opened(graph('a', ['n1', 'n2'])), { kind: 'selectNode', id: 'n2' });
-    expect(reduce(s, server({ type: 'graph', graph: graph('b', ['x']) })).graph?.id).toBe('a');
-    const updated = reduce(s, server({ type: 'graph', graph: graph('a', ['n1']) }));
+    expect(reduce(s, server({ type: 'graph', changes: [], graph: graph('b', ['x']) })).graph?.id).toBe('a');
+    const updated = reduce(s, server({ type: 'graph', changes: [], graph: graph('a', ['n1']) }));
     expect(updated.graph?.nodes).toHaveLength(1);
     expect(updated.selectedNodeId).toBeUndefined();
   });
@@ -111,11 +111,11 @@ describe('client state', () => {
     const open = apply(opened(graph('a')), { kind: 'openConfirm', request: {} }, { kind: 'previewRequested', requestId: 'p1' });
     const shown = reduce(open, server({ type: 'runPreview', preview, requestId: 'p1' }));
     expect(shown.preview).toEqual(preview);
-    expect(reduce(shown, server({ type: 'graph', graph: graph('a', ['n1']) })).preview).toBeUndefined();
+    expect(reduce(shown, server({ type: 'graph', changes: [], graph: graph('a', ['n1']) })).preview).toBeUndefined();
     expect(reduce(shown, server({ type: 'variableValues', graphId: 'a', values: { x: '1' } })).preview).toBeUndefined();
     expect(reduce(shown, server({ type: 'variableValues', graphId: 'b', values: {} })).preview).toEqual(preview);
     const closed = apply(opened(graph('a')));
-    expect(reduce(closed, server({ type: 'graph', graph: graph('a', ['n1']) })).preview).toBeUndefined();
+    expect(reduce(closed, server({ type: 'graph', changes: [], graph: graph('a', ['n1']) })).preview).toBeUndefined();
     expect(reduce(closed, { kind: 'previewRequested', requestId: 'p9' }).previewRequestId).toBe('p9');
     expect(reduce(shown, { kind: 'closeConfirm' }).previewRequestId).toBeUndefined();
   });

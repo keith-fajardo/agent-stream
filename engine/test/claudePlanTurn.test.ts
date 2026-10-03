@@ -58,7 +58,7 @@ async function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
     prompt: 'hi',
     systemAppend: PLANNER_APPEND,
     cwd: paths.root,
-    tools: graphTools({ graphStore, runStore, graphId, requestRun: () => null }),
+    tools: graphTools({ graphStore, runStore, graphId, source: { kind: 'planner', sessionId: 'default' }, requestRun: () => null }),
     gate: createPlannerGate({ projectDir: paths.root, privateFiles: [VALUES_FILE], graphToolNames: new Set(['add_node']) }),
     signal: new AbortController().signal,
     onEvent: (e) => events.push(e),

@@ -15,6 +15,7 @@ function setup() {
     graphStore,
     runStore,
     graphId,
+    source: { kind: 'planner', sessionId: 's' },
     requestRun: (fromNodeId) => {
       runRequests.push(fromNodeId);
       return runError;
@@ -48,6 +49,21 @@ describe('planner graph tools', () => {
   it('describes the tools without naming a model vendor', () => {
     expect(setup().tools.find((t) => t.name === 'add_node')?.description).toContain('runs a separate AI agent');
     for (const t of setup().tools) expect(t.description).not.toMatch(/Claude|Anthropic/);
+  });
+
+  it('records every edit with the source the tools were built for', async () => {
+    const s = setup();
+    await s.call('add_node', { kind: 'command', title: 'Build', command: 'make' });
+    await s.call('add_node', { kind: 'agent', title: 'Check', prompt: 'Check it.', after: ['n1'] });
+    await s.call('update_node', { id: 'n1', command: 'make all' });
+    const ops = s.graphStore.readOps(s.graphId);
+    expect(ops).toHaveLength(4);
+    for (const r of ops) expect(r).toMatchObject({ by: 'agent', source: { kind: 'planner', sessionId: 's' } });
+    expect(s.graphStore.agentChanges(s.graphId).map((c) => c.by)).toEqual([
+      { kind: 'planner', sessionId: 's' },
+      { kind: 'planner', sessionId: 's' },
+      { kind: 'planner', sessionId: 's' },
+    ]);
   });
 
   it('adds agent-authored nodes and wires them after existing ones', async () => {

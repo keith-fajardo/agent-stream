@@ -81,6 +81,8 @@ const nodePatch = z.object({
   timeoutSec: timeoutSec.optional(),
 });
 
+const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
+
 const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addNode'), node: newNode }),
   z.object({ type: z.literal('updateNode'), id: z.string(), patch: nodePatch }),
@@ -94,6 +96,8 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setVariableDescription'), name: z.string(), description: z.string() }),
   z.object({ type: z.literal('deleteVariable'), name: z.string() }),
   z.object({ type: z.literal('moveNode'), id: z.string(), position }),
+  z.object({ type: z.literal('acceptChange'), target: changeTarget }),
+  z.object({ type: z.literal('revertChange'), target: changeTarget }),
 ]);
 
 const refineNodeIds = z.array(z.string()).min(1).max(50);

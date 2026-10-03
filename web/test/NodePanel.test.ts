@@ -16,7 +16,7 @@ const graph: Graph = { ...emptyGraph('g', 'G', 't'), nodes: [step] };
 
 describe('NodePanel draftState', () => {
   it('reports when the draft turns dirty or clean, and clean on unmount', async () => {
-    dispatch({ kind: 'server', msg: { type: 'graphOpened', graph, runs: [], variableValues: {} } });
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph, runs: [], variableValues: {} } });
     dispatch({ kind: 'selectNode', id: 'n1' });
     const el = document.createElement('div');
     const root = createRoot(el);
@@ -39,7 +39,7 @@ describe('NodePanel draftState', () => {
 describe('NodePanel description', () => {
   it('shows the description and saves only it when only it changed', async () => {
     const described: Graph = { ...graph, nodes: [{ ...step, description: 'Plans the work.' }] };
-    dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: described, runs: [], variableValues: {} } });
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: described, runs: [], variableValues: {} } });
     dispatch({ kind: 'selectNode', id: 'n1' });
     vi.mocked(send).mockClear();
     const el = document.createElement('div');
@@ -72,7 +72,7 @@ describe('NodePanel Refine with planner', () => {
       msg: { type: 'hello', status: ok ? { provider: 'claude', ok, label: 'Claude Max' } : { provider: 'claude', ok, label: 'not signed in', error: 'x' }, project: '/p', graphs: [], approvals: [] },
     });
   async function mount(node: Graph['nodes'][number]) {
-    dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: { ...graph, nodes: [node] }, runs: [], variableValues: {} } });
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: { ...graph, nodes: [node] }, runs: [], variableValues: {} } });
     dispatch({ kind: 'selectNode', id: node.id });
     vi.mocked(send).mockClear();
     vi.mocked(post).mockClear();

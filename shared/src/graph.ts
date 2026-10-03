@@ -147,6 +147,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
       return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? { ...n, position: op.position } : n)) });
     }
+    case 'acceptChange':
+    case 'revertChange':
+      return fail('acceptChange and revertChange are applied by the graph store');
   }
 }
 

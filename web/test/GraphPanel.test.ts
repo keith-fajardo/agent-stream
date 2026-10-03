@@ -15,7 +15,7 @@ const { TopBar } = await import('../src/components/TopBar');
 Element.prototype.scrollIntoView = vi.fn() as unknown as Element['scrollIntoView'];
 
 const graph = (patch: Partial<Graph> = {}): Graph => ({ ...emptyGraph('g', 'G', 't'), goal: 'Prove parity', instructions: 'Use dev', ...patch });
-const open = (g: Graph) => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, runs: [], variableValues: {} } });
+const open = (g: Graph) => dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: g, runs: [], variableValues: {} } });
 /** Sets a controlled field's value the way React notices. */
 function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -50,7 +50,7 @@ describe('GraphPanel', () => {
 
   it('offers to discard your edits when someone else changes a field meanwhile', async () => {
     await act(async () => typeInto(container.querySelector('input[aria-label="Goal"]') as HTMLInputElement, 'Mine'));
-    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: graph({ instructions: 'Planner text', updatedAt: 't2' }) } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: graph({ instructions: 'Planner text', updatedAt: 't2' }) } }));
     expect(container.textContent).toContain('The goal or instructions changed since you started editing; saving overwrites those changes.');
     await act(async () => button('Discard my edits').click());
     expect((container.querySelector('input[aria-label="Goal"]') as HTMLInputElement).value).toBe('Prove parity');
@@ -72,7 +72,7 @@ describe('TopBar run picker', () => {
   it('names the provider of each run', async () => {
     dispatch({
       kind: 'server',
-      msg: { type: 'graphOpened', graph: graph(), runs: [{ id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', provider: 'claude' }, { id: 'r2', graphId: 'g', status: 'failed', startedAt: 't' }], variableValues: {} },
+      msg: { type: 'graphOpened', changes: [], graph: graph(), runs: [{ id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', provider: 'claude' }, { id: 'r2', graphId: 'g', status: 'failed', startedAt: 't' }], variableValues: {} },
     });
     const c = document.createElement('div');
     const r = createRoot(c);

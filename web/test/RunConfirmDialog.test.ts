@@ -34,7 +34,7 @@ const button = (label: string) => [...container.querySelectorAll('button')].find
 beforeEach(async () => {
   vi.mocked(send).mockClear();
   dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
-  dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: emptyGraph('g', 'G', 't'), runs: [], variableValues: {} } });
+  dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: emptyGraph('g', 'G', 't'), runs: [], variableValues: {} } });
   container = document.createElement('div');
   root = createRoot(container);
   await act(async () => root.render(createElement(RunConfirmDialog)));
@@ -107,7 +107,7 @@ describe('RunConfirmDialog', () => {
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));
     expect(button('Start run').disabled).toBe(false);
     const first = lastRequestId();
-    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: emptyGraph('g', 'G2', 't') } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: emptyGraph('g', 'G2', 't') } }));
     expect(container.textContent).toContain('Checking the run…');
     expect(button('Start run').disabled).toBe(true);
     expect(lastRequestId()).not.toBe(first);

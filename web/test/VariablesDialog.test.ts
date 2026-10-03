@@ -28,7 +28,7 @@ async function openDialog(request: { focus?: string; addRow?: boolean } = {}) {
 beforeEach(async () => {
   vi.mocked(send).mockClear();
   dispatch({ kind: 'closeVariables' });
-  dispatch({ kind: 'server', msg: { type: 'graphOpened', graph, runs: [], variableValues: { schema: 'dev' } } });
+  dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph, runs: [], variableValues: { schema: 'dev' } } });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -94,7 +94,7 @@ describe('VariablesDialog', () => {
   describe('save safety', () => {
     const two: Graph = { ...graph, variables: [{ name: 'a', description: '' }, { name: 'b', description: '' }] };
     const reopen = async (g: Graph, values: Record<string, string> = {}) => {
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, runs: [], variableValues: values } }));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: g, runs: [], variableValues: values } }));
     };
     const ambiguity = (n: string) => `Another variable is called "${n}" until you save. Rename that one first, then save again.`;
 
@@ -145,7 +145,7 @@ describe('VariablesDialog', () => {
     const plannerEdit = async () => {
       await openDialog();
       const changed: Graph = { ...graph, variables: [{ name: 'schema', description: 'Planner text' }] };
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: changed } }));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: changed } }));
     };
 
     it('warns when the variables change while open and saves nothing untouched', async () => {
@@ -164,7 +164,7 @@ describe('VariablesDialog', () => {
 
     it('sends nothing for a row the planner deleted meanwhile', async () => {
       await openDialog();
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: { ...graph, variables: [] } } }));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...graph, variables: [] } } }));
       await act(async () => typeInto(inputs('Value')[0], 'prod'));
       await act(async () => button('Save').click());
       expect(vi.mocked(send).mock.calls).toEqual([]);
