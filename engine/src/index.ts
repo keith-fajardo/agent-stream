@@ -13,3 +13,17 @@ export type { NodeOutcome } from './executors';
 export { GIT_MISSING, inspectCheckout, NOT_A_REPO, realGit, realOrResolved, type GitExec, type GitResult } from './git';
 export { createWriteLeases, leaseKey, type LeaseResult, type WriteLeases } from './writeLease';
 export { createVariantWorkspaces, pruneWorkspaces, removeWorkspace, variantPath } from './variantWorkspaces';
+export {
+  checkSetup,
+  createWorktrees,
+  MAX_TICKETS,
+  planWorktrees,
+  realWorktreeFs,
+  ticketSlug,
+  ticketSlugs,
+  worktreeAddArgs,
+  type SetupCheck,
+  type WorktreeFs,
+  type WorktreeItem,
+  type WorktreePlan,
+} from './worktrees';
