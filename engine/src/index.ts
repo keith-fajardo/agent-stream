@@ -9,7 +9,12 @@ export type { AgentProvider, GraphTool, PlannerTurn, PlannerTurnResult } from '.
 export { legacyValuesFileFor, valuesFileFor } from './variableValues';
 export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found } from './platform';
 export { envLookup } from './runPreview';
-export type { NodeOutcome } from './executors';
+export type { NodeContext, NodeOutcome } from './executors';
+export { createRunShell, type RunShell, type RunShellResult } from './shell';
+export { ChatModelError, type ChatMessage, type ChatModel, type ChatModelErrorCode, type ChatPart, type ToolSpec } from './agentLoop/chatModel';
+export { builtinTools, type LoopTool, type ToolOutput } from './agentLoop/tools';
+export { toLoopTools } from './agentLoop/graphLoopTools';
+export { lastAssistantText, runAgentLoop, type LoopOptions, type LoopResult } from './agentLoop/loop';
 export { ALTERNATIVES_RULE, PARALLEL_POLICY, SERIALIZATION_GUIDANCE } from './policy';
 export { GIT_MISSING, inspectCheckout, NOT_A_REPO, realGit, realOrResolved, type GitExec, type GitResult } from './git';
 export { createWriteLeases, leaseKey, type LeaseBlock, type LeaseResult, type WriteLeases } from './writeLease';

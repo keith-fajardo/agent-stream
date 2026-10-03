@@ -8,6 +8,8 @@ import { ensureDataDirs, projectPaths, type ProjectPaths } from '../src/paths';
 import type { GitExec, GitResult, WorktreeEntry } from '../src/git';
 import type { CheckoutSource } from '../src/plannerTools';
 import type { AgentProvider } from '../src/providers/types';
+import type { ChatMessage, ChatModel, ChatPart, ToolSpec } from '../src/agentLoop/chatModel';
+import { withDecide, type ToolGate } from '../src/providers/toolGate';
 import { createWriteLeases, type WriteLeases } from '../src/writeLease';
 
 /** A found Git Bash, so command steps aren't refused on Windows (ignored elsewhere). */
@@ -102,3 +104,37 @@ export function appTestDeps() {
 
 /** A planner checkout source for a folder outside Git. */
 export const outsideGit = (root: string): CheckoutSource => async () => ({ info: { git: false, root, reason: 'Not a Git repository' } });
+
+/** What a fake model answers to one request: its parts, an error to throw, or a function of the request. */
+export type FakeReply = ChatPart[] | Error | ((messages: ChatMessage[], tools: ToolSpec[], signal: AbortSignal) => ChatPart[] | Promise<ChatPart[]>);
+
+/** A ChatModel that answers from `replies` in order and records every request. No real model. */
+export function fakeChatModel(replies: FakeReply[], o: { maxInputTokens?: number } = {}) {
+  const requests: { messages: ChatMessage[]; tools: ToolSpec[] }[] = [];
+  const model: ChatModel = {
+    id: 'fake-model',
+    maxInputTokens: o.maxInputTokens ?? 100_000,
+    async *send(messages, tools, signal) {
+      requests.push({ messages: structuredClone(messages), tools });
+      const reply = replies.shift();
+      if (reply === undefined) throw new Error('fakeChatModel: no reply left');
+      if (reply instanceof Error) throw reply;
+      const parts = typeof reply === 'function' ? await reply(messages, tools, signal) : reply;
+      for (const part of parts) {
+        signal.throwIfAborted();
+        yield part;
+      }
+    },
+  };
+  return { model, requests };
+}
+
+export const textPart = (text: string): ChatPart => ({ type: 'text', text });
+export const toolCallPart = (callId: string, name: string, input: unknown): ChatPart => ({ type: 'toolCall', callId, name, input });
+export const userText = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
+
+/** A gate that allows everything without asking. */
+export const allowAll: ToolGate = withDecide({ privacy: () => null, isReadOnly: () => true, approve: async () => ({ allow: true, by: 'user' }) });
+
+/** Settles only when `signal` aborts, rejecting with its reason: a request or tool that runs until Stop. */
+export const untilAborted = (signal: AbortSignal) => new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
