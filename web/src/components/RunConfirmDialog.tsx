@@ -82,6 +82,7 @@ export function RunConfirmDialog() {
     <div className="modal-backdrop" onClick={close}>
       <div className="modal" role="dialog" aria-label="Run confirmation" onClick={(e) => e.stopPropagation()}>
         <h2>{confirm.requestedBy === 'planner' ? 'The planner asks to run this graph' : confirm.fromNodeId ? `Re-run from ${confirm.fromNodeId}` : 'Run workflow'}</h2>
+        {confirm.requestedBy === 'planner' && confirm.fromNodeId && <p className="muted">Re-run from {confirm.fromNodeId}</p>}
         {!preview ? (
           <p className="muted">Checking the run…</p>
         ) : (

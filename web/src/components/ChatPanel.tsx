@@ -9,6 +9,15 @@ export function ChatPanel() {
   const status = useStore((s) => s.status);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const wasBusy = useRef(busy);
+  // Busy: focus Stop so Esc and Enter work right after a mouse-clicked Send. Idle again: back to the message box.
+  useEffect(() => {
+    if (busy) stopButton.current?.focus();
+    else if (wasBusy.current) box.current?.focus();
+    wasBusy.current = busy;
+  }, [busy]);
   // Block body on purpose: Chrome 154+ returns a Promise from scrollIntoView(), and an
   // effect must not return anything but a cleanup function.
   useEffect(() => {
@@ -29,7 +38,7 @@ export function ChatPanel() {
     <div
       className="chat"
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && busy) {
+        if (e.key === 'Escape' && busy && !e.nativeEvent.isComposing && e.keyCode !== 229) {
           e.preventDefault();
           stop();
         }
@@ -49,6 +58,7 @@ export function ChatPanel() {
       </div>
       <div className="chat-input">
         <textarea
+          ref={box}
           value={text}
           disabled={!canType}
           placeholder={canType ? 'Ask the planner… (Enter to send, Shift+Enter for a new line)' : status?.error ?? 'Chat is unavailable.'}
@@ -61,7 +71,7 @@ export function ChatPanel() {
           }}
         />
         {busy ? (
-          <button aria-label="Stop the planner" title="Stop the planner (Esc)" disabled={!target} onClick={stop}>
+          <button ref={stopButton} aria-label="Stop the planner" title="Stop the planner (Esc)" disabled={!target} onClick={stop}>
             ■ Stop
           </button>
         ) : (

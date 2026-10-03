@@ -60,6 +60,14 @@ describe('RunConfirmDialog', () => {
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'startRun' }));
   });
 
+  it('names the step a planner-requested run starts from, under the heading', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: { fromNodeId: 'n2', sourceRunId: 'r1', requestedBy: 'planner' } }));
+    const h2 = container.querySelector('h2')!;
+    expect(h2.textContent).toBe('The planner asks to run this graph');
+    expect(h2.nextElementSibling?.textContent).toBe('Re-run from n2');
+    expect(h2.nextElementSibling?.className).toContain('muted');
+  });
+
   it('keeps the usual heading and Cancel for a run the user opened', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
     expect(container.querySelector('h2')?.textContent).toBe('Run workflow');

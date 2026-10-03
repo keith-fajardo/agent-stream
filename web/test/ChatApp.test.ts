@@ -64,6 +64,7 @@ describe('ChatApp', () => {
   describe('Stop', () => {
     const open = async (busy: boolean) => {
       const el = await render();
+      document.body.append(el);
       await act(async () => {
         dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
         dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
@@ -72,7 +73,7 @@ describe('ChatApp', () => {
       return el;
     };
     const stopButton = (el: HTMLElement) => el.querySelector('button[aria-label="Stop the planner"]') as HTMLButtonElement | null;
-    const sendButton = (el: HTMLElement) => [...el.querySelectorAll('.chat-input button')].find((b) => b.textContent === 'Send');
+    const sendButton = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('.chat-input button')].find((b) => b.textContent === 'Send');
     const type = async (el: HTMLElement, value: string) => {
       const box = el.querySelector('textarea')!;
       await act(async () => {
@@ -103,6 +104,24 @@ describe('ChatApp', () => {
       await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
       expect(posted).toEqual([stop]);
       expect(box.value).toBe('next idea');
+    });
+
+    it('moves focus to Stop when the planner becomes busy and back to the message box when it stops', async () => {
+      const el = await open(false);
+      const box = el.querySelector('textarea')!;
+      await act(async () => sendButton(el)!.focus());
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: true } }));
+      expect(document.activeElement).toBe(stopButton(el));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: false } }));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it('does not stop the planner on Escape during an IME composition', async () => {
+      const el = await open(true);
+      const box = await type(el, 'にほん');
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })));
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true })));
+      expect(posted).toEqual([]);
     });
 
     it('does nothing on Escape while idle and keeps the typed text', async () => {
