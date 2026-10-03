@@ -55,3 +55,79 @@ export const commands = { executeCommand: vi.fn() };
 export const workspace = { getConfiguration: vi.fn(() => ({ get: <T>(_key: string, fallback: T) => fallback })) };
 export const lm = { selectChatModels: vi.fn() };
 export enum ConfigurationTarget { Global = 1, Workspace = 2, WorkspaceFolder = 3 }
+export enum LanguageModelChatMessageRole {
+  User = 1,
+  Assistant = 2,
+}
+export class LanguageModelTextPart {
+  constructor(public value: string) {}
+}
+export class LanguageModelToolCallPart {
+  constructor(
+    public callId: string,
+    public name: string,
+    public input: object,
+  ) {}
+}
+export class LanguageModelToolResultPart {
+  constructor(
+    public callId: string,
+    public content: unknown[],
+  ) {}
+}
+export class LanguageModelDataPart {
+  constructor(
+    public data: Uint8Array,
+    public mimeType: string,
+  ) {}
+}
+export class LanguageModelChatMessage {
+  constructor(
+    public role: LanguageModelChatMessageRole,
+    public content: unknown[] | string,
+    public name?: string,
+  ) {}
+  static User(content: unknown[] | string, name?: string) {
+    return new LanguageModelChatMessage(LanguageModelChatMessageRole.User, content, name);
+  }
+  static Assistant(content: unknown[] | string, name?: string) {
+    return new LanguageModelChatMessage(LanguageModelChatMessageRole.Assistant, content, name);
+  }
+}
+/** As in VS Code: `code` is the factory's name ('NoPermissions', 'Blocked', 'NotFound'). */
+export class LanguageModelError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = 'LanguageModelError';
+  }
+  static NoPermissions(message = '') {
+    return new LanguageModelError(message, 'NoPermissions');
+  }
+  static Blocked(message = '') {
+    return new LanguageModelError(message, 'Blocked');
+  }
+  static NotFound(message = '') {
+    return new LanguageModelError(message, 'NotFound');
+  }
+}
+export class CancellationTokenSource {
+  private listeners: (() => void)[] = [];
+  readonly token = {
+    isCancellationRequested: false,
+    onCancellationRequested: (listener: () => void) => {
+      this.listeners.push(listener);
+      return { dispose: () => {} };
+    },
+  };
+  cancel(): void {
+    if (this.token.isCancellationRequested) return;
+    this.token.isCancellationRequested = true;
+    for (const l of this.listeners) l();
+  }
+  dispose(): void {
+    this.listeners = [];
+  }
+}
