@@ -149,17 +149,21 @@ describe('Planner', () => {
     expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people');
   });
 
-  it('tells the planner to decompose a plan into one node per step or scenario', () => {
+  it('tells the planner to decompose a plan and order steps by their dependencies', () => {
     const graphTools = PLANNER_APPEND.indexOf('- Build and change plans only through the graph tools');
     expect(graphTools).toBeGreaterThanOrEqual(0);
     for (const line of [
       '- Decompose. When asked for a plan, create one node per distinct step or scenario — for example setup, each test scenario, each check, and a summary — connected by edges in the order they must run. Never put a whole multi-step plan into a single node\'s prompt.',
-      '- Let independent scenarios run in parallel: give them no edges between each other. Mark steps that only read, query or compare as read-only (access: read) so they can run side by side.',
+      "- Work out dependencies before adding edges. For each step, list what it needs before it starts and what it changes or produces: files, code, build outputs, database or warehouse objects, services, environment, settings, accounts, test data. Connect step A → B when B uses something A produces (its output, a file, a build, a record); when B checks or relies on a state A creates or changes; when A and B change the same thing, so running them together could interfere; or when the result depends on their order, such as test cases where each starts from the state the previous one left.",
+      "- Run steps in parallel (no edges between them) only when none of that applies: each starts from its own state and doesn't touch what the others read or change. When unsure, run them in sequence and say why in one chat line.",
+      "- Test plans are often stateful sequences, for example create → update → delete; migrate → verify; deploy → smoke test; table absent → first run → new row → changed row.",
+      "- Mark steps that only read, query or compare as read-only (access: read). That only lets them run alongside file-changing steps in the same workspace; edges still decide their order.",
       "- If the project doesn't contain what the user names (for example no such model yet), still build the full graph: add a first step that locates or creates it, and say in one chat line what is missing.",
     ]) {
       expect(PLANNER_APPEND).toContain(line);
       expect(PLANNER_APPEND.indexOf(line)).toBeGreaterThan(graphTools);
     }
+    expect(PLANNER_APPEND).not.toContain('Let independent scenarios run in parallel');
   });
 
   it('calls request_run only when the user asks for a run', () => {
