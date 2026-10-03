@@ -54,9 +54,27 @@ function readLock(file: string): LockRead {
   }
 }
 
-export function createWriteLeases(o: { locksDir: string; pid?: number; isAlive?: (pid: number) => boolean; clock?: () => string }): WriteLeases {
+export function createWriteLeases(o: {
+  locksDir: string;
+  pid?: number;
+  isAlive?: (pid: number) => boolean;
+  clock?: () => string;
+  /** For tests: deletes a lock file. Default `rmSync(file, { force: true })`, which Windows can refuse (EPERM/EBUSY). */
+  removeFile?: (file: string) => void;
+}): WriteLeases {
   const pid = o.pid ?? process.pid;
   const isAlive = o.isAlive ?? processAlive;
+  const removeFile = o.removeFile ?? ((file: string) => rmSync(file, { force: true }));
+  /** Deletes a lock file; false (logged) when the file system refuses. */
+  const tryRemove = (file: string): boolean => {
+    try {
+      removeFile(file);
+      return true;
+    } catch (e) {
+      console.error('[agent-stream] could not delete the lock file', file, e);
+      return false;
+    }
+  };
   /** The leases this process holds, by checkout root. */
   const held = new Map<string, LeaseHolder>();
   /** A Set keeps subscription order: waiting runs acquire in the order they started (ruling R5). */
@@ -85,7 +103,8 @@ export function createWriteLeases(o: { locksDir: string; pid?: number; isAlive?:
         if (lock.kind === 'none') continue;
         if (lock.kind === 'unreadable') return { ok: false, holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: file };
         if (!stale(lock.holder, root)) return { ok: false, holder: lock.holder, otherWindow: lock.holder.pid !== pid };
-        rmSync(file, { force: true });
+        // Fail closed, naming the file, when a stale lock can't be deleted (a Windows file lock).
+        if (!tryRemove(file)) return { ok: false, holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: file };
       }
       return { ok: false, holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: file };
     },
@@ -96,7 +115,8 @@ export function createWriteLeases(o: { locksDir: string; pid?: number; isAlive?:
       held.delete(root);
       const file = leaseFile(o.locksDir, root);
       const lock = readLock(file);
-      if (lock.kind === 'held' && lock.holder.runId === runId && lock.holder.pid === pid) rmSync(file, { force: true });
+      // A lock file left behind is stale (this pid, no active run): the next acquire reclaims it.
+      if (lock.kind === 'held' && lock.holder.runId === runId && lock.holder.pid === pid) tryRemove(file);
       for (const listener of [...listeners]) {
         try {
           listener(root);

@@ -96,3 +96,19 @@ Full output: .agent-stream/runs/r/nodes/n2/output.md
     expect(buildNodePrompt(g, node('n1', 'agent', { title: 'Plan', prompt: 'Plan it.' }), [])).not.toContain('Instructions');
   });
 });
+
+describe('buildNodePrompt and workspaces', () => {
+  it("names the workspace a step works in, and earlier results' workspaces in their headings", () => {
+    const n1 = node('n1', 'command', { title: 'Run wh_small', command: 'dbt build', workspace: 'wh_small' });
+    const n2 = node('n2', 'agent', { title: 'Check', prompt: 'Check it.', workspace: 'wh_small' });
+    const text = buildNodePrompt(graph(''), n2, [{ node: n1, state: { status: 'succeeded', exitCode: 0, durationMs: 312_400 }, output: 'ok', outputPath: 'out.md' }], {
+      path: '/wt/wh_small',
+      head: 'abcdef0123456789',
+    });
+    expect(text).toContain('# Your step: Check\nYou are working in workspace "wh_small" at /wt/wh_small: a separate Git worktree of this repository at abcdef0. Change files only there.\nCheck it.');
+    expect(text).toContain('## n1 · Run wh_small (command `dbt build`, exit 0, 312.4 s, workspace wh_small)');
+    const later = buildNodePrompt(graph(''), node('n3', 'agent', { prompt: 'x' }), [{ node: n2, state: { status: 'succeeded' }, output: 'o', outputPath: 'p' }]);
+    expect(later).toContain('## n2 · Check (agent, succeeded, workspace wh_small)');
+    expect(later).not.toContain('You are working in workspace');
+  });
+});

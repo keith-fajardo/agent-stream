@@ -33,6 +33,8 @@ export type StepGateOptions = {
   emit: (event: NodeEventBody) => void;
   /** Tool names that ask the user themselves (the step's graph tools, as the provider names them). */
   selfApproving?: ReadonlySet<string>;
+  /** The folder whose .agent-stream/runs hold this run's records, when the step works elsewhere (a variant worktree, ruling R18). */
+  runsRoot?: string;
 };
 
 /** Why a step's request was not approved, as the agent is told. */
@@ -105,7 +107,9 @@ export function createStepGate(o: StepGateOptions): ToolGate {
     }
   }
   return withDecide({
-    privacy: (toolName, input) => privatePathDenial(o.projectDir, toolName, input, o.privateFiles),
+    privacy: (toolName, input) =>
+      privatePathDenial(o.projectDir, toolName, input, o.privateFiles) ??
+      (o.runsRoot && o.runsRoot !== o.projectDir ? privatePathDenial(o.runsRoot, toolName, input) : null),
     isReadOnly: (toolName) => READ_ONLY_TOOLS.has(toolName),
     isSelfApproving: (toolName) => o.selfApproving?.has(toolName) ?? false,
     async approve(toolName, input, signal) {

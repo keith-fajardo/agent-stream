@@ -129,6 +129,7 @@ export function createApp(d: AppDeps) {
           nodeId: ctx.node.id,
           nodeTitle: ctx.node.title,
           projectDir: ctx.cwd,
+          runsRoot: d.projectDir,
           privateFiles: privateFiles(),
           signal: ctx.signal,
           emit: ctx.emit,

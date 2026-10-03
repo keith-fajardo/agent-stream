@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import {
   edgeId,
   isWriteCapable,
@@ -67,6 +68,8 @@ export type StartRunInput = {
   sequential?: boolean;
   /** The checkout the app inspected (ruling R4): recorded in RunMeta.checkout, and its root keys the lease. Default: projectDir. */
   checkout?: CheckoutInfo;
+  /** The variant workspaces the app created for this run, by name (spec §4.3a). */
+  workspaces?: Record<string, { path: string; head: string }>;
 };
 /** An approved change a step agent makes to its run: a new step with its connections, or new text for a step that hasn't started. */
 export type RunChange =
@@ -92,6 +95,8 @@ type ActiveRun = {
   holdsLease: boolean;
   /** Set while the run waits for the lease: unsubscribes and stops retrying. */
   stopWaiting?: () => void;
+  /** This run's variant worktrees, by name. */
+  workspaces: Record<string, { path: string; head: string }>;
 };
 
 const DONE_OK: ReadonlySet<NodeStatus> = new Set(['succeeded', 'reused']);
@@ -128,11 +133,17 @@ export class Runner extends EventEmitter {
     const problems = validateRunnable(graph);
     if (problems.length) return { ok: false, error: problems.join('\n') };
     if (this.activeFor(graph.id)) return { ok: false, error: 'A run is already in progress for this graph.' };
+    // Its run.json and its variant worktree paths are keyed by the id: two active runs must never share one.
+    if (input.runId !== undefined && this.runs.has(input.runId)) return { ok: false, error: `Run ${input.runId} is already in progress.` };
     if (input.fromNodeId && !graph.nodes.some((n) => n.id === input.fromNodeId)) {
       return { ok: false, error: `node ${input.fromNodeId} does not exist` };
     }
     for (const n of graph.nodes) {
       if (input.rendered.nodes[n.id] === undefined) return { ok: false, error: `The run has no reviewed text for step ${n.id}.` };
+    }
+    for (const n of graph.nodes) {
+      const ws = workspaceOf(n);
+      if (ws !== null && !input.workspaces?.[ws]) return { ok: false, error: `Step ${n.id} uses workspace "${ws}", but this run has no worktree for it.` };
     }
     let source: RunMeta | undefined;
     if (input.sourceRunId) {
@@ -175,6 +186,7 @@ export class Runner extends EventEmitter {
       ...(input.provider && { provider: input.provider }),
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
+      ...(input.workspaces && Object.keys(input.workspaces).length > 0 && { workspaces: structuredClone(input.workspaces) }),
     };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
@@ -186,7 +198,7 @@ export class Runner extends EventEmitter {
       this.deps.runStore.create(meta);
       if (source) for (const id of reuse) this.deps.runStore.copyOutput(source.id, meta.id, id);
     } catch (e) {
-      if (holdsLease) this.deps.leases.release(leaseRoot, runId);
+      if (holdsLease) this.releaseLease(leaseRoot, runId);
       throw e;
     }
 
@@ -203,6 +215,7 @@ export class Runner extends EventEmitter {
       resolveDone,
       leaseRoot,
       holdsLease,
+      workspaces: input.workspaces ?? {},
     };
     this.runs.set(meta.id, run);
     if (waitFor) this.waitForLease(run, waitFor.otherWindow);
@@ -281,8 +294,17 @@ export class Runner extends EventEmitter {
     for (const run of this.runs.values()) {
       if (run.holdsLease) {
         run.holdsLease = false;
-        this.deps.leases.release(run.leaseRoot, run.meta.id);
+        this.releaseLease(run.leaseRoot, run.meta.id);
       }
+    }
+  }
+
+  /** A lock file Windows won't let go of (EPERM/EBUSY) must never leave a run unfinished or break shutdown. */
+  private releaseLease(root: string, runId: string): void {
+    try {
+      this.deps.leases.release(root, runId);
+    } catch (e) {
+      console.error('[agent-stream] could not release the write lease of run', runId, e);
     }
   }
 
@@ -401,22 +423,30 @@ export class Runner extends EventEmitter {
     const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
     Promise.resolve()
       .then(() => {
+        const workspace = workspaceOf(node);
+        const place = workspace === null ? undefined : run.workspaces[workspace];
+        if (workspace !== null && !place) throw new Error(`Step ${nodeId} uses workspace "${workspace}", but this run has no worktree for it.`);
         // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.
-        const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => ({
-          node: executionNode(meta, parentId),
-          state: meta.nodes[parentId],
-          output: this.deps.runStore.readOutput(meta.id, parentId),
-          outputPath: this.deps.runStore.outputRelPath(meta.id, parentId),
-        }));
+        const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => {
+          const rel = this.deps.runStore.outputRelPath(meta.id, parentId);
+          return {
+            node: executionNode(meta, parentId),
+            state: meta.nodes[parentId],
+            output: this.deps.runStore.readOutput(meta.id, parentId),
+            // Relative to the folder; a step working in a worktree needs the full path (Review Focus 3).
+            outputPath: place ? join(this.deps.projectDir, rel) : rel,
+          };
+        });
         const graph = meta.rendered ? { ...meta.snapshot, goal: meta.rendered.goal, instructions: meta.rendered.instructions } : meta.snapshot;
         const execNode = executionNode(meta, nodeId);
-        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, execNode, upstreamResults) : '';
+        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, execNode, upstreamResults, place) : '';
         return executor({
           runId: meta.id,
           graph,
           node: execNode,
           prompt,
-          cwd: this.deps.projectDir,
+          // Agents get the variant path as their working directory; commands run there (spec §4.3a).
+          cwd: place?.path ?? this.deps.projectDir,
           signal: controller.signal,
           emit: (event) => this.emitEvent(run, nodeId, event),
         });
@@ -500,7 +530,7 @@ export class Runner extends EventEmitter {
     // Released at any final status (spec §4.3): waiting runs hear it through onRelease.
     if (run.holdsLease) {
       run.holdsLease = false;
-      this.deps.leases.release(run.leaseRoot, run.meta.id);
+      this.releaseLease(run.leaseRoot, run.meta.id);
     }
     this.safeEmit('run', run.meta);
     run.resolveDone(run.meta);

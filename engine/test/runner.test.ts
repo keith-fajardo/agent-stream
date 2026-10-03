@@ -306,6 +306,32 @@ describe('Runner when the filesystem or a listener fails', () => {
     expect(done.nodes.n2.status).toBe('not_run');
   });
 
+  it('finishes the run when releasing its lease throws (a Windows file lock)', { timeout: 2000 }, async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const leases: WriteLeases = { ...testLeases(), release: () => { throw Object.assign(new Error('EPERM: operation not permitted, unlink'), { code: 'EPERM' }); } };
+    const { runner, fake } = setup(3, leases);
+    const emitted: string[] = [];
+    runner.on('run', (m: { status: string }) => emitted.push(m.status));
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
+    await tick();
+    fake.finish('n1');
+    expect((await r.done).status).toBe('succeeded');
+    expect(emitted.at(-1)).toBe('succeeded');
+    expect(runner.get(r.run.id)).toBeUndefined();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[agent-stream]'), r.run.id, expect.any(Error));
+  });
+
+  it('dispose carries on when releasing a lease throws', { timeout: 2000 }, async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const leases: WriteLeases = { ...testLeases(), release: () => { throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY' }); } };
+    const { runner } = setup(3, leases);
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
+    await tick();
+    expect(() => runner.dispose()).not.toThrow();
+    expect((await r.done).status).toBe('cancelled');
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[agent-stream]'), r.run.id, expect.any(Error));
+  });
+
   it('runs and records the rendered text instead of the templates', async () => {
     const { runner, fake, runStore } = setup();
     const g = graphOf([{ type: 'addNode', node: { title: 'build', kind: 'command', command: 'dbt build -s {{ model }}' } }, agent('check'), link('n1', 'n2')]);
@@ -596,10 +622,150 @@ describe('Runner write leases', () => {
     expect(stopped.nodes.n1.status).toBe('cancelled');
   });
 
+  it('refuses a run id that is already an active run, creating nothing', async () => {
+    const { runner, runStore } = setup();
+    const id = '20261003-120000-beef';
+    const first = started(runner.start({ ...withRendered(g(reader('a'))), runId: id }));
+    const other = { ...g(reader('b')), id: 'h' };
+    expect(runner.start({ ...withRendered(other), runId: id })).toEqual({ ok: false, error: `Run ${id} is already in progress.` });
+    expect(runStore.list('h')).toEqual([]);
+    expect(runStore.get(id)?.graphId).toBe('g');
+    await tick();
+    runner.stop(id);
+    expect((await first.done).status).toBe('cancelled');
+  });
+
   it('uses the run id it is given', () => {
     const { runner } = setup();
     const r = started(runner.start({ ...withRendered(g(reader('a'))), runId: '20261003-120000-abcd' }));
     expect(r.run.id).toBe('20261003-120000-abcd');
     runner.stop(r.run.id);
+  });
+});
+
+describe('Runner variant workspaces', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const checkout: CheckoutInfo = { git: false, root: join(tmpdir(), 'agent-stream-checkout'), reason: 'Not a Git repository' };
+  const inWs = (title: string, workspace: string, kind: 'agent' | 'command' = 'agent'): Op => ({
+    type: 'addNode',
+    node: kind === 'agent' ? { title, kind, prompt: `do ${title}`, workspace } : { title, kind, command: `run ${title}`, workspace },
+  });
+  const places = (...names: string[]) => Object.fromEntries(names.map((n) => [n, { path: mkdtempSync(join(tmpdir(), `agent-stream-ws-${n}-`)), head: SHA }]));
+
+  it('runs a step that has a workspace there, with absolute paths to earlier outputs (Review Focus 3)', async () => {
+    const { runner, fake, projectDir } = setup();
+    const workspaces = places('wh_a');
+    const r = started(runner.start({ ...withRendered(graphOf([agent('a'), inWs('b', 'wh_a'), link('n1', 'n2')])), workspaces }));
+    expect(r.run.workspaces).toEqual(workspaces);
+    await tick();
+    expect(fake.contexts.get('n1')!.cwd).toBe(projectDir);
+    fake.finish('n1');
+    await tick();
+    const ctx = fake.contexts.get('n2')!;
+    expect(ctx.cwd).toBe(workspaces.wh_a.path);
+    expect(ctx.prompt).toContain(`Full output: ${join(projectDir, '.agent-stream', 'runs', r.run.id, 'nodes', 'n1', 'output.md')}`);
+    expect(ctx.prompt).toContain(`You are working in workspace "wh_a" at ${workspaces.wh_a.path}: a separate Git worktree of this repository at 0123456. Change files only there.`);
+    fake.finish('n2');
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('runs write-capable steps of different workspaces in parallel, one at a time within each', async () => {
+    const { runner, fake } = setup(6);
+    const workspaces = places('wh_a', 'wh_b');
+    const readerInA: Op = { type: 'addNode', node: { title: 'd', kind: 'agent', prompt: 'do d', access: 'read', workspace: 'wh_a' } };
+    const r = started(runner.start({ ...withRendered(graphOf([inWs('a1', 'wh_a'), inWs('a2', 'wh_a', 'command'), inWs('b1', 'wh_b'), agent('c'), readerInA])), workspaces }));
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n4', 'n5']);
+    expect(fake.contexts.get('n5')!.cwd).toBe(workspaces.wh_a.path);
+    fake.finish('n1');
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n4', 'n5', 'n2']);
+    for (const id of ['n2', 'n3', 'n4', 'n5']) fake.finish(id);
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('two write-capable steps in workspace x take turns while one in workspace y runs alongside them', async () => {
+    const { runner, fake } = setup(3);
+    const workspaces = places('x', 'y');
+    const r = started(runner.start({ ...withRendered(graphOf([inWs('x1', 'x'), inWs('x2', 'x', 'command'), inWs('y1', 'y')])), workspaces }));
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3']);
+    expect(fake.contexts.get('n1')!.cwd).toBe(workspaces.x.path);
+    expect(fake.contexts.get('n3')!.cwd).toBe(workspaces.y.path);
+    fake.finish('n1');
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n2']);
+    expect(fake.contexts.get('n2')!.cwd).toBe(workspaces.x.path);
+    expect(runner.get(r.run.id)!.nodes.n3.status).toBe('running');
+    fake.finish('n2');
+    fake.finish('n3');
+    expect((await r.done).status).toBe('succeeded');
+    expect(fake.maxActive).toBe(2);
+  });
+
+  it('needs no lease when its write-capable steps are all in variant workspaces', async () => {
+    const leases = testLeases();
+    const holder = setup(3, leases);
+    const other = setup(3, leases);
+    const first = started(holder.runner.start({ ...withRendered(graphOf([agent('a')])), checkout }));
+    const r = started(other.runner.start({ ...withRendered(graphOf([inWs('a', 'wh_a'), reader('b')])), checkout, workspaces: places('wh_a') }));
+    expect(r.run.waitingFor).toBeUndefined();
+    await tick();
+    expect(other.fake.started).toEqual(['n1', 'n2']);
+    other.fake.finish('n1');
+    other.fake.finish('n2');
+    expect((await r.done).status).toBe('succeeded');
+    expect(leases.holder(checkout.root)?.runId).toBe(first.run.id);
+    await tick();
+    holder.fake.finish('n1');
+    await first.done;
+  });
+
+  it('takes the lease on demand for a checkout step added mid-run (Review Focus 2)', async () => {
+    const leases = testLeases();
+    const holder = setup(3, leases);
+    const other = setup(3, leases);
+    const first = started(holder.runner.start({ ...withRendered(graphOf([agent('a')])), checkout }));
+    const r = started(other.runner.start({ ...withRendered(graphOf([inWs('a', 'wh_a')])), checkout, workspaces: places('wh_a') }));
+    await tick();
+    const added: GraphNode = { id: 'n2', title: 'fix', kind: 'agent', prompt: 'fix it', createdBy: 'agent', updatedBy: 'agent', updatedAt: 't' };
+    expect(other.runner.amend(r.run.id, { kind: 'add', node: added, text: 'fix it', after: ['n1'], before: [] }, 'n1', 'n1 wants to add step "fix"')).toEqual({ ok: true });
+    other.fake.finish('n1');
+    await tick();
+    expect(other.runner.get(r.run.id)).toMatchObject({ status: 'running', waitingFor: { runId: first.run.id }, nodes: { n2: { status: 'queued' } } });
+    expect(other.fake.started).toEqual(['n1']);
+    holder.fake.finish('n1');
+    await first.done;
+    await tick();
+    expect(other.fake.started).toEqual(['n1', 'n2']);
+    expect(leases.holder(checkout.root)?.runId).toBe(r.run.id);
+    other.fake.finish('n2');
+    expect((await r.done).status).toBe('succeeded');
+    expect(leases.holder(checkout.root)).toBeUndefined();
+  });
+
+  it('never reuses a step that has a workspace on a re-run', async () => {
+    const { runner, fake } = setup();
+    const graph = graphOf([agent('a'), inWs('b', 'wh_a', 'command'), link('n1', 'n2')]);
+    const first = started(runner.start({ ...withRendered(graph), workspaces: places('wh_a') }));
+    await tick();
+    fake.finish('n1');
+    await tick();
+    fake.finish('n2');
+    await first.done;
+    fake.started.length = 0;
+    const second = started(runner.start({ ...withRendered(graph, { sourceRunId: first.run.id }), workspaces: places('wh_a') }));
+    // n2's only parent is reused, so it starts during start(), not reused itself.
+    expect(second.run.nodes).toMatchObject({ n1: { status: 'reused' }, n2: { status: 'running' } });
+    await tick();
+    expect(fake.started).toEqual(['n2']);
+    fake.finish('n2');
+    expect((await second.done).status).toBe('succeeded');
+  });
+
+  it('refuses a run whose workspace has no worktree, creating nothing', () => {
+    const { runner, runStore } = setup();
+    expect(runner.start(withRendered(graphOf([inWs('a', 'wh_a')])))).toEqual({ ok: false, error: 'Step n1 uses workspace "wh_a", but this run has no worktree for it.' });
+    expect(runStore.list('g')).toEqual([]);
   });
 });

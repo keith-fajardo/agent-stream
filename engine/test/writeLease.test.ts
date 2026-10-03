@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWriteLeases, leaseFile, leaseKey, UNKNOWN_HOLDER } from '../src/writeLease';
 
 const ROOT = join(tmpdir(), 'agent-stream-some-checkout');
@@ -9,6 +9,10 @@ const locks = () => mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
 const holder = (runId: string) => ({ runId, graphId: 'g', folder: join(tmpdir(), 'proj'), startedAt: '2026-10-03T00:00:00.000Z' });
 
 describe('write leases', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('acquires by writing the lock file, and releases by deleting it', () => {
     const dir = locks();
     const leases = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true });
@@ -86,6 +90,35 @@ describe('write leases', () => {
     leases.acquire(ROOT, holder('r2'));
     leases.release(ROOT, 'r2');
     expect(seen).toEqual([`a:${ROOT}`, `b:${ROOT}`, `b:${ROOT}`]);
+  });
+
+  it('fails closed, naming the file, when a stale lock file cannot be removed (a Windows file lock)', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dir = locks();
+    createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true }).acquire(ROOT, holder('r1'));
+    const busy = () => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY' });
+    };
+    const next = createWriteLeases({ locksDir: dir, pid: 200, isAlive: (pid) => pid !== 100, removeFile: busy });
+    expect(next.acquire(ROOT, holder('r2'))).toEqual({ ok: false, holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: leaseFile(dir, ROOT) });
+    expect(JSON.parse(readFileSync(leaseFile(dir, ROOT), 'utf8'))).toMatchObject({ runId: 'r1', pid: 100 });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[agent-stream]'), leaseFile(dir, ROOT), expect.any(Error));
+  });
+
+  it('still forgets the lease and tells listeners when its lock file cannot be removed', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dir = locks();
+    const denied = () => {
+      throw Object.assign(new Error('EPERM: operation not permitted, unlink'), { code: 'EPERM' });
+    };
+    const leases = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true, removeFile: denied });
+    const seen: string[] = [];
+    leases.onRelease((root) => seen.push(root));
+    leases.acquire(ROOT, holder('r1'));
+    expect(() => leases.release(ROOT, 'r1')).not.toThrow();
+    expect(seen).toEqual([ROOT]);
+    expect(leases.holder(ROOT)).toBeUndefined();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[agent-stream]'), leaseFile(dir, ROOT), expect.any(Error));
   });
 
   it('keeps separate checkouts apart', () => {

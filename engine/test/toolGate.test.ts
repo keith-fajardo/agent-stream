@@ -62,6 +62,16 @@ describe('step gate', () => {
     expect(broker.pending()).toEqual([]);
     expect(stepGate().gate.isSelfApproving('mcp__run_graph__add_step')).toBe(false);
   });
+
+  it("keeps the folder's run records private from a step in a workspace (Review Focus 4)", () => {
+    const workspace = resolve('/', 'home', 'me', '.agent-stream', 'worktrees', '0123456789abcdef', '20261003-000000-0001', 'wh_a');
+    const gate = createStepGate({ broker: new ApprovalBroker(() => 't'), runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: workspace, runsRoot: PROJECT, privateFiles: [VALUES], signal: new AbortController().signal, emit: vi.fn() });
+    const runDir = join(PROJECT, '.agent-stream', 'runs', '20261003-000000-0001');
+    expect(gate.privacy('Read', { file_path: join(runDir, 'run.json') })).toMatch(/Run records contain variable values/);
+    expect(gate.privacy('Read', { file_path: join(runDir, 'nodes', 'n1', 'events.jsonl') })).toMatch(/Run records contain variable values/);
+    expect(gate.privacy('Read', { file_path: join(runDir, 'nodes', 'n1', 'output.md') })).toBeNull();
+    expect(gate.privacy('Read', { file_path: join(workspace, 'models', 'orders.sql') })).toBeNull();
+  });
 });
 
 describe('planner gate', () => {
