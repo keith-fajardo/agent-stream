@@ -27,7 +27,7 @@ How to work:
 - Make every agent node prompt self-contained: what to do, where, and what to output. Downstream nodes see upstream outputs, not this chat.
 - Command nodes never receive upstream output as input. If a command needs something an agent produced, have the agent write it to a file and have the command read that file.
 - The user edits the same graph. Respect their edits; you will be told what they changed since your last turn.
-- You cannot start runs. Use request_run to ask the user, and get_run to read results when debugging.
+- You cannot start runs. Only call request_run when the user asks you to run or test the graph; after building or changing a plan, stop and let the user review it. Use get_run to read results when debugging.
 - Keep chat replies short; the graph is the plan.
 - Every step has a short plain-language description for people: one sentence on what the step does and why, without technical detail. Write one whenever you add a step, and update it whenever you change a step's prompt or command. The user may write a step's prompt or description in plain language; when asked to refine steps, turn that into precise instructions and keep the description short and readable.
 
@@ -110,6 +110,7 @@ export type PlannerDeps = {
 };
 
 const STILL_WORKING = 'The planner is still working on your previous message.';
+const STOPPED = 'Stopped.';
 const key = (sessionId: string, graphId: string) => `${sessionId}|${graphId}`;
 
 /**
@@ -117,8 +118,8 @@ const key = (sessionId: string, graphId: string) => `${sessionId}|${graphId}`;
  * Events: 'entry'(sessionId, graphId, entry), 'busy'(sessionId, graphId, busy), 'cleared'(sessionId, graphId).
  */
 export class Planner extends EventEmitter {
-  /** `${sessionId}|${graphId}` of the conversations with a turn running. */
-  private busy = new Set<string>();
+  /** `${sessionId}|${graphId}` of the conversations with a turn running, each with the controller that stops it. */
+  private busy = new Map<string, AbortController>();
   private clock: Clock;
 
   constructor(private d: PlannerDeps) {
@@ -131,17 +132,22 @@ export class Planner extends EventEmitter {
   }
 
   isBusyInGraph(graphId: string): boolean {
-    return [...this.busy].some((k) => k.slice(k.indexOf('|') + 1) === graphId);
+    return [...this.busy.keys()].some((k) => k.slice(k.indexOf('|') + 1) === graphId);
   }
 
   isBusyInSession(sessionId: string): boolean {
-    return [...this.busy].some((k) => k.slice(0, k.indexOf('|')) === sessionId);
+    return [...this.busy.keys()].some((k) => k.slice(0, k.indexOf('|')) === sessionId);
   }
 
   private add(sessionId: string, graphId: string, role: ChatRole, text: string): void {
     const entry: ChatEntry = { at: this.clock(), role, text };
     this.d.sessions.chatLog(sessionId).append(graphId, entry);
     this.emit('entry', sessionId, graphId, entry);
+  }
+
+  /** Stops this conversation's running turn (the chat's Stop button or Esc); does nothing when none is running. */
+  stop(sessionId: string, graphId: string): void {
+    this.busy.get(key(sessionId, graphId))?.abort();
   }
 
   /** "New chat": forgets this session's conversation for the graph (its chat and provider session). */
@@ -164,8 +170,10 @@ export class Planner extends EventEmitter {
       }
       return;
     }
-    this.busy.add(k);
     const abortController = new AbortController();
+    this.busy.set(k, abortController);
+    /** The user stopped this turn: whatever the provider then reports, the chat shows one Stopped. note. */
+    const stopped = () => abortController.signal.aborted;
     /** The provider conversation this turn resumes, if any. */
     let resume: string | undefined;
     try {
@@ -212,6 +220,13 @@ export class Planner extends EventEmitter {
         signal: abortController.signal,
         onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),
       });
+      if (stopped()) {
+        if (!r.ok && r.resumeFailed) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });
+        // Saved like a finished turn, so the user can type "continue"; the provider's cancelled error isn't shown.
+        if (r.ok) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: r.sessionId ?? resume, provider: provider.id, opCursor: cursor });
+        this.add(sessionId, graphId, 'note', STOPPED);
+        return;
+      }
       if (!r.ok) {
         // A conversation that could not be resumed is dropped, so the next message starts fresh instead of failing the same way forever.
         if (r.resumeFailed) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });
@@ -222,6 +237,11 @@ export class Planner extends EventEmitter {
       this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: r.sessionId ?? resume, provider: provider.id, opCursor: cursor });
     } catch (e) {
       try {
+        // A provider that throws when stopped keeps its conversation: the stop is not a broken session.
+        if (stopped()) {
+          this.add(sessionId, graphId, 'note', STOPPED);
+          return;
+        }
         if (resume) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });
         const message = e instanceof Error ? e.message : String(e);
         this.add(sessionId, graphId, 'error', resume ? `${message}${SESSION_RESET_NOTE}` : message);

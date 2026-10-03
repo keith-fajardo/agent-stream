@@ -85,6 +85,10 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
         }
       }
       return error ? { ok: true, sessionId, error } : { ok: true, sessionId };
+    } catch (e) {
+      // The user stopped the turn: Claude Code saved what it did, so the session can be resumed with "continue".
+      if (turn.signal.aborted) return { ok: true, sessionId, error: 'cancelled' };
+      throw e;
     } finally {
       turn.signal.removeEventListener('abort', onAbort);
     }

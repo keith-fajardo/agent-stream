@@ -131,9 +131,9 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   for (const [name, command] of Object.entries(run)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, command));
   context.subscriptions.push(approvalsTree);
-  events.confirmRun = (folder, graphId, fromNodeId, sourceRunId) => {
+  events.confirmRun = (folder, graphId, fromNodeId, sourceRunId, requestedBy) => {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
-    if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId });
+    if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId, ...(requestedBy && { requestedBy }) });
   };
   events.graphDeleted = (folder, graphId) => {
     const panel = panels.get(folder.key, graphId);

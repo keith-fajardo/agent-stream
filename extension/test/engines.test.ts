@@ -67,6 +67,17 @@ describe('EngineManager', () => {
     expect(checkAuth).not.toHaveBeenCalled();
   });
 
+  it("passes a planner's run request on with who asked for it", async () => {
+    const { manager, events } = setup();
+    await manager.checkProvider();
+    const a = folder('a');
+    const app = manager.get(a);
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'agent');
+    expect(app.requestRun(g.id)).toBeNull();
+    expect(events.confirmRun).toHaveBeenCalledWith(a, g.id, undefined, undefined, 'planner');
+  });
+
   it('creates one engine per folder and reports its graphs', async () => {
     const { manager, events } = setup();
     await manager.checkProvider();

@@ -22,7 +22,8 @@ import { changeKey } from './changeLabels';
 export type Tab = 'node' | 'graph' | 'changes';
 /** Size and collapsed state of the side panel and the logs panel; `logsHeight` null is the stylesheet default. */
 export type PanelLayout = { sideWidth: number; sideCollapsed: boolean; logsHeight: number | null; logsCollapsed: boolean };
-export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
+/** `requestedBy: 'planner'`: the planner's request_run asked for this run. */
+export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' };
 export type StartRequest = { graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string };
 /** A start the engine refused because another run is changing files in this checkout (spec §7). */
 export type Blocked = { message: string; canSetUpTickets: boolean; start?: StartRequest };
@@ -73,6 +74,10 @@ export type State = {
   layout: PanelLayout;
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
+
+function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
+  return { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId, ...(msg.requestedBy && { requestedBy: msg.requestedBy }) };
+}
 
 export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
@@ -242,7 +247,7 @@ function reduceServer(state: State, msg: HostMessage): State {
         ? { ...state, blocked: { message: msg.message, canSetUpTickets: msg.canSetUpTickets, ...(state.lastStart?.graphId === msg.graphId && { start: state.lastStart }) } }
         : state;
     case 'confirmRun':
-      return msg.graphId === current ? { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId } } : state;
+      return msg.graphId === current ? { ...state, confirm: confirmRequest(msg) } : state;
     case 'variableValues':
       return msg.graphId === current ? { ...state, variableValues: msg.values, preview: undefined } : state;
     case 'runPreview':
@@ -258,7 +263,7 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'revealNode':
       return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, selectedNodeId: msg.nodeId, tab: 'node' } : state;
     case 'openRunDialog':
-      return { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId }, preview: undefined, previewRequestId: undefined };
+      return { ...state, confirm: confirmRequest(msg), preview: undefined, previewRequestId: undefined };
     case 'openVariables':
       return { ...state, variablesDialog: {} };
     case 'prefs':

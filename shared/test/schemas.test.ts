@@ -80,10 +80,12 @@ describe('parseWebviewMessage', () => {
       { type: 'openChat', graphId: 'g', sessionId: 'default' },
       { type: 'chat', graphId: 'g', sessionId: 'default', text: 'hi' },
       { type: 'newChat', graphId: 'g', sessionId: 'default' },
+      { type: 'stopPlanner', graphId: 'g', sessionId: 'default' },
     ]) {
       expect(parseWebviewMessage(msg)).toEqual({ ok: true, kind: 'engine', msg });
     }
     expect(parseWebviewMessage({ type: 'chat', graphId: 'g', text: 'hi' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'stopPlanner', graphId: 'g' }).ok).toBe(false);
   });
   it('accepts inspectCheckout, a sequential startRun and the setUpParallelTickets host message', () => {
     expect(parseWebviewMessage({ type: 'inspectCheckout' })).toEqual({ ok: true, kind: 'engine', msg: { type: 'inspectCheckout' } });

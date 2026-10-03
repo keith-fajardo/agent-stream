@@ -106,6 +106,26 @@ describe('Claude provider: planner turns', () => {
     ]);
   });
 
+  it("reports a turn the user stopped as cancelled with its session, so the conversation can continue", async () => {
+    const stop = new AbortController();
+    const s = await setup(async function* (options) {
+      yield init();
+      yield say({ type: 'text', text: 'Working.' });
+      stop.abort();
+      expect(options.abortController?.signal.aborted).toBe(true);
+      throw Object.assign(new Error('Claude Code process aborted by user'), { name: 'AbortError' });
+    });
+    expect(await s.provider.planTurn(s.turn({ signal: stop.signal }))).toEqual({ ok: true, sessionId: 'sess-1', error: 'cancelled' });
+  });
+
+  it('still throws a failure that was not a stop', async () => {
+    const s = await setup(async function* () {
+      yield init();
+      throw new Error('boom');
+    });
+    await expect(s.provider.planTurn(s.turn())).rejects.toThrow('boom');
+  });
+
   it('serves the graph tools to Claude Code through the graph MCP server', async () => {
     const s = await setup(async function* () {
       yield init();

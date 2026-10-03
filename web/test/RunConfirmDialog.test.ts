@@ -51,6 +51,23 @@ describe('RunConfirmDialog', () => {
     expect(button('Start run').disabled).toBe(true);
   });
 
+  it('says when the planner asked for the run, and Not now closes it like Cancel', async () => {
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'confirmRun', graphId: 'g', requestedBy: 'planner' } }));
+    expect(container.querySelector('h2')?.textContent).toBe('The planner asks to run this graph');
+    expect(button('Cancel')).toBeUndefined();
+    await act(async () => button('Not now').click());
+    expect(getState().confirm).toBeUndefined();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'startRun' }));
+  });
+
+  it('keeps the usual heading and Cancel for a run the user opened', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    expect(container.querySelector('h2')?.textContent).toBe('Run workflow');
+    expect(button('Cancel')).toBeDefined();
+    expect(button('Not now')).toBeUndefined();
+    await act(async () => button('Cancel').click());
+  });
+
   it('shows commands in full, agent prompts folded, the variables used, then starts with the signature', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));

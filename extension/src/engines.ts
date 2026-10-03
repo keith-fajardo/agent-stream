@@ -26,7 +26,7 @@ export type FolderApproval = { folder: Folder; request: ApprovalRequest };
 export type EngineEvents = {
   graphs(folder: Folder, graphs: GraphListItem[]): void;
   approvals(): void;
-  confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string): void;
+  confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string, requestedBy?: 'planner'): void;
   graphDeleted(folder: Folder, graphId: string): void;
   /** A folder's work sessions: sent on connect and after every change. */
   sessions(folder: Folder, sessions: SessionListItem[]): void;
@@ -214,7 +214,7 @@ export class EngineManager {
       case 'approvals':
         return this.d.events.approvals();
       case 'confirmRun':
-        return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId);
+        return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId, msg.requestedBy);
       case 'graphDeleted':
         return this.d.events.graphDeleted(folder, msg.graphId);
       case 'sessions':

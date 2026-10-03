@@ -97,6 +97,18 @@ describe('ChatViewController', () => {
     expect(s.posted.at(-1)).toEqual({ type: 'error', message: 'This chat is no longer open.' });
   });
 
+  it('forwards stopPlanner with its session and graph, and only for the conversation it shows', () => {
+    const s = setup();
+    s.chat.activate({ folder: s.folder, graphId: s.g1 }, [{ folder: s.folder, graphId: s.g1 }]);
+    s.handle.mockClear();
+    s.chat.handle({ type: 'stopPlanner', graphId: s.g1, sessionId: 'default' });
+    expect(s.handle).toHaveBeenCalledWith(expect.anything(), { type: 'stopPlanner', graphId: s.g1, sessionId: 'default' });
+    s.handle.mockClear();
+    s.chat.handle({ type: 'stopPlanner', graphId: s.g2, sessionId: 'default' });
+    expect(s.handle).not.toHaveBeenCalled();
+    expect(s.posted.at(-1)).toEqual({ type: 'error', message: 'This chat is no longer open.' });
+  });
+
   it('refuses chat for a conversation it is not showing', () => {
     const s = setup();
     s.chat.activate({ folder: s.folder, graphId: s.g1 }, [{ folder: s.folder, graphId: s.g1 }]);

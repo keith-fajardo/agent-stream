@@ -284,7 +284,7 @@ export function createApp(d: AppDeps) {
       sourceRunId = runStore.list(graphId)[0]?.id;
       if (!sourceRunId) return 'There is no previous run to re-run from.';
     }
-    broadcast({ type: 'confirmRun', graphId, fromNodeId, sourceRunId });
+    broadcast({ type: 'confirmRun', graphId, fromNodeId, sourceRunId, requestedBy: 'planner' });
     return null;
   }
 
@@ -518,6 +518,10 @@ export function createApp(d: AppDeps) {
         if (!s.ok) return error(s.error);
         const r = planner.newChat(msg.sessionId, msg.graphId);
         if (!r.ok) return error(r.error);
+        return;
+      }
+      case 'stopPlanner': {
+        planner.stop(msg.sessionId, msg.graphId);
         return;
       }
       case 'setPlannerModel': {

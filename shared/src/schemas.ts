@@ -121,6 +121,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
   z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
+  z.object({ type: z.literal('stopPlanner'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: z.enum(EFFORT_LEVELS).optional() }),
   z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), sequential: z.boolean().optional() }),
   z.object({ type: z.literal('inspectCheckout') }),

@@ -81,7 +81,7 @@ export function RunConfirmDialog() {
   return (
     <div className="modal-backdrop" onClick={close}>
       <div className="modal" role="dialog" aria-label="Run confirmation" onClick={(e) => e.stopPropagation()}>
-        <h2>{confirm.fromNodeId ? `Re-run from ${confirm.fromNodeId}` : 'Run workflow'}</h2>
+        <h2>{confirm.requestedBy === 'planner' ? 'The planner asks to run this graph' : confirm.fromNodeId ? `Re-run from ${confirm.fromNodeId}` : 'Run workflow'}</h2>
         {!preview ? (
           <p className="muted">Checking the run…</p>
         ) : (
@@ -171,7 +171,7 @@ export function RunConfirmDialog() {
           </>
         )}
         <div className="modal-actions">
-          <button onClick={close}>Cancel</button>
+          <button onClick={close}>{confirm.requestedBy === 'planner' ? 'Not now' : 'Cancel'}</button>
           <button className="primary" disabled={!preview || preview.problems.length > 0} onClick={start}>
             Start run
           </button>

@@ -149,6 +149,13 @@ describe('Planner', () => {
     expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people');
   });
 
+  it('calls request_run only when the user asks for a run', () => {
+    expect(PLANNER_APPEND).toContain(
+      '- You cannot start runs. Only call request_run when the user asks you to run or test the graph; after building or changing a plan, stop and let the user review it. Use get_run to read results when debugging.',
+    );
+    expect(PLANNER_APPEND).not.toContain('Use request_run to ask the user');
+  });
+
   it('resumes the session and tells the planner about user edits since its last turn', async () => {
     const s = setup([ran(), ran()]);
     await s.planner.send('a', s.graphId, 'first');
@@ -427,6 +434,75 @@ describe('Planner', () => {
     expect(s.planner.isBusyInSession('a')).toBe(false);
     expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: true });
     expect(cleared).toEqual([['a', s.graphId]]);
+  });
+});
+
+describe('Planner.stop', () => {
+  /** A turn that waits until its signal aborts, then ends the way `onAbort` says. */
+  const untilStopped =
+    (onAbort: (t: PlannerTurn) => PlannerTurnResult | Promise<PlannerTurnResult>): Turn =>
+    (t) =>
+      new Promise<PlannerTurnResult>((resolve, reject) => {
+        t.onEvent({ type: 'text', text: 'Working on it.' });
+        t.signal.addEventListener('abort', () => Promise.resolve().then(() => onAbort(t)).then(resolve, reject), { once: true });
+      });
+
+  it('stops a provider that throws on abort: one Stopped. note, no error, busy clears, the resumed conversation is kept', async () => {
+    const s = setup([
+      untilStopped(() => {
+        throw Object.assign(new Error('Claude Code process aborted by user'), { name: 'AbortError' });
+      }),
+    ]);
+    s.sessions.setPlannerState('a', s.graphId, { sessionId: 'sess-old', provider: 'claude', opCursor: 0 });
+    const turn = s.planner.send('a', s.graphId, 'plan it');
+    expect(s.planner.isBusy('a', s.graphId)).toBe(true);
+    s.planner.stop('a', s.graphId);
+    await turn;
+    expect(s.chat().map((e) => [e.role, e.text])).toEqual([
+      ['user', 'plan it'],
+      ['assistant', 'Working on it.'],
+      ['note', 'Stopped.'],
+    ]);
+    expect(s.planner.isBusy('a', s.graphId)).toBe(false);
+    expect(s.busy).toEqual([true, false]);
+    expect(s.state()).toMatchObject({ sessionId: 'sess-old' });
+  });
+
+  it("stops a provider that returns error 'cancelled' and saves its conversation so the user can continue", async () => {
+    const s = setup([untilStopped(() => ({ ok: true, sessionId: 'sess-2', error: 'cancelled' }))]);
+    const turn = s.planner.send('a', s.graphId, 'plan it');
+    s.planner.stop('a', s.graphId);
+    await turn;
+    expect(s.chat().map((e) => e.role)).toEqual(['user', 'assistant', 'note']);
+    expect(s.chat().at(-1)).toMatchObject({ role: 'note', text: 'Stopped.' });
+    expect(s.state()).toMatchObject({ sessionId: 'sess-2', provider: 'claude', opCursor: 0 });
+    expect(s.planner.isBusy('a', s.graphId)).toBe(false);
+  });
+
+  it("aborts only that session and graph's turn", async () => {
+    const other = deferred<PlannerTurnResult>();
+    const s = setup([untilStopped(() => ({ ok: true, sessionId: 's-a', error: 'cancelled' })), (t) => (t.signal.aborted ? Promise.reject(new Error('aborted')) : other.promise)]);
+    const a = s.planner.send('a', s.graphId, 'one');
+    const b = s.planner.send('b', s.graphId, 'two');
+    s.planner.stop('a', s.graphId);
+    await a;
+    expect(s.seen[1].signal.aborted).toBe(false);
+    expect(s.planner.isBusy('b', s.graphId)).toBe(true);
+    other.resolve({ ok: true, sessionId: 's-b' });
+    await b;
+    expect(s.sessions.chatLog('b').read(s.graphId).map((e) => e.role)).toEqual(['user']);
+    expect(s.sessions.plannerState('b', s.graphId).sessionId).toBe('s-b');
+  });
+
+  it('does nothing when no turn is running', async () => {
+    const s = setup([ran('s1'), ran('s1')]);
+    s.planner.stop('a', s.graphId);
+    await s.planner.send('a', s.graphId, 'one');
+    s.planner.stop('a', s.graphId);
+    await s.planner.send('a', s.graphId, 'two');
+    expect(s.seen[1].signal.aborted).toBe(false);
+    expect(s.chat().map((e) => e.role)).toEqual(['user', 'user']);
+    expect(s.busy).toEqual([true, false, true, false]);
   });
 });
 

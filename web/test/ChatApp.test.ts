@@ -61,6 +61,59 @@ describe('ChatApp', () => {
     expect(posted).toContainEqual({ type: 'chatCommand', command: 'newChat' });
     expect(posted).toContainEqual({ type: 'chatCommand', command: 'switchSession' });
   });
+  describe('Stop', () => {
+    const open = async (busy: boolean) => {
+      const el = await render();
+      await act(async () => {
+        dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
+        dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+        dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy } });
+      });
+      return el;
+    };
+    const stopButton = (el: HTMLElement) => el.querySelector('button[aria-label="Stop the planner"]') as HTMLButtonElement | null;
+    const sendButton = (el: HTMLElement) => [...el.querySelectorAll('.chat-input button')].find((b) => b.textContent === 'Send');
+    const type = async (el: HTMLElement, value: string) => {
+      const box = el.querySelector('textarea')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, value);
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      return box;
+    };
+    const stop = { type: 'stopPlanner', graphId: 'g1', sessionId: 'default' };
+
+    it('replaces Send with Stop only while the planner works, and Stop sends stopPlanner', async () => {
+      const el = await open(false);
+      expect(stopButton(el)).toBeNull();
+      expect(sendButton(el)).toBeDefined();
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: true } }));
+      expect(sendButton(el)).toBeUndefined();
+      expect(stopButton(el)?.textContent).toBe('■ Stop');
+      await act(async () => stopButton(el)!.click());
+      expect(posted).toEqual([stop]);
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: false } }));
+      expect(stopButton(el)).toBeNull();
+      expect(sendButton(el)).toBeDefined();
+    });
+
+    it('sends stopPlanner on Escape while the planner works', async () => {
+      const el = await open(true);
+      const box = await type(el, 'next idea');
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      expect(posted).toEqual([stop]);
+      expect(box.value).toBe('next idea');
+    });
+
+    it('does nothing on Escape while idle and keeps the typed text', async () => {
+      const el = await open(false);
+      const box = await type(el, 'half a thought');
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      expect(posted).toEqual([]);
+      expect(box.value).toBe('half a thought');
+    });
+  });
+
   it('disables input with the provider’s reason', async () => {
     const el = await render();
     await act(async () => {

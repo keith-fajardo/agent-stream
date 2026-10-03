@@ -21,8 +21,20 @@ export function ChatPanel() {
     send({ type: 'chat', graphId: target.graphId, sessionId: target.sessionId, text: t });
     setText('');
   };
+  const stop = () => {
+    if (target && busy) send({ type: 'stopPlanner', graphId: target.graphId, sessionId: target.sessionId });
+  };
   return (
-    <div className="chat">
+    // Esc anywhere in the chat stops a running turn; while idle it does nothing (the typed text stays).
+    <div
+      className="chat"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && busy) {
+          e.preventDefault();
+          stop();
+        }
+      }}
+    >
       <div className="chat-log">
         {chat.length === 0 && (
           <p className="muted">Describe what you want done. The planner draws the plan on the canvas; edit it freely, then press Run.</p>
@@ -48,9 +60,15 @@ export function ChatPanel() {
             }
           }}
         />
-        <button className="primary" disabled={!canType || busy || !text.trim()} onClick={submit}>
-          Send
-        </button>
+        {busy ? (
+          <button aria-label="Stop the planner" title="Stop the planner (Esc)" disabled={!target} onClick={stop}>
+            ■ Stop
+          </button>
+        ) : (
+          <button className="primary" disabled={!canType || !text.trim()} onClick={submit}>
+            Send
+          </button>
+        )}
       </div>
     </div>
   );

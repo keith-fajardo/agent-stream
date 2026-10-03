@@ -323,7 +323,8 @@ export type ServerMessage =
    */
   | { type: 'models'; provider: ProviderId; models: ModelChoice[]; defaultEfforts: EffortLevel[] }
   | { type: 'sessions'; sessions: SessionListItem[] }
-  | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
+  /** Asks the graph's tab to confirm a run. `requestedBy: 'planner'`: the planner's request_run asked for it. */
+  | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }
   | { type: 'variableValues'; graphId: string; values: Record<string, string> }
   /** Where this folder's graphs work and who holds its write lease: after hello, on request, and when a run starts, ends or stops waiting. */
@@ -342,6 +343,8 @@ export type ClientMessage =
   | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
   /** Clears the conversation: its chat and the provider session. */
   | { type: 'newChat'; graphId: string; sessionId: string }
+  /** Stops the conversation's running planner turn; nothing happens when none is running. */
+  | { type: 'stopPlanner'; graphId: string; sessionId: string }
   /** The conversation's model and effort from its next turn; an absent field is Default. */
   | { type: 'setPlannerModel'; graphId: string; sessionId: string; model?: string; effort?: EffortLevel }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
@@ -376,7 +379,7 @@ export type WebviewMessage = ClientMessage | WebviewHostMessage;
 export type HostMessage =
   | ServerMessage
   | { type: 'revealNode'; nodeId: string }
-  | { type: 'openRunDialog'; fromNodeId?: string; sourceRunId?: string }
+  | { type: 'openRunDialog'; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
   | { type: 'openVariables' }
   | { type: 'prefs'; minimap: boolean }
   | { type: 'chatTarget'; target?: ChatTarget };

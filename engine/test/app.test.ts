@@ -202,7 +202,7 @@ describe('app', () => {
     app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { prompt: 'p' } }, 'agent');
     expect(app.requestRun(g.id, 'n1')).toBe('There is no previous run to re-run from.');
     expect(app.requestRun(g.id)).toBeNull();
-    expect(a.of('confirmRun')).toEqual([{ type: 'confirmRun', graphId: g.id }]);
+    expect(a.of('confirmRun')).toEqual([{ type: 'confirmRun', graphId: g.id, requestedBy: 'planner' }]);
   });
 
   it('marks runs left running by a previous server as interrupted', () => {
@@ -623,6 +623,32 @@ describe('app', () => {
       expect(a.last('error')).toEqual({ type: 'error', message: 'session "nope" not found' });
     });
   });
+
+    it('stops the running planner turn of the conversation stopPlanner names', async () => {
+      const seen: PlannerTurn[] = [];
+      const provider = testProvider({
+        planTurn: (t) => {
+          seen.push(t);
+          return new Promise<PlannerTurnResult>((resolve) => t.signal.addEventListener('abort', () => resolve({ ok: true, sessionId: 's1', error: 'cancelled' }), { once: true }));
+        },
+      });
+      const { app, graphId } = setupWithGraph({ provider });
+      app.createSession('B');
+      const a = client(app);
+      await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+      await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'plan' });
+      await app.handle(a.client, { type: 'chat', graphId, sessionId: 'b', text: 'plan' });
+      await flush();
+      expect(seen).toHaveLength(2);
+      await app.handle(a.client, { type: 'stopPlanner', graphId, sessionId: 'default' });
+      await flush();
+      expect(seen.map((t) => t.signal.aborted)).toEqual([true, false]);
+      expect(a.last('chatBusy')).toEqual({ type: 'chatBusy', graphId, sessionId: 'default', busy: false });
+      expect(a.last('chatEntry').entry).toMatchObject({ role: 'note', text: 'Stopped.' });
+      expect(a.all('error')).toEqual([]);
+      await app.handle(a.client, { type: 'stopPlanner', graphId, sessionId: 'b' });
+      await flush();
+    });
 
   describe('for the extension', () => {
     it('lists the variant workspaces of its runs, newest first, and marks one removed', () => {

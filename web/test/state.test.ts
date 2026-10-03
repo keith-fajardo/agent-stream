@@ -91,6 +91,7 @@ describe('client state', () => {
     const s = apply(opened(graph('a')));
     expect(reduce(s, server({ type: 'confirmRun', graphId: 'a', fromNodeId: 'n2', sourceRunId: 'r1' })).confirm).toEqual({ fromNodeId: 'n2', sourceRunId: 'r1' });
     expect(reduce(s, server({ type: 'confirmRun', graphId: 'b' })).confirm).toBeUndefined();
+    expect(reduce(s, server({ type: 'confirmRun', graphId: 'a', requestedBy: 'planner' })).confirm).toEqual({ requestedBy: 'planner' });
   });
 
   it('follows its chat target: new target clears, other conversations are ignored', () => {
@@ -166,6 +167,7 @@ describe('client state', () => {
     expect(reduce(s, server({ type: 'revealNode', nodeId: 'n1' }))).toMatchObject({ selectedNodeId: 'n1', tab: 'node' });
     expect(reduce(s, server({ type: 'revealNode', nodeId: 'missing' })).selectedNodeId).toBeUndefined();
     expect(reduce(s, server({ type: 'openRunDialog', fromNodeId: 'n1', sourceRunId: 'r' })).confirm).toEqual({ fromNodeId: 'n1', sourceRunId: 'r' });
+    expect(reduce(s, server({ type: 'openRunDialog', requestedBy: 'planner' })).confirm).toEqual({ requestedBy: 'planner' });
     expect(reduce(s, server({ type: 'openVariables' })).variablesDialog).toEqual({});
     expect(reduce(s, server({ type: 'prefs', minimap: false })).minimap).toBe(false);
     expect(reduce(s, { kind: 'openVariables', focus: 'schema' }).variablesDialog).toEqual({ focus: 'schema' });
