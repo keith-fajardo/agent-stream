@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
@@ -8,7 +9,7 @@ import type { AgentProvider, PlannerTurn, PlannerTurnResult } from '../src/provi
 import { RunStore } from '../src/runStore';
 import { SessionStore } from '../src/sessionStore';
 import { ALTERNATIVES_RULE, PARALLEL_POLICY, PLANNER_AB_RULES, PLANNER_TICKET_RULES, SERIALIZATION_GUIDANCE } from '../src/policy';
-import { deferred, fixedClock, outsideGit, signedIn, tmpProject } from './helpers';
+import { deferred, fixedClock, outsideGit, signedIn, tmpProject, userText } from './helpers';
 
 const VALUES_FILE = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
 const RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
@@ -455,5 +456,49 @@ describe('describeOp for reviewed agent changes', () => {
   it('carries the parallel tickets policy, the alternatives rule and the serialization guidance verbatim', () => {
     for (const text of [PARALLEL_POLICY, ALTERNATIVES_RULE, PLANNER_TICKET_RULES, SERIALIZATION_GUIDANCE, PLANNER_AB_RULES]) expect(PLANNER_APPEND).toContain(text);
     expect(PLANNER_APPEND.indexOf(ALTERNATIVES_RULE)).toBe(PLANNER_APPEND.indexOf(PARALLEL_POLICY) + PARALLEL_POLICY.length + '\n- '.length);
+  });
+
+  it('gives each turn a transcript store kept per session, graph and provider', async () => {
+    const history = [userText('first'), { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'ok' }] }];
+    const s = setup([
+      async (t) => {
+        t.transcript.save('conv-1', history);
+        return { ok: true, sessionId: 'conv-1' };
+      },
+      async (t) => ({ ok: true, sessionId: t.resume }),
+      async () => ({ ok: true, sessionId: 'other' }),
+    ]);
+    await s.planner.send('a', s.graphId, 'one');
+    expect(existsSync(join(s.paths.sessionsDir, 'a', 'transcripts', `${s.graphId}.claude.conv-1.json`))).toBe(true);
+    await s.planner.send('a', s.graphId, 'two');
+    expect(s.seen[1].resume).toBe('conv-1');
+    expect(s.seen[1].transcript.load('conv-1')).toEqual(history);
+    await s.planner.send('b', s.graphId, 'three');
+    expect(s.seen[2].transcript.load('conv-1')).toBeUndefined();
+  });
+
+  it("New chat deletes the conversation's transcripts", async () => {
+    const s = setup([
+      async (t) => {
+        t.transcript.save('conv-1', [userText('first')]);
+        return { ok: true, sessionId: 'conv-1' };
+      },
+    ]);
+    await s.planner.send('a', s.graphId, 'one');
+    const file = join(s.paths.sessionsDir, 'a', 'transcripts', `${s.graphId}.claude.conv-1.json`);
+    expect(existsSync(file)).toBe(true);
+    expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: true });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('starts fresh when the provider finds no transcript to resume', async () => {
+    const s = setup([
+      async () => ({ ok: true, sessionId: 'conv-1' }),
+      async (t) => (t.resume && !t.transcript.load(t.resume) ? { ok: false, error: 'The earlier Copilot conversation was not found.', resumeFailed: true } : { ok: true }),
+    ]);
+    await s.planner.send('a', s.graphId, 'one');
+    await s.planner.send('a', s.graphId, 'two');
+    expect(s.chat().at(-1)).toMatchObject({ role: 'error', text: `The earlier Copilot conversation was not found.${RESET_NOTE}` });
+    expect(s.state().sessionId).toBeUndefined();
   });
 });

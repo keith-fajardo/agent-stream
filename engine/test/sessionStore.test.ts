@@ -91,6 +91,19 @@ describe('SessionStore', () => {
     expect(store.ensureDefault().id).toBe(DEFAULT_SESSION_ID);
     expect(store.list()).toHaveLength(1);
   });
+
+  it("keeps transcripts in the session's folder, clears them on New chat and when their graph is removed", () => {
+    const { paths, store } = setup();
+    const a = store.create('A');
+    const hi = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'hi' }] }];
+    store.transcripts(a.id).save('g1', 'copilot', 'c', hi);
+    expect(existsSync(join(paths.sessionsDir, a.id, 'transcripts', 'g1.copilot.c.json'))).toBe(true);
+    store.clearPlanner(a.id, 'g1');
+    expect(store.transcripts(a.id).load('g1', 'copilot', 'c')).toBeUndefined();
+    store.transcripts(a.id).save('g1', 'copilot', 'c', hi);
+    store.removeGraph('g1');
+    expect(store.transcripts(a.id).load('g1', 'copilot', 'c')).toBeUndefined();
+  });
 });
 
 describe('ensureDefault with an unreadable default session', () => {

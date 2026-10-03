@@ -62,6 +62,7 @@ async function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
     gate: createPlannerGate({ projectDir: paths.root, privateFiles: [VALUES_FILE], graphToolNames: new Set(['add_node']) }),
     signal: new AbortController().signal,
     onEvent: (e) => events.push(e),
+    transcript: { load: () => undefined, save: () => {} },
     ...over,
   });
   return { paths, graphStore, runStore, graphId, provider, calls, events, turn };

@@ -59,6 +59,7 @@ const turn = (over: Partial<PlannerTurn> = {}): PlannerTurn => ({
   gate: createPlannerGate({ projectDir: '/proj', privateFiles: [], graphToolNames: new Set() }),
   signal: new AbortController().signal,
   onEvent: () => {},
+  transcript: { load: () => undefined, save: () => {} },
   ...over,
 });
 

@@ -8,6 +8,7 @@ import { systemClock, type Clock } from './clock';
 import { writeFileAtomic } from './fsutil';
 import { slugify } from './graphStore';
 import { isGraphId, isSessionId, type ProjectPaths } from './paths';
+import { Transcripts } from './transcripts';
 
 export const DEFAULT_SESSION_ID = 'default';
 
@@ -177,11 +178,18 @@ export class SessionStore extends EventEmitter {
     const kept: SessionPlannerState = { ...(gone?.model !== undefined && { model: gone.model }), ...(gone?.effort !== undefined && { effort: gone.effort }) };
     this.save({ ...session, planner: Object.keys(kept).length ? { ...planner, [graphId]: kept } : planner });
     this.chatLog(id).clear(graphId);
+    this.transcripts(id).clear(graphId);
   }
 
   chatLog(id: string): ChatLog {
     if (!isSessionId(id)) throw new Error(`invalid session id "${id}"`);
     return new ChatLog(join(this.dir(id), 'chats'));
+  }
+
+  /** The session's planner transcripts (spec §6): sessions/<id>/transcripts/. */
+  transcripts(id: string): Transcripts {
+    if (!isSessionId(id)) throw new Error(`invalid session id "${id}"`);
+    return new Transcripts(join(this.dir(id), 'transcripts'));
   }
 
   removeGraph(graphId: string): void {
@@ -200,6 +208,7 @@ export class SessionStore extends EventEmitter {
       const { activeGraphId, ...rest } = s;
       this.save({ ...rest, tabs: reindexed, planner, ...(activeGraphId && activeGraphId !== graphId && { activeGraphId }) });
       this.chatLog(s.id).clear(graphId);
+      this.transcripts(s.id).clear(graphId);
     }
     this.emit('changed');
   }

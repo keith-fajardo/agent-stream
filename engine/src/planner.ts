@@ -179,6 +179,7 @@ export class Planner extends EventEmitter {
         return;
       }
       const state = this.d.sessions.plannerState(sessionId, graphId);
+      const transcripts = this.d.sessions.transcripts(sessionId);
       // State saved before providers existed is Claude's. Another provider can't resume it, so it starts fresh.
       const sameProvider = (state.provider ?? 'claude') === provider.id;
       if (state.sessionId && !sameProvider) this.add(sessionId, graphId, 'note', `Started a new planner conversation with ${provider.name}; it doesn't see earlier messages.`);
@@ -207,6 +208,7 @@ export class Planner extends EventEmitter {
         ...(model && { model }),
         ...(effort && { effort }),
         gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
+        transcript: { load: (id) => transcripts.load(graphId, provider.id, id), save: (id, messages) => transcripts.save(graphId, provider.id, id, messages) },
         signal: abortController.signal,
         onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),
       });

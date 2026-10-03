@@ -1,4 +1,5 @@
 import type { ZodRawShape } from 'zod';
+import type { ChatMessage } from '../agentLoop/chatModel';
 import type { EffortLevel, ModelChoice, ProviderId, ProviderStatus } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../executors';
 import type { ToolGate } from './toolGate';
@@ -7,6 +8,12 @@ export type ToolReply = { text: string; isError?: boolean };
 /** A graph-editing tool the planner may call, defined once for every provider. */
 export type GraphTool = { name: string; description: string; schema: ZodRawShape; run(input: unknown): Promise<ToolReply> };
 export type PlannerEvent = { type: 'text'; text: string } | { type: 'tool'; name: string; input: unknown };
+/** A planner conversation's messages, offered to providers that have no server-side session (spec §6). Claude ignores it. */
+export interface TranscriptStore {
+  load(id: string): ChatMessage[] | undefined;
+  save(id: string, messages: ChatMessage[]): void;
+}
+
 export type PlannerTurn = {
   prompt: string;
   systemAppend: string;
@@ -18,6 +25,8 @@ export type PlannerTurn = {
   model?: string;
   effort?: EffortLevel;
   gate: ToolGate;
+  /** This conversation's stored messages, per session, graph and provider. */
+  transcript: TranscriptStore;
   signal: AbortSignal;
   onEvent(e: PlannerEvent): void;
 };
