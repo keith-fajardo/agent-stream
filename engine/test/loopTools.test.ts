@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -395,5 +395,45 @@ describe('private folders: output.md must be a regular file (T2-1)', () => {
   it('refuses an output.md/.. path that normalises to run.json, and an extra segment', async () => {
     expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/output.md/../run.json' })).toEqual(refusal);
     expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/z/output.md' })).toEqual(refusal);
+  });
+});
+
+describe('fix round 1', () => {
+  const refusal = { text: 'That folder holds Agent Stream run records and sessions, which are private.', isError: true };
+
+  it.skipIf(process.platform === 'win32')('Edit keeps the file mode', async () => {
+    const cwd = project({ 'run.sh': 'echo a\n' });
+    chmodSync(join(cwd, 'run.sh'), 0o755);
+    await runTool(cwd, 'Edit', { file_path: 'run.sh', old_string: 'a', new_string: 'b' });
+    expect(statSync(join(cwd, 'run.sh')).mode & 0o777).toBe(0o755);
+  });
+
+  it('keeps CRLF when one line becomes several', async () => {
+    const cwd = project({ 'w.txt': 'one\r\ntwo\r\n' });
+    await runTool(cwd, 'Edit', { file_path: 'w.txt', old_string: 'one', new_string: 'a\nb' });
+    expect(readFileSync(join(cwd, 'w.txt'), 'utf8')).toBe('a\r\nb\r\ntwo\r\n');
+  });
+
+  it('Edit and Write refuse private folders without reading or writing', async () => {
+    const cwd = project({ '.agent-stream/runs/r1/run.json': 'x x' });
+    const f = '.agent-stream/runs/r1/run.json';
+    expect(await runTool(cwd, 'Edit', { file_path: f, old_string: 'x', new_string: 'y' })).toEqual(refusal);
+    expect(await runTool(cwd, 'Write', { file_path: f, content: 'z' })).toEqual(refusal);
+    expect(await runTool(cwd, 'Write', { file_path: '.agent-stream/sessions/new/s.json', content: 'z' })).toEqual(refusal);
+    expect(readFileSync(join(cwd, f), 'utf8')).toBe('x x');
+    expect(existsSync(join(cwd, '.agent-stream', 'sessions'))).toBe(false);
+  });
+
+  it('Edit refuses a binary file', async () => {
+    const cwd = project({ 'b.bin': Buffer.from([97, 0, 98]) });
+    expect(await runTool(cwd, 'Edit', { file_path: 'b.bin', old_string: 'a', new_string: 'c' })).toEqual({ text: `${join(cwd, 'b.bin')} is a binary file.`, isError: true });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a symlink named output.md', async () => {
+    const cwd = project({ '.agent-stream/runs/r1/run.json': 'secret' });
+    const dir = join(cwd, '.agent-stream', 'runs', 'r1', 'nodes', 'n1');
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(join(cwd, '.agent-stream', 'runs', 'r1', 'run.json'), join(dir, 'output.md'));
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/output.md' })).toEqual(refusal);
   });
 });

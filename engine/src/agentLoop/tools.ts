@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, type Dirent, type Stats } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, type Dirent, type Stats } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -53,6 +53,14 @@ const statOf = (p: string): Stats | undefined => {
     return undefined;
   }
 };
+/** Like statOf but does not follow a final symlink. */
+const lstatOf = (p: string): Stats | undefined => {
+  try {
+    return lstatSync(p);
+  } catch {
+    return undefined;
+  }
+};
 const isBinary = (buf: Buffer) => buf.subarray(0, BINARY_SNIFF_BYTES).includes(0);
 const posixRelative = (root: string, file: string) => relative(root, file).split(sep).join('/');
 
@@ -72,7 +80,7 @@ function isUpstreamOutput(resolved: string): boolean {
 }
 
 /** Private, and not an upstream output.md that a step is told to read (which must be a regular file, not a folder of that name). */
-const refusedFile = (resolved: string) => isPrivatePath(resolved) && !(isUpstreamOutput(resolved) && statOf(resolved)?.isFile());
+const refusedFile = (resolved: string) => isPrivatePath(resolved) && !(isUpstreamOutput(resolved) && lstatOf(resolved)?.isFile());
 
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 /** Agent Stream's own private folders, skipped wherever a `.agent-stream` folder is met. */
@@ -319,9 +327,13 @@ function writeTools(cwd: string, runShell: RunShell): LoopTool[] {
   return [
     defineLoopTool('Edit', 'Replace text in a file. old_string must occur exactly once unless replace_all is true.', editInput, async ({ file_path, old_string, new_string, replace_all }) => {
       const file = toolPath(cwd, file_path);
+      if (isPrivatePath(file)) return { text: PRIVATE_FOLDER, isError: true };
       if (old_string === '') return { text: 'old_string is empty; use Write to create or replace a whole file.', isError: true };
-      if (!statOf(file)?.isFile()) return { text: `File not found: ${file}`, isError: true };
-      const text = readFileSync(file, 'utf8');
+      const st = statOf(file);
+      if (!st?.isFile()) return { text: `File not found: ${file}`, isError: true };
+      const buf = readFileSync(file);
+      if (isBinary(buf)) return { text: `${file} is a binary file.`, isError: true };
+      const text = buf.toString('utf8');
       let from = old_string;
       let to = new_string;
       let count = occurrences(text, from);
@@ -331,13 +343,15 @@ function writeTools(cwd: string, runShell: RunShell): LoopTool[] {
         to = to.replace(/\r?\n/g, '\r\n');
         count = occurrences(text, from);
       }
+      if (count > 0 && !from.includes('\n') && to.includes('\n') && text.includes('\r\n')) to = to.replace(/\r?\n/g, '\r\n');
       if (count === 0) return { text: `old_string was not found in ${file}.`, isError: true };
       if (count > 1 && !replace_all) return { text: `old_string was found ${count} times in ${file}. Add more surrounding text to make it unique, or set replace_all.`, isError: true };
-      writeFileAtomic(file, text.split(from).join(to));
+      writeFileAtomic(file, text.split(from).join(to), st.mode & 0o777);
       return { text: `Edited ${file} (${count} replacement${count === 1 ? '' : 's'}).` };
     }),
     defineLoopTool('Write', 'Create or overwrite a file with the given content. Missing folders are created.', writeInput, async ({ file_path, content }) => {
       const file = toolPath(cwd, file_path);
+      if (isPrivatePath(file)) return { text: PRIVATE_FOLDER, isError: true };
       mkdirSync(dirname(file), { recursive: true });
       writeFileAtomic(file, content);
       return { text: `Wrote ${file} (${Buffer.byteLength(content)} bytes).` };
