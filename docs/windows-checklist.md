@@ -16,4 +16,36 @@ Run on a Windows machine with Claude Code installed and signed in, and Git for W
 12. Run a command step `sleep 600` and press Stop. The step stops, and Task Manager shows no `bash.exe` or `sleep.exe` left from it.
 13. Set `agentStream.gitBashPath` to a path that doesn't exist. The run dialog of a graph with command steps explains the problem. Clear the setting afterwards.
 
+**Parallel tickets and workspaces.** Use a Git repository with at least one commit and no uncommitted changes.
+
+14. **Checkout chip.** The graph tab's top bar shows `⎇ <branch>`, and its tooltip shows the repository root with the drive letter. Open a folder that isn't a Git repository: the chip says `Not a Git repository`.
+15. **Set Up Parallel Tickets.** Run it with two tickets (for example `ABC-1 Fix login` and `ABC-2 Add export`) and keep **Next to the repo**.
+    - Two folders appear next to the repository, `<repo>-abc-1-fix-login` and `<repo>-abc-2-add-export`.
+    - `git worktree list` shows them on branches `feat/abc-1-fix-login` and `feat/abc-2-add-export`.
+    - Each has a starter graph in `.agent-stream\graphs\`.
+16. **Opening a ticket.** Use **Open in New VS Code Window…** to open one ticket.
+    - The new window's chip shows `⎇ feat/abc-1-… · worktree <folder>`.
+    - Its Sessions and runs start empty.
+    - Its values file in `%USERPROFILE%\.agent-stream\values\` is separate from the main repository's.
+17. **Set Up refusals.**
+    - Run Set Up Parallel Tickets again with the same two tickets. It refuses, listing the existing branches and folders, and creates nothing.
+    - Modify a tracked file and run it with new tickets. It refuses with the uncommitted-changes message.
+    - Undo the change afterwards.
+18. **Write lease.** Open the main repository in two VS Code windows. In window 1, start a graph with a command step `sleep 60`. In window 2, start a graph with a command step.
+    - Window 2 shows **Can't start yet**, naming the run "in another VS Code window".
+    - While window 1's run is going, a lock file exists in `%USERPROFILE%\.agent-stream\locks\`.
+    - Choose **Run after it finishes**. Window 2's step starts within a few seconds of window 1's run ending, and the lock file is gone after both runs end.
+19. **Read-only step.** Mark an agent step **Read-only** and ask it to edit a file. The edit is refused without an approval prompt, and the step reports it.
+20. **A/B workspaces.** Run **New A/B Test Graph** with variants `wh_small` and `wh_large`.
+    - Set `setup_command` to `echo setup` and `run_wh_small` / `run_wh_large` to `pwd && sleep 20`, then run it.
+    - Both run steps run at the same time.
+    - Each `pwd` prints its own folder under `%USERPROFILE%\.agent-stream\worktrees\`.
+    - The logs header shows `workspace <name> · <path>`.
+21. **Manage Run Workspaces.**
+    - **Open in New VS Code Window** opens a variant.
+    - **Create Branch Here** creates the branch: check with `git branch` in the main repository.
+    - **Remove** removes it, so it's gone from `git worktree list`.
+    - Edit a file in the other variant, then Remove it. You're asked first.
+22. **Clean up.** Remove the two ticket worktrees with `git worktree remove <path>` and delete their branches with `git branch -D`.
+
 Report anything that differs, with the step number and a screenshot.
