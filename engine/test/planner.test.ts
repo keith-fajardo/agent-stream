@@ -160,7 +160,7 @@ describe('Planner', () => {
       "- Run steps in parallel (no edges between them) only when none of that applies: each starts from its own state and doesn't touch what the others read or change. When unsure, run them in sequence and say why in one chat line.",
       "- Test plans are often stateful sequences, for example create → update → delete; migrate → verify; deploy → smoke test; table absent → first run → new row → changed row.",
       "- Mark steps that only read, query or compare as read-only (access: read). That only lets them run alongside file-changing steps in the same workspace; edges still decide their order.",
-      "- If the project doesn't contain what the user names (for example no such model yet), still build the full graph: add a first step that locates or creates it, and say in one chat line what is missing.",
+      "- If the project doesn't contain what the user names (for example no such model yet), still build the full graph of steps that would run: add a first step that locates or creates it, and say in one chat line what is missing. Something missing never turns the plan into steps that only write documents.",
     ]) {
       expect(PLANNER_APPEND).toContain(line);
       expect(PLANNER_APPEND.indexOf(line)).toBeGreaterThan(graphTools);
