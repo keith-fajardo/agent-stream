@@ -7,7 +7,8 @@ import { emptyGraph, type AgentChange, type Graph, type GraphNode } from '@agent
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { send } = await import('../src/bridge');
 const { dispatch, getState } = await import('../src/store');
-const { ChangesPanel, sourceLabel } = await import('../src/components/ChangesPanel');
+const { ChangesPanel } = await import('../src/components/ChangesPanel');
+const { sourceLabel } = await import('../src/changeLabels');
 const { ChangeConfirmDialog } = await import('../src/components/ChangeConfirmDialog');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -114,6 +115,23 @@ describe('ChangesPanel', () => {
     const removed = rows().find((r) => r.textContent?.includes('n3'))!;
     await act(async () => removed.click());
     expect([...container.querySelectorAll('.diff-removed')].map((e) => e.textContent)).toContain('gone');
+  });
+
+  it('opens a change from the keyboard', async () => {
+    const row = rows()[2]!;
+    expect(row.getAttribute('role')).toBe('button');
+    expect(row.tabIndex).toBe(0);
+    await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(getState().selectedChange).toBe('node:n1');
+  });
+
+  it('closes the confirmation with Escape, posting nothing', async () => {
+    await act(async () => buttons('Revert all')[0]!.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(getState().changeConfirm).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('says so when there is nothing to review', async () => {

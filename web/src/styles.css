@@ -66,6 +66,12 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .empty { flex: 1; display: grid; place-items: center; color: var(--muted); }
 
 .step { width: 220px; min-height: 70px; padding: 8px 10px; border-radius: 8px; border: 2px solid var(--border); background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+/* The change mark is an outline, never the border: the border belongs to the run state (.status-*), so a changed
+   step still shows running/succeeded/failed. Dashed = added, solid = changed; a selected step's own outline wins. */
+.step.change-added { outline: 2px dashed var(--agent-accent); outline-offset: 3px; }
+.step.change-changed { outline: 2px solid var(--agent-accent); outline-offset: 3px; }
+.step.change-removed { opacity: 0.45; outline: 2px dashed var(--agent-accent); outline-offset: 3px; cursor: pointer; }
+.step.change-removed .step-title { text-decoration: line-through; }
 .step.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
 .step-title { font-weight: 600; display: flex; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
 .step-desc { margin-top: 4px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -73,10 +79,6 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .step-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }
 .by-agent { color: var(--info); }
 .change-badge { color: var(--agent-accent); font-weight: 600; }
-.step.change-added { border: 2px dashed var(--agent-accent); }
-.step.change-changed { border: 2px solid var(--agent-accent); }
-.step.change-removed { opacity: 0.45; border: 2px dashed var(--agent-accent); cursor: pointer; }
-.step.change-removed .step-title { text-decoration: line-through; }
 .react-flow__edge.edge-added .react-flow__edge-path { stroke: var(--agent-accent); stroke-dasharray: 6 4; stroke-width: 2; }
 .react-flow__edge.edge-removed .react-flow__edge-path { stroke: var(--agent-accent); stroke-dasharray: 4 4; opacity: 0.4; }
 .diff-removed { text-decoration: line-through; background: var(--vscode-diffEditor-removedTextBackground, rgba(180, 35, 24, 0.18)); }

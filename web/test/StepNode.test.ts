@@ -75,12 +75,29 @@ describe('StepNode', () => {
       await a.done();
     });
 
+    it('keeps the run-state class beside the change class, so the border still shows the run', async () => {
+      // CSS can't be asserted in jsdom: the change mark is an outline and the border stays with .status-*.
+      const a = await renderCardEl(node, { status: 'running' }, false, { change: 'changed', changeBy: planner });
+      const card = a.container.firstElementChild!;
+      expect(card.classList.contains('status-running')).toBe(true);
+      expect(card.classList.contains('change-changed')).toBe(true);
+      await a.done();
+    });
+
     it('uses neutral wording when nobody is recorded as the author', async () => {
       const changed = await renderCardEl(node, undefined, false, { change: 'changed' });
       expect(badge(changed.container)!.textContent).toBe('✎ changed');
+      expect(badge(changed.container)!.getAttribute('title')).toBe('Changed');
+      const withFields = await renderCardEl(node, undefined, false, { change: 'changed', changeFields: ['prompt'] });
+      expect(badge(withFields.container)!.getAttribute('title')).toBe('Changed: prompt');
+      await withFields.done();
+      const removed = await renderCardEl(node, undefined, false, { change: 'removed', ghost: true });
+      expect(badge(removed.container)!.getAttribute('title')).toBe('Removed');
+      await removed.done();
       await changed.done();
       const added = await renderCardEl(node, undefined, false, { change: 'added' });
       expect(badge(added.container)!.textContent).toBe('＋ added');
+      expect(badge(added.container)!.getAttribute('title')).toBe('Added');
       await added.done();
     });
 

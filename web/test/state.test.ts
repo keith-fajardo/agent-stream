@@ -196,6 +196,15 @@ describe('client state', () => {
       expect(reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), changes: one })).selectedChange).toBe('node:n2');
     });
 
+    it('does not carry a picked change or a pending confirmation over to another graph', () => {
+      const s = apply(opened(graph('a', ['n1']), { baseline, changes: one }), { kind: 'selectChange', key: 'node:n2' }, { kind: 'openChangeConfirm', mode: 'accept' });
+      const other = reduce(s, opened(graph('b', ['n1']), { changes: one }));
+      expect([other.selectedChange, other.changeConfirm]).toEqual([undefined, undefined]);
+      // Re-opening the same graph keeps them.
+      const same = reduce(s, opened(graph('a', ['n1']), { baseline, changes: one }));
+      expect([same.selectedChange, same.changeConfirm]).toEqual(['node:n2', 'accept']);
+    });
+
     it('asks to confirm accepting or reverting everything', () => {
       const s = reduce(apply(opened(graph('a'), { changes: one })), { kind: 'openChangeConfirm', mode: 'revert' });
       expect(s.changeConfirm).toBe('revert');

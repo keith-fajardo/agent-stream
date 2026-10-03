@@ -144,6 +144,8 @@ function reduceServer(state: State, msg: HostMessage): State {
       return {
         ...state,
         ...reviewing(state, msg.changes),
+        // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
+        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined }),
         graph: msg.graph,
         baseline: msg.baseline,
         changes: msg.changes,

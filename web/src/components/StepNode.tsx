@@ -15,8 +15,9 @@ export type StepData = {
 };
 export type StepFlowNode = Node<StepData, 'step'>;
 
+/** `Changed: prompt, title`, or just `Added` / `Removed`; the badge already says who. */
 const changeTitle = (change: NonNullable<StepData['change']>, fields?: ChangedField[]) =>
-  change === 'changed' && fields?.length ? `Changed: ${fields.join(', ')}` : change === 'added' ? 'Added by an agent' : change === 'removed' ? 'Removed by an agent' : 'Changed by an agent';
+  `${change[0].toUpperCase()}${change.slice(1)}${fields?.length ? `: ${fields.join(', ')}` : ''}`;
 
 export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
   const { node, state, waiting, change, changeBy, changeFields } = data;

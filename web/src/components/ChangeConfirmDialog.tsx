@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { actions } from '../actions';
 import { dispatch, useStore } from '../store';
 
@@ -5,6 +6,14 @@ import { dispatch, useStore } from '../store';
 export function ChangeConfirmDialog() {
   const mode = useStore((s) => s.changeConfirm);
   const count = useStore((s) => s.changes.length);
+  useEffect(() => {
+    if (!mode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dispatch({ kind: 'closeChangeConfirm' });
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mode]);
   if (!mode) return null;
   const close = () => dispatch({ kind: 'closeChangeConfirm' });
   const confirm = () => {

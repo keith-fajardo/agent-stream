@@ -4,8 +4,6 @@ import { changeKey, sourceLabel } from '../changeLabels';
 import { lineDiff } from '../lineDiff';
 import { dispatch, useStore } from '../store';
 
-export { sourceLabel };
-
 const ICONS: Record<AgentChange['change'], string> = { added: '＋', changed: '✎', removed: '✕' };
 const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)' };
 
@@ -74,7 +72,20 @@ export function ChangesPanel() {
         {rows.map((c) => {
           const key = changeKey(c);
           return (
-            <li key={key} className={`change-row${selected === key ? ' selected' : ''}`} onClick={() => dispatch({ kind: 'selectChange', key })}>
+            <li
+              key={key}
+              className={`change-row${selected === key ? ' selected' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-expanded={selected === key}
+              onClick={() => dispatch({ kind: 'selectChange', key })}
+              onKeyDown={(e) => {
+                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  dispatch({ kind: 'selectChange', key });
+                }
+              }}
+            >
               <div className="change-head">
                 <span className={`change-icon icon-${c.change}`}>{ICONS[c.change]}</span>
                 <span className="change-name">{name(c)}</span>
