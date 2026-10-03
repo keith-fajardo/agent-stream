@@ -149,6 +149,19 @@ describe('Planner', () => {
     expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people');
   });
 
+  it('tells the planner to decompose a plan into one node per step or scenario', () => {
+    const graphTools = PLANNER_APPEND.indexOf('- Build and change plans only through the graph tools');
+    expect(graphTools).toBeGreaterThanOrEqual(0);
+    for (const line of [
+      '- Decompose. When asked for a plan, create one node per distinct step or scenario — for example setup, each test scenario, each check, and a summary — connected by edges in the order they must run. Never put a whole multi-step plan into a single node\'s prompt.',
+      '- Let independent scenarios run in parallel: give them no edges between each other. Mark steps that only read, query or compare as read-only (access: read) so they can run side by side.',
+      "- If the project doesn't contain what the user names (for example no such model yet), still build the full graph: add a first step that locates or creates it, and say in one chat line what is missing.",
+    ]) {
+      expect(PLANNER_APPEND).toContain(line);
+      expect(PLANNER_APPEND.indexOf(line)).toBeGreaterThan(graphTools);
+    }
+  });
+
   it('calls request_run only when the user asks for a run', () => {
     expect(PLANNER_APPEND).toContain(
       '- You cannot start runs. Only call request_run when the user asks you to run or test the graph; after building or changing a plan, stop and let the user review it. Use get_run to read results when debugging.',
