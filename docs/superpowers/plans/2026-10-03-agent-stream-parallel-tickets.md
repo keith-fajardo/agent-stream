@@ -142,7 +142,7 @@ Task 5 also does the dependency plumbing (`AppDeps.leases/git/home`, `EngineMana
 These are five failure modes the spec implies but that no task's main tests would naturally exercise, most likely first. Each is pinned by a test in the task that owns the code.
 
 1. **Two workspace folders of one checkout** (a repo and its subfolder) open in one window, or the same repo in two windows. They must share one lease, keyed by the Git top-level and not by the folder, so the second folder's write-capable run is blocked. Pinned in Task 3 (`git.test.ts` › "reports the top-level folder as the root of a subfolder") and Task 5 (`runner.test.ts` › "blocks a second write-capable run in the same checkout, from another engine, creating nothing").
-2. **A step agent adds a checkout step mid-run to a run whose writers were all in variant workspaces.** That run holds no lease. The added step must wait for the lease (or take it if free) before it changes files in the checkout. Pinned in Task 5: `runner.test.ts` › "takes the lease on demand for a checkout step added mid-run".
+2. **A step agent adds a checkout step mid-run to a run whose writers were all in variant workspaces.** That run holds no lease. The added step must wait for the lease (or take it if free) before it changes files in the checkout. Pinned in Task 6: `runner.test.ts` › "takes the lease on demand for a checkout step added mid-run".
 3. **A step in a variant workspace reads an earlier step's output.** Its working directory is the worktree, so the `Full output:` path must be absolute, or the agent reads a file that doesn't exist. Pinned in Task 6: `runner.test.ts` › "runs a step that has a workspace there, with absolute paths to earlier outputs".
 4. **An agent in a variant workspace reads the folder's run records** (`.agent-stream/runs/*/run.json`, which contain variable values) by absolute path. Privacy must still refuse it, even though the step's `projectDir` is now the worktree. Pinned in Task 6: `toolGate.test.ts` › "keeps the folder's run records private from a step in a workspace".
 5. **"Run after it finishes" when the holder finished meanwhile.** The re-sent `startRun` with `sequential: true` must simply start and take the lease, with no `waitingFor` and no stuck queued steps. Pinned in Task 5: `runner.test.ts` › "a sequential start takes the lease at once when it is free".
@@ -3127,6 +3127,7 @@ describe('the checkout and the write lease', () => {
       return { ok: true, output: '' };
     };
     const added: string[] = [];
+    const removed: string[] = [];
     const { app, root, home, projectDir } = gitApp({
       git: (root) =>
         repoGit({
@@ -3136,6 +3137,10 @@ describe('the checkout and the write lease', () => {
           answers: {
             'worktree add --detach *': (cwd, args) => {
               added.push(`${cwd}|${args[3]}|${args[4]}`);
+              return {};
+            },
+            'worktree remove *': (_cwd, args) => {
+              removed.push(args.join(' '));
               return {};
             },
           },
@@ -3158,6 +3163,8 @@ describe('the checkout and the write lease', () => {
     expect(run.workspaces).toEqual({ wh_a: { path: pathA, head: SHA }, wh_b: { path: pathB, head: SHA } });
     expect(added).toEqual([`${root}|${pathA}|${SHA}`, `${root}|${pathB}|${SHA}`]);
     expect(ran).toEqual(expect.arrayContaining([{ id: 'n1', cwd: pathA }, { id: 'n2', cwd: pathB }, { id: 'n3', cwd: projectDir }]));
+    // Kept after the run for inspection (spec §4.3a): nothing removes them.
+    expect(removed).toEqual([]);
   });
 
   it("refuses the run when a workspace can't be created, removing this attempt's worktrees", async () => {
@@ -5669,7 +5676,7 @@ describe('TopBar run picker', () => {
 In `web/test/RunConfirmDialog.test.ts`:
 - Change the bridge import to `const { post, send } = await import('../src/bridge');`.
 - Add `type ServerMessage` to the shared import.
-- Add `vi.mocked(post).mockClear();` to `beforeEach`.
+- Add `vi.mocked(post).mockClear();` and `dispatch({ kind: 'closeBlocked' });` to `beforeEach`. The store outlives each test, and `graphOpened` for the same graph id keeps `blocked`.
 - Append:
 
 ```ts
@@ -6419,4 +6426,4 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Task 5: `Runner.newRunId`, `Runner.dispose`.
 - Tasks 3/5/12: `fakeGit` (engine and extension copies), `appTestDeps`, `engineTestDeps`, `testLeases`, `noGit`.
 
-**4. Review Focus.** Each of the five has a test in its owning task (Tasks 3, 5, 6, 6 and 5).
+**4. Review Focus.** Each of the five has a test in its owning task: 1 in Tasks 3 and 5, 2–4 in Task 6, and 5 in Task 5.
