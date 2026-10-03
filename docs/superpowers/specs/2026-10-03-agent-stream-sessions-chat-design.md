@@ -140,7 +140,7 @@ Success:
 ### 5.1 Active session and the status bar
 
 - **Active session.** There is one per folder, stored in `context.workspaceState` under
-  `agentStream.activeSession:<folderKey>`. It falls back to the most recently updated session.
+  `agentStream.activeSession:<folderKey>`. With nothing remembered, it is the "Default" session if that is readable, otherwise the most recently updated readable session.
 - **Status bar.** The item shows `$(layers) <session name>` for the folder of the active graph tab. In a
   single-folder window it uses that folder. Clicking it runs Switch Session.
 
