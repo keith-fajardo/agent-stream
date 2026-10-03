@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { emptyGraph, type ApprovalRequest, type Graph, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
-const { sendHost, post } = await import('../src/bridge');
+const { sendHost, post, send } = await import('../src/bridge');
 const { buildMenus } = await import('../src/menuModel');
 const { initialState, reduce } = await import('../src/state');
+const { dispatch, getState } = await import('../src/store');
 type State = import('../src/state').State;
 type MenuAction = import('../src/menuModel').MenuAction;
 
@@ -82,6 +83,35 @@ describe('menus', () => {
     const s = base({ approvals: [approval('a1', 'g'), approval('a2', 'other'), approval('a3', 'g')] });
     expect(items(s, 'run')['Approve all (2)'].enabled).toBe(true);
     expect(items(base(), 'run')['Approve all (0)'].enabled).toBe(false);
+  });
+
+  it('leaves graph-change approvals out of Approve all, and out of its count', () => {
+    const graphChange = { ...approval('a2', 'g'), toolName: 'Change graph', graphChange: { summary: 'n1 wants to add a step', detail: 'text' } };
+    const approvals = [approval('a1', 'g'), graphChange, approval('a3', 'other')];
+    const s = base({ approvals });
+    expect(items(s, 'run')['Approve all (1)'].enabled).toBe(true);
+    // Running the item acts on the live store.
+    dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals } });
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph, runs: [], variableValues: {} } });
+    vi.mocked(send).mockClear();
+    items(s, 'run')['Approve all (1)'].run();
+    expect(vi.mocked(send).mock.calls).toEqual([[{ type: 'decide', approvalId: 'a1', decision: 'approve' }]]);
+    const only = base({ approvals: [graphChange] });
+    expect(items(only, 'run')['Approve all (0)'].enabled).toBe(false);
+  });
+
+  it('has the agent-change review items in Edit, disabled when nothing changed', () => {
+    const none = items(base(), 'edit');
+    expect([none['Review agent changes…'].enabled, none['Accept all agent changes'].enabled, none['Revert all agent changes'].enabled]).toEqual([false, false, false]);
+    const some = base({ changes: [{ kind: 'node', change: 'added', id: 'n1', title: 'n1' }] });
+    const edit = items(some, 'edit');
+    expect([edit['Review agent changes…'].enabled, edit['Accept all agent changes'].enabled, edit['Revert all agent changes'].enabled]).toEqual([true, true, true]);
+    edit['Review agent changes…'].run();
+    expect(getState().tab).toBe('changes');
+    edit['Accept all agent changes'].run();
+    expect(getState().changeConfirm).toBe('accept');
+    edit['Revert all agent changes'].run();
+    expect(getState().changeConfirm).toBe('revert');
   });
 
   it('checks the View toggles', () => {

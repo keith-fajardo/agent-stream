@@ -25,6 +25,14 @@ export function graphTarget(folderPath: string, filePath: string): string | unde
   return dir === '.agent-stream' && graphs === 'graphs' && m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
+const GENERIC_NOT_GRAPH = `This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`;
+const BASELINE_NOT_GRAPH = 'This is the agent-change baseline for a graph (your accepted version). Use "Reopen Editor With… → Text Editor" to see it as JSON.';
+
+/** Why a file the graph editor was asked to open isn't shown as a graph. The editor selector also matches `<id>.baseline.json`. */
+export function notGraphText(filePath: string): string {
+  return /(^|[\\/])[^\\/]+\.baseline\.json$/.test(filePath) ? BASELINE_NOT_GRAPH : GENERIC_NOT_GRAPH;
+}
+
 export const panelKey = (folderKey: string, graphId: string): string => `${folderKey}|${graphId}`;
 
 /** What the registry needs from a webview panel; tests pass a fake. */
@@ -176,7 +184,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
     const folder = this.d.folderFor(document.uri);
     const graphId = folder && graphTarget(folder.path, document.uri.fsPath);
     if (!folder || !graphId) {
-      webview.html = messagePage(`This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`);
+      webview.html = messagePage(notGraphText(document.uri.fsPath));
       return;
     }
     const app = this.d.engines.get(folder);

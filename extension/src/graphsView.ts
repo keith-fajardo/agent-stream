@@ -27,7 +27,9 @@ export class GraphItem extends vscode.TreeItem {
       this.iconPath = new vscode.ThemeIcon('warning');
       return;
     }
-    this.description = graph.lastRun ? `${statusLabel(graph.lastRun.status)} · ${relativeTime(graph.lastRun.startedAt, now)}` : 'Never run';
+    const lastRun = graph.lastRun ? `${statusLabel(graph.lastRun.status)} · ${relativeTime(graph.lastRun.startedAt, now)}` : 'Never run';
+    const n = graph.agentChanges ?? 0;
+    this.description = n > 0 ? `${lastRun} · ${n} agent ${n === 1 ? 'change' : 'changes'}` : lastRun;
     this.contextValue = 'graph';
     this.iconPath = new vscode.ThemeIcon('type-hierarchy');
     this.command = { command: 'agentStream.openGraph', title: 'Open', arguments: [{ folder, graphId: graph.id }] };

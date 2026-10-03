@@ -22,4 +22,19 @@ describe('ApprovalCard', () => {
     expect(approve.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => root.unmount());
   });
+
+  it('shows a graph change as its summary, with the exact text that would run', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const graphChange = { summary: 'n1 wants to add a step "Install deps"', detail: 'Step n5 (command)\nnpm ci' };
+    await act(async () => root.render(createElement(ApprovalCard, { request: { ...request('a2', ''), toolName: 'Change graph', input: {}, graphChange } })));
+    const card = container.querySelector('.approval-card') as HTMLElement;
+    expect(card.querySelector('.approval-title')!.textContent).toBe(graphChange.summary);
+    expect(card.textContent).not.toContain('wants to use');
+    const pre = card.querySelector('details pre') as HTMLElement;
+    expect(pre.textContent).toBe(graphChange.detail);
+    expect(card.querySelector('details')!.open).toBe(true);
+    expect([...card.querySelectorAll('button')].map((b) => b.textContent)).toEqual(expect.arrayContaining(['Approve', 'Deny']));
+    await act(async () => root.unmount());
+  });
 });

@@ -11,6 +11,7 @@
   --warn: var(--vscode-editorWarning-foreground, #b26a00);
   --info: var(--vscode-textLink-foreground, #1d5fa8);
   --skip: var(--vscode-disabledForeground, #8a8a86);
+  --agent-accent: var(--vscode-charts-purple, var(--vscode-focusBorder, #8957e5));
   --code-bg: var(--vscode-textCodeBlock-background, #f1f0ec);
   font-family: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
   font-size: var(--vscode-font-size, 13px);
@@ -71,6 +72,30 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .kind-icon { color: var(--muted); font-family: ui-monospace, monospace; }
 .step-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }
 .by-agent { color: var(--info); }
+.change-badge { color: var(--agent-accent); font-weight: 600; }
+.step.change-added { border: 2px dashed var(--agent-accent); }
+.step.change-changed { border: 2px solid var(--agent-accent); }
+.step.change-removed { opacity: 0.45; border: 2px dashed var(--agent-accent); cursor: pointer; }
+.step.change-removed .step-title { text-decoration: line-through; }
+.react-flow__edge.edge-added .react-flow__edge-path { stroke: var(--agent-accent); stroke-dasharray: 6 4; stroke-width: 2; }
+.react-flow__edge.edge-removed .react-flow__edge-path { stroke: var(--agent-accent); stroke-dasharray: 4 4; opacity: 0.4; }
+.diff-removed { text-decoration: line-through; background: var(--vscode-diffEditor-removedTextBackground, rgba(180, 35, 24, 0.18)); }
+.diff-added { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 125, 50, 0.2)); }
+.diff-block { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; background: var(--code-bg); border-radius: 6px; padding: 6px 8px; max-height: 260px; overflow: auto; }
+.changes-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.change-list { list-style: none; margin: 0; padding: 0; flex: 1; overflow: auto; }
+.change-row { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.change-row.selected { background: var(--code-bg); }
+.change-head { display: flex; align-items: center; gap: 6px; }
+.change-icon { color: var(--agent-accent); font-weight: 700; }
+.change-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.change-actions { display: flex; gap: 6px; }
+.change-meta { font-size: 12px; }
+.change-detail { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.change-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.change-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--agent-accent); border-radius: 8px; font-size: 12px; }
+.approval-title { font-weight: 600; overflow-wrap: anywhere; }
+.approval-card details pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .status-running { border-color: var(--info); }
 .status-waiting_approval, .step.waiting { border-color: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
 .status-succeeded, .status-reused { border-color: var(--ok); }

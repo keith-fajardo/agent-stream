@@ -48,9 +48,9 @@ export function runCommands(d: RunCommandDeps) {
     deny(item: ApprovalTarget): void {
       if (isItem(item)) decide(item, 'deny');
     },
-    /** Approves every request listed now, in every graph; anything arriving later still waits. */
+    /** Approves every request listed now, in every graph; anything arriving later still waits. A graph change always needs its own approval. */
     approveAll(): void {
-      for (const item of d.engines.approvals()) decide(item, 'approve');
+      for (const item of d.engines.approvals()) if (!item.request.graphChange) decide(item, 'approve');
     },
     async revealApproval(item: ApprovalTarget): Promise<void> {
       if (!isItem(item)) return;

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, HostCommand } from '@agent-stream/shared';
+import type { ApprovalRequest, ChangeTarget, HostCommand } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions } from './layout';
 import type { State, Tab } from './state';
@@ -15,6 +15,11 @@ export function registerCanvas(c: CanvasActions | undefined): void {
 export function graphApprovals(s: State): ApprovalRequest[] {
   const id = s.graph?.id;
   return id ? s.approvals.filter((a) => a.graphId === id) : [];
+}
+
+/** What Run › Approve all will approve: this graph's pending requests, except graph changes, which each need their own approval. */
+export function approvableApprovals(s: State): ApprovalRequest[] {
+  return graphApprovals(s).filter((a) => !a.graphChange);
 }
 
 /** One code path per action: the menu bar, toolbar buttons and panels all call these. */
@@ -44,7 +49,22 @@ export const actions = {
     if (run?.status === 'running') send({ type: 'stopRun', runId: run.id });
   },
   approveAll(): void {
-    for (const a of graphApprovals(getState())) send({ type: 'decide', approvalId: a.id, decision: 'approve' });
+    for (const a of approvableApprovals(getState())) send({ type: 'decide', approvalId: a.id, decision: 'approve' });
+  },
+  reviewChanges(): void {
+    dispatch({ kind: 'setTab', tab: 'changes' });
+  },
+  acceptChange(target: ChangeTarget): void {
+    const { graph } = getState();
+    if (graph) send({ type: 'op', graphId: graph.id, op: { type: 'acceptChange', target } });
+  },
+  revertChange(target: ChangeTarget): void {
+    const { graph } = getState();
+    if (graph) send({ type: 'op', graphId: graph.id, op: { type: 'revertChange', target } });
+  },
+  /** Accept all / Revert all ask first (the dialog calls acceptChange or revertChange with the `all` target on Confirm). */
+  confirmAllChanges(mode: 'accept' | 'revert'): void {
+    dispatch({ kind: 'openChangeConfirm', mode });
   },
   toggleMinimap(): void {
     const value = !getState().minimap;

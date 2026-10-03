@@ -16,7 +16,7 @@ describe('bridge', () => {
     deliver({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
     expect(getState().status).toEqual({ provider: 'claude', ok: true, label: 'Claude Max' });
     expect(posted.at(-1)).toEqual({ type: 'openGraph', graphId: 'parity' });
-    deliver({ type: 'graphOpened', graph: emptyGraph('parity', 'Parity', 't'), runs: [], variableValues: {} });
+    deliver({ type: 'graphOpened', changes: [], graph: emptyGraph('parity', 'Parity', 't'), runs: [], variableValues: {} });
     expect(getState().graph?.id).toBe('parity');
     expect(posted.at(-1)).toEqual({ type: 'opened', graphId: 'parity' });
   });

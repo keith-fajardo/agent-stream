@@ -1,5 +1,5 @@
 import { refinable, type HostCommand } from '@agent-stream/shared';
-import { actions, graphApprovals } from './actions';
+import { actions, approvableApprovals } from './actions';
 import type { State, Tab } from './state';
 
 export type MenuAction = { label: string; enabled: boolean; checked?: boolean; warn?: boolean; run: () => void };
@@ -28,7 +28,8 @@ export function buildMenus(s: State): Menu[] {
   const running = s.run?.status === 'running';
   const signedIn = !!s.status?.ok;
   const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
-  const pending = graphApprovals(s).length;
+  const pending = approvableApprovals(s).length;
+  const changeCount = s.changes.length;
   const selectedNode = s.graph?.nodes.find((n) => n.id === s.selectedNodeId);
   const changedIds = (s.graph?.nodes ?? []).filter((n) => n.updatedBy === 'user' && refinable(n)).map((n) => n.id);
   const tab = (label: string, t: Tab) => item(label, hasGraph, () => actions.showTab(t), { checked: s.tab === t });
@@ -58,6 +59,10 @@ export function buildMenus(s: State): Menu[] {
         SEPARATOR,
         item('Refine selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.refine([selectedNode!.id])),
         item(`Refine steps you changed (${changedIds.length})`, signedIn && changedIds.length > 0, () => actions.refine(changedIds)),
+        SEPARATOR,
+        item('Review agent changes…', changeCount > 0, actions.reviewChanges),
+        item('Accept all agent changes', changeCount > 0, () => actions.confirmAllChanges('accept')),
+        item('Revert all agent changes', changeCount > 0, () => actions.confirmAllChanges('revert')),
       ],
     },
     {

@@ -152,4 +152,55 @@ describe('client state', () => {
     expect(reduce(reduce(s, { kind: 'openVariables' }), { kind: 'closeVariables' }).variablesDialog).toBeUndefined();
     expect(reduce(s, { kind: 'setMinimap', value: false }).minimap).toBe(false);
   });
+
+  describe('agent changes', () => {
+    const baseline = graph('a', ['n1', 'n2']);
+    const one: import('@agent-stream/shared').AgentChange[] = [{ kind: 'node', change: 'removed', id: 'n2', title: 'n2' }];
+
+    it('stores the baseline and changes from graphOpened and graph', () => {
+      const s = apply(opened(graph('a', ['n1']), { baseline, changes: one }));
+      expect([s.baseline, s.changes]).toEqual([baseline, one]);
+      const next = reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), baseline: graph('a', ['n1']), changes: [] }));
+      expect([next.baseline?.nodes.length, next.changes]).toEqual([1, []]);
+      expect(reduce(s, server({ type: 'graph', graph: graph('b'), baseline: graph('b'), changes: [] })).changes).toEqual(one);
+    });
+
+    it('drops them when the graph is deleted', () => {
+      const s = reduce(apply(opened(graph('a', ['n1']), { baseline, changes: one })), server({ type: 'graphDeleted', graphId: 'a' }));
+      expect([s.baseline, s.changes]).toEqual([undefined, []]);
+    });
+
+    it('leaves the Changes tab when the count drops to 0', () => {
+      const s = apply(opened(graph('a', ['n1']), { baseline, changes: one }), { kind: 'setTab', tab: 'changes' });
+      expect(s.tab).toBe('changes');
+      expect(reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), changes: one })).tab).toBe('changes');
+      expect(reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), changes: [] })).tab).toBe('node');
+      expect(reduce(s, opened(graph('a', ['n1']))).tab).toBe('node');
+      const graphTab = apply(opened(graph('a'), { changes: one }), { kind: 'setTab', tab: 'graph' });
+      expect(reduce(graphTab, server({ type: 'graph', graph: graph('a'), changes: [] })).tab).toBe('graph');
+    });
+
+    it('selects a change: opens the tab, and selects the step when it still exists', () => {
+      const s = apply(opened(graph('a', ['n1']), { baseline, changes: one }));
+      const ghost = reduce(s, { kind: 'selectChange', key: 'node:n2' });
+      expect([ghost.tab, ghost.selectedChange, ghost.selectedNodeId]).toEqual(['changes', 'node:n2', undefined]);
+      const real = reduce(s, { kind: 'selectChange', key: 'node:n1' });
+      expect([real.tab, real.selectedChange, real.selectedNodeId]).toEqual(['changes', 'node:n1', 'n1']);
+      // Selecting a step on the canvas moves to the Node tab but leaves the change selection alone.
+      expect(reduce(real, { kind: 'selectNode', id: 'n1' }).tab).toBe('node');
+    });
+
+    it('forgets a selected change that is no longer pending', () => {
+      const s = apply(opened(graph('a', ['n1']), { baseline, changes: one }), { kind: 'selectChange', key: 'node:n2' });
+      expect(reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), changes: [] })).selectedChange).toBeUndefined();
+      expect(reduce(s, server({ type: 'graph', graph: graph('a', ['n1']), changes: one })).selectedChange).toBe('node:n2');
+    });
+
+    it('asks to confirm accepting or reverting everything', () => {
+      const s = reduce(apply(opened(graph('a'), { changes: one })), { kind: 'openChangeConfirm', mode: 'revert' });
+      expect(s.changeConfirm).toBe('revert');
+      expect(reduce(s, { kind: 'closeChangeConfirm' }).changeConfirm).toBeUndefined();
+      expect(reduce(s, server({ type: 'graph', graph: graph('a'), changes: [] })).changeConfirm).toBeUndefined();
+    });
+  });
 });

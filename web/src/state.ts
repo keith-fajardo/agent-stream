@@ -1,4 +1,5 @@
 import type {
+  AgentChange,
   ApprovalRequest,
   ChatEntry,
   ChatTarget,
@@ -11,8 +12,9 @@ import type {
   RunPreview,
   RunSummary,
 } from '@agent-stream/shared';
+import { changeKey } from './changeLabels';
 
-export type Tab = 'node' | 'graph';
+export type Tab = 'node' | 'graph' | 'changes';
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
 
 export type State = {
@@ -21,6 +23,13 @@ export type State = {
   project?: string;
   graphs: GraphListItem[];
   graph?: Graph;
+  /** The user's accepted version of the graph, and what agents changed since (spec §3). */
+  baseline?: Graph;
+  changes: AgentChange[];
+  /** The change picked in the Changes tab, as `node:<id>` or `edge:<id>`. */
+  selectedChange?: string;
+  /** An Accept all / Revert all waiting for the user's confirmation. */
+  changeConfirm?: 'accept' | 'revert';
   runs: RunSummary[];
   /** The run shown on the canvas and in the logs: the latest by default, or one the user picked. */
   run?: RunMeta;
@@ -44,13 +53,16 @@ export type State = {
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, logsHidden: false };
+export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, logsHidden: false };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
   | { kind: 'disconnected' }
   | { kind: 'selectNode'; id?: string }
   | { kind: 'setTab'; tab: Tab }
+  | { kind: 'selectChange'; key: string }
+  | { kind: 'openChangeConfirm'; mode: 'accept' | 'revert' }
+  | { kind: 'closeChangeConfirm' }
   | { kind: 'openConfirm'; request: ConfirmRequest }
   | { kind: 'closeConfirm' }
   | { kind: 'previewRequested'; requestId: string }
@@ -75,6 +87,16 @@ export function reduce(state: State, action: Action): State {
       return { ...state, selectedNodeId: action.id, tab: action.id ? 'node' : state.tab };
     case 'setTab':
       return { ...state, tab: action.tab };
+    case 'selectChange': {
+      // A step that still exists is selected too; a ghost (removed step) has nothing to select.
+      const id = action.key.startsWith('node:') ? action.key.slice('node:'.length) : undefined;
+      const exists = id !== undefined && !!state.graph?.nodes.some((n) => n.id === id);
+      return { ...state, tab: 'changes', selectedChange: action.key, ...(exists && { selectedNodeId: id }) };
+    }
+    case 'openChangeConfirm':
+      return { ...state, changeConfirm: action.mode };
+    case 'closeChangeConfirm':
+      return { ...state, changeConfirm: undefined };
     case 'openConfirm':
       return { ...state, confirm: action.request, preview: undefined, previewRequestId: undefined };
     case 'closeConfirm':
@@ -96,6 +118,15 @@ export function reduce(state: State, action: Action): State {
   }
 }
 
+/** What the review state becomes when the changes become `changes`: the Changes tab and a picked change only exist while they do. */
+function reviewing(state: State, changes: AgentChange[]): Pick<State, 'tab' | 'selectedChange' | 'changeConfirm'> {
+  return {
+    tab: changes.length === 0 && state.tab === 'changes' ? 'node' : state.tab,
+    selectedChange: changes.some((c) => changeKey(c) === state.selectedChange) ? state.selectedChange : undefined,
+    changeConfirm: changes.length === 0 ? undefined : state.changeConfirm,
+  };
+}
+
 function reduceServer(state: State, msg: HostMessage): State {
   const current = state.graph?.id;
   switch (msg.type) {
@@ -107,12 +138,15 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, graphs: msg.graphs };
     case 'graphDeleted':
       return msg.graphId === current
-        ? { ...state, graph: undefined, run: undefined, runs: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
+        ? { ...state, ...reviewing(state, []), graph: undefined, baseline: undefined, changes: [], run: undefined, runs: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
         : state;
     case 'graphOpened':
       return {
         ...state,
+        ...reviewing(state, msg.changes),
         graph: msg.graph,
+        baseline: msg.baseline,
+        changes: msg.changes,
         runs: msg.runs,
         run: msg.run,
         logs: {},
@@ -125,7 +159,7 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'graph': {
       if (msg.graph.id !== current) return state;
       const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);
-      return { ...state, graph: msg.graph, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
+      return { ...state, ...reviewing(state, msg.changes), graph: msg.graph, baseline: msg.baseline, changes: msg.changes, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
     }
     case 'opRejected':
       return msg.graphId === current ? { ...state, toast: msg.error } : state;

@@ -15,7 +15,8 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import { nextNodeId, type Op, type Position } from '@agent-stream/shared';
-import { buildFlowEdges, buildFlowNodes } from '../flowNodes';
+import { changeKey } from '../changeLabels';
+import { buildFlowEdges, buildFlowNodes, GHOST_PREFIX } from '../flowNodes';
 import { actions, registerCanvas } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
@@ -27,6 +28,8 @@ const nodeTypes = { step: StepNode };
 export function Canvas() {
   const graph = useStore((s) => s.graph);
   const run = useStore((s) => s.run);
+  const baseline = useStore((s) => s.baseline);
+  const agentChanges = useStore((s) => s.changes);
   const approvals = useStore((s) => s.approvals);
   const selectedId = useStore((s) => s.selectedNodeId);
   const minimap = useStore((s) => s.minimap);
@@ -45,11 +48,11 @@ export function Canvas() {
     lastSelected.current = selectedId;
     setNodes((current) =>
       graph
-        ? buildFlowNodes({ graph, run: runForGraph, approvals, selectedId, selectionChanged, current, dragging: dragging.current, pendingMoves: pendingMoves.current })
+        ? buildFlowNodes({ graph, run: runForGraph, approvals, selectedId, selectionChanged, current, dragging: dragging.current, pendingMoves: pendingMoves.current, baseline, changes: agentChanges })
         : [],
     );
-    setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current) : []));
-  }, [graph, runForGraph, approvals, selectedId]);
+    setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current, agentChanges) : []));
+  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<StepFlowNode>[]) => setNodes((current) => applyNodeChanges(changes.filter((c) => c.type !== 'remove'), current)),
@@ -119,7 +122,11 @@ export function Canvas() {
             op({ type: 'moveNode', id: n.id, position });
           })
         }
-        onNodeClick={(_e, n) => dispatch({ kind: 'selectNode', id: n.id })}
+        // A ghost (a removed step or connection) can't be edited: clicking it opens its change instead.
+        onNodeClick={(_e, n) => dispatch(n.data.ghost ? { kind: 'selectChange', key: changeKey({ kind: 'node', id: n.data.node.id }) } : { kind: 'selectNode', id: n.id })}
+        onEdgeClick={(_e, edge) => {
+          if (edge.id.startsWith(GHOST_PREFIX)) dispatch({ kind: 'selectChange', key: changeKey({ kind: 'edge', id: edge.id.slice(GHOST_PREFIX.length) }) });
+        }}
         onPaneClick={() => dispatch({ kind: 'selectNode' })}
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}

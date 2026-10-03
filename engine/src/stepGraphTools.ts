@@ -22,10 +22,10 @@ export type StepGraphToolDeps = {
 const APPROVAL = "Every change waits for the user's approval; only steps that haven't started can be changed.";
 const TOOL_NAME = 'Change graph';
 const started = (id: string) => `${id} already started; the change was not applied.`;
-/** A title is part of what runs (`# Your step: <title>`): one line, so it can't smuggle in instructions. */
+/** A title is part of what runs (`# Your step: <title>`): one line (no Unicode line break either), so it can't smuggle in instructions. */
 const MAX_TITLE_CHARS = 200;
 const TITLE_PROBLEM = `a step title must be one line of at most ${MAX_TITLE_CHARS} characters`;
-const titleProblem = (title: string | undefined) => (title !== undefined && (/[\r\n]/.test(title) || title.length > MAX_TITLE_CHARS) ? TITLE_PROBLEM : null);
+const titleProblem = (title: string | undefined) => (title !== undefined && (/[\r\n\u2028\u2029\u0085\v\f]/.test(title) || title.length > MAX_TITLE_CHARS) ? TITLE_PROBLEM : null);
 
 /** Changed fields in the order a person reads them: the text that runs first. */
 const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec'];

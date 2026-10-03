@@ -29,6 +29,17 @@ describe('GraphsView', () => {
     expect(items[2].tooltip).toBe('invalid JSON: Unexpected end');
   });
 
+  it('adds the number of agent changes waiting for review', () => {
+    const items = view([a], {
+      [a.key]: [
+        { id: 'p', name: 'Parity', lastRun: { status: 'succeeded', startedAt: '2026-10-02T10:00:00Z' }, agentChanges: 3 },
+        { id: 'd', name: 'Demo', agentChanges: 1 },
+        { id: 'z', name: 'Zero', agentChanges: 0 },
+      ],
+    }).getChildren() as GraphItem[];
+    expect(items.map((i) => i.description)).toEqual(['Succeeded · 2h ago · 3 agent changes', 'Never run · 1 agent change', 'Never run']);
+  });
+
   it('groups graphs by folder in a multi-folder workspace', () => {
     const v = view([a, b], { [b.key]: [{ id: 'g', name: 'G' }] });
     const top = v.getChildren();

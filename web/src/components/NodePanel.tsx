@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { refinable, type GraphNode, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
+import { changedSentence, changeKey } from '../changeLabels';
 import { post, send } from '../bridge';
-import { useStore } from '../store';
+import { dispatch, useStore } from '../store';
 
 type Draft = { title: string; description: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
 
@@ -19,10 +20,24 @@ const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b
 export function NodePanel() {
   const graph = useStore((s) => s.graph);
   const selectedId = useStore((s) => s.selectedNodeId);
+  const changes = useStore((s) => s.changes);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   if (!graph || !node) return <p className="muted pad">Select a step on the canvas, or double-click empty canvas to add one.</p>;
+  const changed = changes.find((c) => c.kind === 'node' && c.change === 'changed' && c.id === node.id);
   return (
     <div className="node-panel">
+      {changed?.kind === 'node' && (
+        <div className="change-banner">
+          <span>{changedSentence(changed.by, changed.fields ?? [])}</span>
+          <span className="actions">
+            <button className="link" onClick={() => dispatch({ kind: 'selectChange', key: changeKey(changed) })}>
+              Show before/after
+            </button>
+            <button onClick={() => actions.acceptChange({ kind: 'node', id: node.id })}>Accept</button>
+            <button onClick={() => actions.revertChange({ kind: 'node', id: node.id })}>Revert</button>
+          </span>
+        </div>
+      )}
       <NodeEditor key={node.id} graphId={graph.id} node={node} />
     </div>
   );

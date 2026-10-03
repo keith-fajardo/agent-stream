@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp, createClaudeProvider } from '@agent-stream/engine';
 import type { HostMessage, ServerMessage } from '@agent-stream/shared';
 import type { Folder } from '../src/engines';
-import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, openAndSend } from '../src/graphEditor';
+import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, notGraphText, openAndSend } from '../src/graphEditor';
 
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
@@ -214,5 +214,24 @@ describe('graphTarget', () => {
     expect(graphTarget('/ws', '/ws/node_modules/p/.agent-stream/graphs/x.json')).toBeUndefined();
     expect(graphTarget('/ws', '/ws/.agent-stream/graphs/Bad Name.json')).toBeUndefined();
     expect(graphTarget('/ws', '/other/.agent-stream/graphs/g.json')).toBeUndefined();
+  });
+});
+
+describe('notGraphText', () => {
+  const generic = "This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use \"Reopen Editor With… → Text Editor\" to see it as JSON.";
+  const baseline = 'This is the agent-change baseline for a graph (your accepted version). Use "Reopen Editor With… → Text Editor" to see it as JSON.';
+
+  it('explains a baseline file, which the graph editor selector also matches', () => {
+    const file = '/ws/.agent-stream/graphs/g.baseline.json';
+    expect(graphTarget('/ws', file)).toBeUndefined();
+    expect(notGraphText(file)).toBe(baseline);
+    expect(notGraphText('C:\\ws\\.agent-stream\\graphs\\g.baseline.json')).toBe(baseline);
+  });
+
+  it('keeps the general explanation for any other file that is not a graph here', () => {
+    for (const file of ['/ws/sub/.agent-stream/graphs/x.json', '/ws/.agent-stream/graphs/Bad Name.json', '/other/.agent-stream/graphs/g.json']) {
+      expect(graphTarget('/ws', file)).toBeUndefined();
+      expect(notGraphText(file)).toBe(generic);
+    }
   });
 });

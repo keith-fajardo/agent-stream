@@ -6,7 +6,7 @@ import { emptyGraph, type Graph } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { post, send } = await import('../src/bridge');
-const { dispatch } = await import('../src/store');
+const { dispatch, getState } = await import('../src/store');
 const { NodePanel } = await import('../src/components/NodePanel');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -118,5 +118,51 @@ describe('NodePanel Refine with planner', () => {
     expect(signedOut.button('Refine with planner')!.disabled).toBe(true);
     await act(async () => signedOut.root.unmount());
     hello(true);
+  });
+});
+
+describe('NodePanel agent-change banner', () => {
+  const baseline: Graph = { ...graph, nodes: [{ ...step, prompt: 'old' }] };
+  const changed = { ...step, prompt: 'new' };
+  const changes = (by?: import('@agent-stream/shared').ChangeSource) => [{ kind: 'node' as const, change: 'changed' as const, id: 'n1', title: 'Plan', fields: ['prompt' as const, 'title' as const], ...(by ? { by } : {}) }];
+  async function mount(c: ReturnType<typeof changes>) {
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: { ...graph, nodes: [changed] }, baseline, changes: c, runs: [], variableValues: {} } });
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    dispatch({ kind: 'setTab', tab: 'node' });
+    vi.mocked(send).mockClear();
+    const el = document.createElement('div');
+    const root = createRoot(el);
+    await act(async () => root.render(createElement(NodePanel)));
+    const button = (label: string) => [...el.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+    return { el, root, button };
+  }
+
+  it('says who changed the step and what, and lets you review, accept or revert it', async () => {
+    const { el, root, button } = await mount(changes({ kind: 'planner' }));
+    expect(el.querySelector('.change-banner')!.textContent).toContain('Changed by planner: prompt, title');
+    await act(async () => button('Accept')!.click());
+    await act(async () => button('Revert')!.click());
+    expect(vi.mocked(send).mock.calls).toEqual([
+      [{ type: 'op', graphId: 'g', op: { type: 'acceptChange', target: { kind: 'node', id: 'n1' } } }],
+      [{ type: 'op', graphId: 'g', op: { type: 'revertChange', target: { kind: 'node', id: 'n1' } } }],
+    ]);
+    await act(async () => button('Show before/after')!.click());
+    expect(getState().tab).toBe('changes');
+    expect(getState().selectedChange).toBe('node:n1');
+    await act(async () => root.unmount());
+  });
+
+  it('never says "by planner" when the author is unknown', async () => {
+    const { el, root } = await mount(changes());
+    const text = el.querySelector('.change-banner')!.textContent!;
+    expect(text).toContain('Changed: prompt, title');
+    expect(text).not.toContain('planner');
+    await act(async () => root.unmount());
+  });
+
+  it('shows no banner for a step with no change', async () => {
+    const { el, root } = await mount([]);
+    expect(el.querySelector('.change-banner')).toBeNull();
+    await act(async () => root.unmount());
   });
 });

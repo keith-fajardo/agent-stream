@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge as FlowEdge } from '@xyflow/react';
-import { applyOp, emptyGraph, type Graph, type Op, type Position, type RunMeta } from '@agent-stream/shared';
+import { applyOp, diffGraphs, emptyGraph, type AgentChange, type Graph, type Op, type Position, type RunMeta } from '@agent-stream/shared';
 import { buildFlowEdges, buildFlowNodes } from '../src/flowNodes';
 import type { StepFlowNode } from '../src/components/StepNode';
 
@@ -95,5 +95,68 @@ describe('buildFlowEdges', () => {
     const current = buildFlowEdges(chain, undefined, []).map((e) => ({ ...e, selected: true }));
     const unlinked = graphOf([add('n1'), add('n2'), add('n3'), link('n1', 'n2')]);
     expect(buildFlowEdges(unlinked, undefined, current).map((e) => e.id)).toEqual(['n1->n2']);
+  });
+});
+
+describe('agent changes on the canvas', () => {
+  const link = (from: string, to: string): Op => ({ type: 'connect', from, to });
+  const baseline = graphOf([add('n1', { x: 0, y: 0 }), add('n2', { x: 300, y: 0 }), add('n3', { x: 600, y: 0 }), link('n1', 'n2'), link('n2', 'n3')]);
+  // n2 changed, n3 removed (with its edge), n4 added (with an edge from n1).
+  const graph = graphOf([
+    add('n1', { x: 0, y: 0 }),
+    add('n2', { x: 300, y: 0 }),
+    add('n4', { x: 300, y: 200 }),
+    link('n1', 'n2'),
+    link('n1', 'n4'),
+    { type: 'updateNode', id: 'n2', patch: { prompt: 'new' } },
+  ]);
+  const planner = { kind: 'planner' as const };
+  const step = { kind: 'step' as const, runId: 'r1', nodeId: 'n2' };
+  const changes: AgentChange[] = diffGraphs(baseline, graph).map((c) => {
+    if (c.kind === 'node' && c.change === 'added') return { ...c, by: planner };
+    if (c.kind === 'node' && c.change === 'changed') return { ...c, by: step };
+    return { ...c, by: planner };
+  });
+  const nodes = buildFlowNodes({ ...base, graph, baseline, changes });
+  const byId = (id: string) => nodes.find((n) => n.id === id)!;
+
+  it('marks added and changed steps with who made the change', () => {
+    expect(byId('n4').data).toMatchObject({ change: 'added', changeBy: planner });
+    expect(byId('n2').data).toMatchObject({ change: 'changed', changeBy: step, changeFields: ['prompt'] });
+    expect(byId('n1').data.change).toBeUndefined();
+  });
+
+  it('shows a removed step as a ghost at its baseline position that cannot be selected', () => {
+    const ghost = byId('ghost:n3');
+    expect(ghost.position).toEqual({ x: 600, y: 0 });
+    expect(ghost.data).toMatchObject({ ghost: true, change: 'removed', changeBy: planner });
+    expect([ghost.selectable, ghost.draggable, ghost.deletable, ghost.connectable]).toEqual([false, false, false, false]);
+    expect(ghost.selected).toBe(false);
+    expect(nodes.filter((n) => n.data.ghost)).toHaveLength(1);
+  });
+
+  it('places a ghost with no baseline position by the baseline layout', () => {
+    const unplaced = graphOf([add('n1'), add('n2'), link('n1', 'n2')]);
+    const now = graphOf([add('n1')]);
+    const ghost = buildFlowNodes({ ...base, graph: now, baseline: unplaced, changes: diffGraphs(unplaced, now) }).find((n) => n.id === 'ghost:n2')!;
+    expect(Number.isFinite(ghost.position.x) && Number.isFinite(ghost.position.y)).toBe(true);
+  });
+
+  it('shows no marks without changes', () => {
+    const plain = buildFlowNodes({ ...base, graph });
+    expect(plain.some((n) => n.data.change || n.data.ghost)).toBe(false);
+  });
+
+  it('classes an added edge and draws a removed one as a ghost between real or ghost steps', () => {
+    const edges = buildFlowEdges(graph, undefined, [], changes);
+    expect(edges.find((e) => e.id === 'n1->n4')!.className).toBe('edge-added');
+    expect(edges.find((e) => e.id === 'n1->n2')!.className).toBeUndefined();
+    const ghost = edges.find((e) => e.id === 'ghost:n2->n3')!;
+    expect(ghost).toMatchObject({ source: 'n2', target: 'ghost:n3', className: 'edge-removed', selectable: false, deletable: false });
+  });
+
+  it('skips a ghost edge whose end is gone everywhere', () => {
+    const orphan: AgentChange[] = [{ kind: 'edge', change: 'removed', id: 'x->y', from: 'x', to: 'y' }];
+    expect(buildFlowEdges(graph, undefined, [], orphan).map((e) => e.id)).not.toContain('ghost:x->y');
   });
 });

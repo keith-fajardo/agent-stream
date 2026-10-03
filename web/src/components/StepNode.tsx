@@ -1,13 +1,27 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { fmtDuration, statusLabel, type GraphNode, type NodeRunState } from '@agent-stream/shared';
+import { fmtDuration, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
+import { badgeText } from '../changeLabels';
 
-export type StepData = { node: GraphNode; state?: NodeRunState; waiting: boolean };
+export type StepData = {
+  node: GraphNode;
+  state?: NodeRunState;
+  waiting: boolean;
+  /** What agents did to this step since the user's baseline, and who (spec §5). */
+  change?: 'added' | 'changed' | 'removed';
+  changeBy?: ChangeSource;
+  changeFields?: ChangedField[];
+  /** A removed step drawn from the baseline: it can't be selected or edited. */
+  ghost?: boolean;
+};
 export type StepFlowNode = Node<StepData, 'step'>;
 
+const changeTitle = (change: NonNullable<StepData['change']>, fields?: ChangedField[]) =>
+  change === 'changed' && fields?.length ? `Changed: ${fields.join(', ')}` : change === 'added' ? 'Added by an agent' : change === 'removed' ? 'Removed by an agent' : 'Changed by an agent';
+
 export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
-  const { node, state, waiting } = data;
+  const { node, state, waiting, change, changeBy, changeFields } = data;
   const status = state?.status;
-  const classes = ['step', `kind-${node.kind}`, status ? `status-${status}` : '', waiting ? 'waiting' : '', selected ? 'selected' : ''];
+  const classes = ['step', `kind-${node.kind}`, change ? `change-${change}` : '', status ? `status-${status}` : '', waiting ? 'waiting' : '', selected ? 'selected' : ''];
   return (
     <div className={classes.filter(Boolean).join(' ')}>
       <Handle type="target" position={Position.Left} />
@@ -22,7 +36,13 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
       )}
       <div className="step-meta">
         <span>{node.id}</span>
-        {node.updatedBy === 'agent' && <span className="by-agent">by agent</span>}
+        {change ? (
+          <span className="change-badge" title={changeTitle(change, changeFields)}>
+            {badgeText(change, changeBy)}
+          </span>
+        ) : (
+          node.updatedBy === 'agent' && <span className="by-agent">by agent</span>
+        )}
         {status && <span className="status">{statusLabel(status)}</span>}
         {state?.durationMs !== undefined && <span>{fmtDuration(state.durationMs)}</span>}
       </div>

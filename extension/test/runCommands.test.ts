@@ -89,6 +89,19 @@ describe('run commands', () => {
     expect(await three.decision).toEqual({ decision: 'approve' });
   });
 
+  it('leaves graph-change approvals out of Approve all, since each needs its own approval', async () => {
+    const s = setup();
+    const ask = (graphChange?: { summary: string; detail: string }) =>
+      s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: graphChange ? 'Change graph' : 'Bash', input: {}, ...(graphChange ? { graphChange } : {}) });
+    const plain = ask();
+    const change = ask({ summary: 'n1 wants to add a step', detail: 'npm ci' });
+    s.cmds.approveAll();
+    expect(await plain.decision).toEqual({ decision: 'approve' });
+    expect(s.app.broker.pending().map((p) => p.id)).toEqual([change.id]);
+    s.cmds.approve({ folder: s.f, request: s.app.broker.pending()[0] });
+    expect(await change.decision).toEqual({ decision: 'approve' });
+  });
+
   it('does nothing when an approval command gets no item', async () => {
     const s = setup();
     const req = s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: 'Bash', input: {} });
