@@ -93,3 +93,8 @@ export const repoGit = (o: RepoOptions) => fakeGit(repoAnswers(o));
 export function testLeases(o: { pid?: number } = {}): WriteLeases {
   return createWriteLeases({ locksDir: mkdtempSync(join(tmpdir(), 'agent-stream-locks-')), isAlive: () => true, ...o });
 }
+
+/** What createApp needs besides the folder: no real Git, temp leases and a temp home folder. */
+export function appTestDeps() {
+  return { git: noGit, leases: testLeases(), home: mkdtempSync(join(tmpdir(), 'agent-stream-home-')) };
+}

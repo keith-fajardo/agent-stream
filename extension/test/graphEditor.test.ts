@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp, createClaudeProvider } from '@agent-stream/engine';
 import type { HostMessage, ServerMessage } from '@agent-stream/shared';
 import type { Folder } from '../src/engines';
+import { engineTestDeps } from './helpers';
 import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, notGraphText, openAndSend } from '../src/graphEditor';
 
 const folder = (name: string): Folder => {
@@ -19,6 +20,7 @@ function setup() {
   const f = folder('a');
   const done = async () => ({ ok: true, output: '' });
   const app = createApp({
+    ...engineTestDeps(),
     projectDir: f.path,
     provider: createClaudeProvider({ findClaude: () => ({ ok: true, path: '/bin/claude' }) }),
     status: { provider: 'claude', ok: true, label: 'Claude Max' },

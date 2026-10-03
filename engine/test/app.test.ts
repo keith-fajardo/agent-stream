@@ -10,7 +10,7 @@ import { createClaudeProvider } from '../src/providers/claude';
 import type { PlannerTurn, PlannerTurnResult } from '../src/providers/types';
 import { refineRequest } from '../src/refine';
 import { RunStore } from '../src/runStore';
-import { deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
+import { appTestDeps, deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
 const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
@@ -22,6 +22,7 @@ function setup(status: ProviderStatus = signedIn, command: NodeExecutor = instan
   const paths = tmpProject();
   const valuesFile = tmpValuesFile();
   const app = createApp({
+    ...appTestDeps(),
     projectDir: paths.root,
     valuesFile,
     provider: testProvider(),
@@ -54,7 +55,7 @@ async function reviewed(app: ReturnType<typeof setup>['app'], c: TestClient, gra
 /** An App with one graph; `over` replaces its dependencies (a planner provider, say). */
 function setupWithGraph(over: Partial<AppDeps> = {}) {
   const paths = tmpProject();
-  const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, gitBash: testGitBash, ...over });
+  const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, gitBash: testGitBash, ...over });
   const graphId = app.graphStore.create('G').id;
   return { app, graphId, paths };
 }
@@ -211,7 +212,7 @@ describe('app', () => {
       snapshot: emptyGraph('g', 'G', 't'),
       nodes: { n1: { status: 'running' } },
     });
-    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
+    const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
     expect(app.runStore.get('20261001-120000-abcd')).toMatchObject({ status: 'interrupted', nodes: { n1: { status: 'interrupted' } } });
   });
 
@@ -247,6 +248,7 @@ describe('app', () => {
     });
     await provider.status();
     const app = createApp({
+      ...appTestDeps(),
       projectDir: paths.root,
       valuesFile,
       legacyValuesFile,
@@ -419,6 +421,7 @@ describe('app', () => {
     const paths = tmpProject();
     const gate = { release: () => {} };
     const app = createApp({
+      ...appTestDeps(),
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
       provider: testProvider({
@@ -445,6 +448,7 @@ describe('app', () => {
   it('reports a missing Git Bash on Windows in the preview of graphs with command steps', async () => {
     const paths = tmpProject();
     const app = createApp({
+      ...appTestDeps(),
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
       provider: testProvider(),
@@ -468,7 +472,7 @@ describe('app', () => {
       const paths = tmpProject();
       writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ id: 'g1', name: 'G', goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: 't', plannerSessionId: 's', plannerOpCursor: 2 }));
       writeFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), `${JSON.stringify({ at: 't', role: 'user', text: 'old' })}\n`);
-      const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+      const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
       expect(app.sessionStore.plannerState('default', 'g1')).toEqual({ sessionId: 's', provider: 'claude', opCursor: 2 });
       expect(app.sessionStore.chatLog('default').read('g1').map((e) => e.text)).toEqual(['old']);
       expect(app.startupWarnings()).toEqual([]);
@@ -697,7 +701,7 @@ describe('app', () => {
     describe('migrating the old names', () => {
       const mk = (extra: Partial<Parameters<typeof createApp>[0]> = {}) => {
         const root = mkdtempSync(join(tmpdir(), 'agent-stream-mig-'));
-        const base = { projectDir: root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } };
+        const base = { ...appTestDeps(), projectDir: root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } };
         return { root, make: () => createApp({ ...base, ...extra }) };
       };
 
@@ -750,7 +754,7 @@ describe('app', () => {
       const paths = tmpProject();
       const valuesFile = tmpValuesFile();
       writeFileSync(valuesFile, '{');
-      const app = createApp({ projectDir: paths.root, valuesFile, provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
+      const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile, provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The variable values file \(.+\) could not be read/)]);
     });
   });
@@ -809,6 +813,9 @@ describe('app', () => {
       await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'acceptChange', target: { kind: 'node', id: 'n2' } } });
       expect(a.of('opRejected')).toHaveLength(4);
       expect(app.graphStore.agentChanges(g.id).map((c) => c.id)).toEqual(['n1', 'n2->n3']);
+      // build (n1) and lint (n3) can both change files, so they take turns (spec §4.3); test (n2) follows build.
+      releaseAll();
+      await vi.waitFor(() => expect(app.runner.activeFor(g.id)?.nodes.n3.status).toBe('running'));
       releaseAll();
       await vi.waitFor(() => expect(app.runner.activeFor(g.id)?.nodes.n2.status).toBe('running'));
       releaseAll();
@@ -933,7 +940,7 @@ describe('app', () => {
       const paths = tmpProject();
       writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify(emptyGraph('g1', 'G', 't')));
       writeFileSync(join(paths.graphsDir, 'g1.baseline.json'), '{ nope');
-      const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+      const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The agent-change baseline .+g1\.baseline\.json could not be read \(/)]);
       expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
     });

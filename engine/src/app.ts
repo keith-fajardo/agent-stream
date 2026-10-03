@@ -25,6 +25,7 @@ import { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
+import type { GitExec } from './git';
 import { GraphStore } from './graphStore';
 import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
@@ -40,6 +41,7 @@ import { createStepGraphTools } from './stepGraphTools';
 import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
+import type { WriteLeases } from './writeLease';
 
 /** Run states in which a step's definition may still be read: a revert must wait for them. */
 const IN_PROGRESS = new Set<NodeStatus | undefined>(['queued', 'running', 'waiting_approval']);
@@ -70,6 +72,12 @@ export type AppDeps = {
   platform?: NodeJS.Platform;
   /** Windows: where Git Bash is (see findGitBash), or why it can't be found. */
   gitBash?: Found;
+  /** The extension host's write leases, shared by every folder's engine (spec §4.2). */
+  leases: WriteLeases;
+  /** Runs git: realGit in VS Code; tests pass a fake, so none runs real git. */
+  git: GitExec;
+  /** The home folder: variant worktrees live in ~/.agent-stream/worktrees (spec §4.3a). Required, so no test writes to the real one. */
+  home: string;
 };
 
 export type App = ReturnType<typeof createApp>;
@@ -132,7 +140,7 @@ export function createApp(d: AppDeps) {
     agent: agentFor(provider),
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
-  const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
+  const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock, leases: d.leases });
   const clients = new Set<Client>();
   const broadcast = (msg: ServerMessage) => {
     for (const c of clients) c.send(msg);
@@ -303,9 +311,9 @@ export function createApp(d: AppDeps) {
     broadcast({ type: 'auth', status });
   }
 
-  /** VS Code is closing: stop every run (ruling R4). */
+  /** VS Code is closing: release this engine's leases and stop every run (ruling R4, spec §8). */
   function dispose(): void {
-    runner.stopAll();
+    runner.dispose();
   }
 
   function startupWarnings(): string[] {

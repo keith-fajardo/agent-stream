@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp, type NodeOutcome } from '@agent-stream/engine';
 import type { HostMessage } from '@agent-stream/shared';
 import { EngineManager, type Folder } from '../src/engines';
+import { noGit } from './helpers';
 import { GraphPanel, GraphPanels } from '../src/graphEditor';
 import { runCommands } from '../src/runCommands';
 
@@ -22,6 +23,7 @@ function setup() {
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+    git: noGit,
     events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, sessions() {}, auth() {}, warning() {} },
     checkAuth: async () => ({ provider: 'claude' as const, ok: true, label: 'Claude Max' }),
     findClaude: () => ({ ok: true, path: '/bin/claude' }),

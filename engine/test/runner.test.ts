@@ -1,11 +1,14 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
+import { applyOp, emptyGraph, type CheckoutInfo, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
-import { tmpProject } from './helpers';
+import { createWriteLeases, type WriteLeases } from '../src/writeLease';
+import { testLeases, tmpProject } from './helpers';
 
 /** The reviewed text a run needs: every step's prompt or command as written. */
 const asRendered = (graph: Graph): RenderedRun => ({
@@ -27,6 +30,7 @@ function graphOf(ops: Op[]): Graph {
   return g;
 }
 const agent = (title: string): Op => ({ type: 'addNode', node: { title, kind: 'agent', prompt: `do ${title}` } });
+const reader = (title: string): Op => ({ type: 'addNode', node: { title, kind: 'agent', prompt: `do ${title}`, access: 'read' } });
 const link = (from: string, to: string): Op => ({ type: 'connect', from, to });
 
 /** An executor whose nodes finish only when the test says so. */
@@ -63,7 +67,7 @@ function controllable() {
 }
 
 let seq = 0;
-function setup(maxParallel = 3) {
+function setup(maxParallel = 3, leases: WriteLeases = testLeases(), leaseRetryMs?: number) {
   const paths = tmpProject();
   const runStore = new RunStore(paths);
   const broker = new ApprovalBroker();
@@ -74,9 +78,11 @@ function setup(maxParallel = 3) {
     executors: { agent: fake.exec, command: fake.exec },
     projectDir: paths.root,
     maxParallel,
+    leases,
+    leaseRetryMs,
     newRunId: () => `20261002-000000-${(seq++).toString(16).padStart(4, '0')}`,
   });
-  return { runStore, broker, fake, runner };
+  return { runStore, broker, fake, runner, leases, projectDir: paths.root };
 }
 
 function started(r: ReturnType<Runner['start']>) {
@@ -114,7 +120,8 @@ describe('Runner', () => {
 
   it('runs independent nodes in parallel up to maxParallel', async () => {
     const { runner, fake } = setup(2);
-    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), agent('d')]))));
+    // Read-only: write-capable steps in one workspace take turns (spec §4.3).
+    const r = started(runner.start(withRendered(graphOf([reader('a'), reader('b'), reader('c'), reader('d')]))));
     await tick();
     expect(fake.started).toEqual(['n1', 'n2']);
     fake.finish('n1');
@@ -130,7 +137,7 @@ describe('Runner', () => {
 
   it('skips descendants of a failed node but finishes independent branches', async () => {
     const { runner, fake, runStore } = setup();
-    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2')]))));
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), reader('c'), link('n1', 'n2')]))));
     await tick();
     fake.finish('n1', { ok: false, output: 'partial', error: 'boom' });
     fake.finish('n3');
@@ -288,6 +295,7 @@ describe('Runner when the filesystem or a listener fails', () => {
       executors: { agent: broken, command: broken },
       projectDir: paths.root,
       maxParallel: 3,
+      leases: testLeases(),
       newRunId: () => `20261002-000000-${(seq++).toString(16).padStart(4, '0')}`,
     });
     const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), link('n1', 'n2')]))));
@@ -376,5 +384,222 @@ describe('Runner.amend', () => {
     expect(runner.get(r.run.id)).toEqual(before);
     runner.stop(r.run.id);
     await r.done;
+  });
+});
+
+describe('Runner write leases', () => {
+  const checkout: CheckoutInfo = { git: false, root: join(tmpdir(), 'agent-stream-checkout'), reason: 'Not a Git repository' };
+  const g = (...ops: Op[]) => graphOf(ops);
+
+  it('blocks a second write-capable run in the same checkout, from another engine, creating nothing (Review Focus 1)', async () => {
+    const leases = testLeases();
+    const a = setup(3, leases);
+    const b = setup(3, leases);
+    const first = started(a.runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    expect(first.run.checkout).toEqual({ root: checkout.root, linkedWorktree: false });
+    const second = b.runner.start({ ...withRendered(g(agent('b'))), checkout });
+    expect(second).toEqual({
+      ok: false,
+      error: `Run ${first.run.id} is already changing files in ${checkout.root}.`,
+      blocked: { holder: { runId: first.run.id, graphId: 'g', folder: a.projectDir, pid: process.pid, startedAt: first.run.startedAt }, otherWindow: false, checkout },
+    });
+    expect(b.runStore.list('g')).toEqual([]);
+    expect(b.runner.activeFor('g')).toBeUndefined();
+    await tick();
+    a.fake.finish('n1');
+    await first.done;
+  });
+
+  it('starts a read-only run alongside a write-capable run', async () => {
+    const leases = testLeases();
+    const a = setup(3, leases);
+    const b = setup(3, leases);
+    const first = started(a.runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    const second = started(b.runner.start({ ...withRendered(g(reader('look'))), checkout }));
+    expect(second.run.waitingFor).toBeUndefined();
+    await tick();
+    expect(b.fake.started).toEqual(['n1']);
+    b.fake.finish('n1');
+    expect((await second.done).status).toBe('succeeded');
+    a.fake.finish('n1');
+    await first.done;
+  });
+
+  it('in a sequential run, read-only steps run and write-capable steps wait until the first run ends', async () => {
+    const leases = testLeases();
+    const a = setup(3, leases);
+    const b = setup(3, leases);
+    const first = started(a.runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    const second = started(b.runner.start({ ...withRendered(g(reader('look'), agent('edit'))), checkout, sequential: true }));
+    expect(second.run.waitingFor).toEqual({ runId: first.run.id, graphId: 'g', folder: a.projectDir });
+    await tick();
+    expect(b.fake.started).toEqual(['n1']);
+    b.fake.finish('n1');
+    await tick();
+    expect(b.runner.get(second.run.id)).toMatchObject({ status: 'running', nodes: { n2: { status: 'queued' } } });
+    a.fake.finish('n1');
+    await first.done;
+    await tick();
+    expect(b.fake.started).toEqual(['n1', 'n2']);
+    expect(b.runner.get(second.run.id)?.waitingFor).toBeUndefined();
+    expect(leases.holder(checkout.root)?.runId).toBe(second.run.id);
+    b.fake.finish('n2');
+    expect((await second.done).status).toBe('succeeded');
+    expect(leases.holder(checkout.root)).toBeUndefined();
+  });
+
+  it('never overlaps write-capable checkout steps of one run, while read-only ones run alongside', async () => {
+    const { runner, fake } = setup(4);
+    const r = started(runner.start({ ...withRendered(g(agent('a'), agent('b'), reader('c'), reader('d'))), checkout }));
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n4']);
+    fake.finish('n3');
+    fake.finish('n4');
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n4']);
+    fake.finish('n1');
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n3', 'n4', 'n2']);
+    fake.finish('n2');
+    expect((await r.done).status).toBe('succeeded');
+    expect(fake.maxActive).toBe(3);
+  });
+
+  it('releases the lease on success, failure and cancel', async () => {
+    const { runner, fake, leases } = setup();
+    const graph = g(agent('a'));
+    const ok = started(runner.start({ ...withRendered(graph), checkout }));
+    expect(leases.holder(checkout.root)?.runId).toBe(ok.run.id);
+    await tick();
+    fake.finish('n1');
+    await ok.done;
+    expect(leases.holder(checkout.root)).toBeUndefined();
+    const failed = started(runner.start({ ...withRendered(graph), checkout }));
+    await tick();
+    fake.finish('n1', { ok: false, output: '', error: 'boom' });
+    expect((await failed.done).status).toBe('failed');
+    expect(leases.holder(checkout.root)).toBeUndefined();
+    const cancelled = started(runner.start({ ...withRendered(graph), checkout }));
+    await tick();
+    runner.stop(cancelled.run.id);
+    expect((await cancelled.done).status).toBe('cancelled');
+    expect(leases.holder(checkout.root)).toBeUndefined();
+  });
+
+  it('a cancelled waiting run never takes the lease', async () => {
+    const leases = testLeases();
+    const a = setup(3, leases);
+    const b = setup(3, leases);
+    const first = started(a.runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    const second = started(b.runner.start({ ...withRendered(g(agent('b'))), checkout, sequential: true }));
+    b.runner.stop(second.run.id);
+    const stopped = await second.done;
+    expect(stopped.status).toBe('cancelled');
+    expect(stopped.waitingFor).toBeUndefined();
+    await tick();
+    a.fake.finish('n1');
+    await first.done;
+    expect(leases.holder(checkout.root)).toBeUndefined();
+    expect(b.fake.started).toEqual([]);
+  });
+
+  it('waiting runs take the lease in the order they started', async () => {
+    const leases = testLeases();
+    const a = setup(3, leases);
+    const b = setup(3, leases);
+    const c = setup(3, leases);
+    const first = started(a.runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    const second = started(c.runner.start({ ...withRendered(g(agent('c'))), checkout, sequential: true }));
+    const third = started(b.runner.start({ ...withRendered(g(agent('b'))), checkout, sequential: true }));
+    await tick();
+    a.fake.finish('n1');
+    await first.done;
+    expect(leases.holder(checkout.root)?.runId).toBe(second.run.id);
+    expect(b.runner.get(third.run.id)?.waitingFor?.runId).toBe(second.run.id);
+    await tick();
+    c.fake.finish('n1');
+    await second.done;
+    expect(leases.holder(checkout.root)?.runId).toBe(third.run.id);
+    await tick();
+    b.fake.finish('n1');
+    await third.done;
+  });
+
+  it('retries every few seconds while the holder is in another window', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-stream-locks-'));
+    const elsewhere = join(tmpdir(), 'elsewhere');
+    const otherWindow = createWriteLeases({ locksDir: dir, pid: 4242, isAlive: () => true });
+    otherWindow.acquire(checkout.root, { runId: '20261003-090000-beef', graphId: 'billing', folder: elsewhere, startedAt: 't' });
+    const { runner, fake } = setup(3, createWriteLeases({ locksDir: dir, isAlive: () => true }), 20);
+    const r = started(runner.start({ ...withRendered(g(agent('a'))), checkout, sequential: true }));
+    expect(r.run.waitingFor).toEqual({ runId: '20261003-090000-beef', graphId: 'billing', folder: elsewhere });
+    otherWindow.release(checkout.root, '20261003-090000-beef');
+    await vi.waitFor(() => expect(fake.started).toEqual(['n1']));
+    fake.finish('n1');
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('a sequential start takes the lease at once when it is free (Review Focus 5)', async () => {
+    const { runner, fake, leases } = setup();
+    const r = started(runner.start({ ...withRendered(g(agent('a'))), checkout, sequential: true }));
+    expect(r.run.waitingFor).toBeUndefined();
+    expect(leases.holder(checkout.root)?.runId).toBe(r.run.id);
+    await tick();
+    expect(fake.started).toEqual(['n1']);
+    fake.finish('n1');
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('needs no lease when its write-capable steps are all reused', async () => {
+    const { runner, fake, leases } = setup();
+    const graph = g(agent('a'), reader('b'), link('n1', 'n2'));
+    const first = started(runner.start({ ...withRendered(graph), checkout }));
+    await tick();
+    fake.finish('n1');
+    await tick();
+    fake.finish('n2');
+    await first.done;
+    expect(leases.acquire(checkout.root, { runId: '20261003-090000-beef', graphId: 'x', folder: 'f', startedAt: 't' })).toEqual({ ok: true });
+    const rerun = started(runner.start({ ...withRendered(graph, { sourceRunId: first.run.id, fromNodeId: 'n2' }), checkout }));
+    expect(rerun.run.nodes.n1.status).toBe('reused');
+    expect(rerun.run.waitingFor).toBeUndefined();
+    await tick();
+    fake.finish('n2');
+    expect((await rerun.done).status).toBe('succeeded');
+    leases.release(checkout.root, '20261003-090000-beef');
+  });
+
+  it('dispose releases every lease and stops the runs', async () => {
+    const { runner, leases } = setup();
+    const r = started(runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    await tick();
+    runner.dispose();
+    expect(leases.holder(checkout.root)).toBeUndefined();
+    expect((await r.done).status).toBe('cancelled');
+  });
+
+  it('dispose stops waiting runs before releasing, so a waiting run starts nothing during shutdown', async () => {
+    const { runner, fake, leases } = setup();
+    const first = started(runner.start({ ...withRendered(g(agent('a'))), checkout }));
+    // Another graph in the same runner, waiting for the lease.
+    const second = started(runner.start({ ...withRendered({ ...g(agent('edit')), id: 'h' }), checkout, sequential: true }));
+    expect(second.run.waitingFor?.runId).toBe(first.run.id);
+    await tick();
+    expect(fake.started).toEqual(['n1']);
+    runner.dispose();
+    await tick();
+    expect(fake.started).toEqual(['n1']);
+    expect(leases.holder(checkout.root)).toBeUndefined();
+    expect((await first.done).status).toBe('cancelled');
+    const stopped = await second.done;
+    expect(stopped.status).toBe('cancelled');
+    expect(stopped.nodes.n1.status).toBe('cancelled');
+  });
+
+  it('uses the run id it is given', () => {
+    const { runner } = setup();
+    const r = started(runner.start({ ...withRendered(g(reader('a'))), runId: '20261003-120000-abcd' }));
+    expect(r.run.id).toBe('20261003-120000-abcd');
+    runner.stop(r.run.id);
   });
 });

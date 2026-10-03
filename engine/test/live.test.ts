@@ -11,7 +11,7 @@ import { createClaudeProvider } from '../src/providers/claude';
 import { createStepGate } from '../src/providers/toolGate';
 import { Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
-import { tmpProject } from './helpers';
+import { testLeases, tmpProject } from './helpers';
 
 const live = process.env.AGENT_STREAM_LIVE === '1';
 
@@ -40,6 +40,7 @@ describe.skipIf(!live)('live: real Claude on the subscription', () => {
       executors: { agent, command: createCommandExecutor() },
       projectDir: paths.root,
       maxParallel: 2,
+      leases: testLeases(),
     });
 
     let graph: Graph = emptyGraph('live', 'Live', new Date().toISOString());

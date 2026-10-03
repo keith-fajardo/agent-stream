@@ -2,12 +2,17 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   edgeId,
+  isWriteCapable,
   reusableNodeIds,
+  toRunCheckout,
   topoOrder,
   upstream,
   validateRunnable,
+  workspaceOf,
+  type CheckoutInfo,
   type Graph,
   type GraphNode,
+  type LeaseHolder,
   type NodeEvent,
   type NodeEventBody,
   type NodeRunState,
@@ -15,12 +20,14 @@ import {
   type ProviderId,
   type RenderedRun,
   type RunMeta,
+  type WaitingFor,
 } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import type { Executors, NodeExecutor, NodeOutcome } from './executors';
 import { buildNodePrompt } from './prompt';
 import type { RunStore } from './runStore';
+import type { WriteLeases } from './writeLease';
 
 export function newRunId(date: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -28,12 +35,19 @@ export function newRunId(date: Date = new Date()): string {
   return `${stamp}-${randomBytes(2).toString('hex')}`;
 }
 
+/** How often a waiting run retries while the lease holder is in another VS Code window (spec §4.3). */
+export const LEASE_RETRY_MS = 3000;
+
 export type RunnerDeps = {
   runStore: RunStore;
   broker: ApprovalBroker;
   executors: Executors;
   projectDir: string;
   maxParallel: number;
+  /** The extension host's write leases, shared by every folder's engine (spec §4.2). */
+  leases: WriteLeases;
+  /** For tests: how often to retry while the holder is in another window. */
+  leaseRetryMs?: number;
   clock?: Clock;
   newRunId?: () => string;
 };
@@ -47,13 +61,21 @@ export type StartRunInput = {
   agent?: NodeExecutor;
   /** Which provider runs the agent steps, recorded in the run. */
   provider?: ProviderId;
+  /** The run's id, when the caller needs it before the run starts (variant worktree paths contain it). */
+  runId?: string;
+  /** Start even though another run holds the checkout's lease: write-capable checkout steps wait for it (spec §4.3). */
+  sequential?: boolean;
+  /** The checkout the app inspected (ruling R4): recorded in RunMeta.checkout, and its root keys the lease. Default: projectDir. */
+  checkout?: CheckoutInfo;
 };
 /** An approved change a step agent makes to its run: a new step with its connections, or new text for a step that hasn't started. */
 export type RunChange =
   | { kind: 'add'; node: GraphNode; text: string; after: string[]; before: string[] }
   | { kind: 'change'; node: GraphNode; text: string };
 
-export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string };
+/** Another run holds the checkout's write lease (spec §4.3); nothing was created. */
+export type RunBlocked = { holder: LeaseHolder; otherWindow: boolean; checkout: CheckoutInfo; lockFile?: string };
+export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string; blocked?: RunBlocked };
 
 type ActiveRun = {
   meta: RunMeta;
@@ -65,10 +87,16 @@ type ActiveRun = {
   stopping: boolean;
   finished: boolean;
   resolveDone: (meta: RunMeta) => void;
+  /** The checkout root that keys this run's lease. */
+  leaseRoot: string;
+  holdsLease: boolean;
+  /** Set while the run waits for the lease: unsubscribes and stops retrying. */
+  stopWaiting?: () => void;
 };
 
 const DONE_OK: ReadonlySet<NodeStatus> = new Set(['succeeded', 'reused']);
 const BLOCKED: ReadonlySet<NodeStatus> = new Set(['failed', 'not_run', 'cancelled', 'interrupted']);
+const waitingOn = (h: LeaseHolder): WaitingFor => ({ runId: h.runId, graphId: h.graphId, folder: h.folder });
 
 /**
  * Executes a frozen snapshot of a graph (spec §7.2): a node starts once every upstream node
@@ -113,14 +141,40 @@ export class Runner extends EventEmitter {
     }
     const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered) : new Set<string>();
 
+    const runId = input.runId ?? this.makeRunId();
+    const leaseRoot = input.checkout?.root ?? this.deps.projectDir;
+    const startedAt = this.clock();
+    // Only write-capable steps in this checkout that will actually run need the lease (spec §4.3).
+    const needsLease = graph.nodes.some((n) => isWriteCapable(n) && workspaceOf(n) === null && !reuse.has(n.id));
+    let holdsLease = false;
+    let waitFor: { holder: LeaseHolder; otherWindow: boolean } | undefined;
+    if (needsLease) {
+      const got = this.deps.leases.acquire(leaseRoot, { runId, graphId: graph.id, folder: this.deps.projectDir, startedAt });
+      if (got.ok) holdsLease = true;
+      else if (!input.sequential) {
+        return {
+          ok: false,
+          error: `Run ${got.holder.runId} is already changing files in ${leaseRoot}.`,
+          blocked: {
+            holder: got.holder,
+            otherWindow: got.otherWindow,
+            checkout: input.checkout ?? { git: false, root: leaseRoot, reason: 'Not inspected' },
+            ...(got.lockFile && { lockFile: got.lockFile }),
+          },
+        };
+      } else waitFor = { holder: got.holder, otherWindow: got.otherWindow };
+    }
+
     const meta: RunMeta = {
-      id: this.makeRunId(),
+      id: runId,
       graphId: graph.id,
       status: 'running',
-      startedAt: this.clock(),
+      startedAt,
       snapshot: graph,
       nodes: {},
       ...(input.provider && { provider: input.provider }),
+      ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
+      ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
     };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
@@ -128,13 +182,30 @@ export class Runner extends EventEmitter {
     for (const n of graph.nodes) {
       meta.nodes[n.id] = source && reuse.has(n.id) ? { ...source.nodes[n.id], status: 'reused' } : { status: 'queued' };
     }
-    this.deps.runStore.create(meta);
-    if (source) for (const id of reuse) this.deps.runStore.copyOutput(source.id, meta.id, id);
+    try {
+      this.deps.runStore.create(meta);
+      if (source) for (const id of reuse) this.deps.runStore.copyOutput(source.id, meta.id, id);
+    } catch (e) {
+      if (holdsLease) this.deps.leases.release(leaseRoot, runId);
+      throw e;
+    }
 
     let resolveDone!: (m: RunMeta) => void;
     const done = new Promise<RunMeta>((resolve) => (resolveDone = resolve));
-    const run: ActiveRun = { meta, agent: input.agent, order: topoOrder(graph), running: new Map(), waiting: new Map(), stopping: false, finished: false, resolveDone };
+    const run: ActiveRun = {
+      meta,
+      agent: input.agent,
+      order: topoOrder(graph),
+      running: new Map(),
+      waiting: new Map(),
+      stopping: false,
+      finished: false,
+      resolveDone,
+      leaseRoot,
+      holdsLease,
+    };
     this.runs.set(meta.id, run);
+    if (waitFor) this.waitForLease(run, waitFor.otherWindow);
     this.safeEmit('run', meta);
     this.schedule(run);
     return { ok: true, run: meta, done };
@@ -194,6 +265,27 @@ export class Runner extends EventEmitter {
     for (const id of [...this.runs.keys()]) this.stop(id);
   }
 
+  /** A fresh run id, for callers that need it before start (variant worktree paths). */
+  newRunId(): string {
+    return this.makeRunId();
+  }
+
+  /**
+   * VS Code is closing (spec §8): stop every run and release every lease this engine holds. Waiting runs stop
+   * listening first, so none takes a released lease and launches a write-capable step during shutdown.
+   */
+  dispose(): void {
+    for (const run of this.runs.values()) this.endWait(run);
+    this.stopAll();
+    // Runs that finished inside stopAll released theirs already; the rest are still stopping.
+    for (const run of this.runs.values()) {
+      if (run.holdsLease) {
+        run.holdsLease = false;
+        this.deps.leases.release(run.leaseRoot, run.meta.id);
+      }
+    }
+  }
+
   private schedule(run: ActiveRun): void {
     if (run.finished) return;
     if (!run.stopping) {
@@ -204,10 +296,99 @@ export class Runner extends EventEmitter {
           this.setNode(run, id, { status: 'not_run' });
           continue;
         }
-        if (parents.every((s) => DONE_OK.has(s)) && run.running.size < this.deps.maxParallel) this.launch(run, id);
+        if (!parents.every((s) => DONE_OK.has(s)) || run.running.size >= this.deps.maxParallel) continue;
+        const node = run.meta.snapshot.nodes.find((n) => n.id === id)!;
+        if (isWriteCapable(node)) {
+          // At most one write-capable step per workspace at a time; in the checkout only while the run holds the lease (spec §4.3).
+          const workspace = workspaceOf(node);
+          if (this.writerRunning(run, workspace)) continue;
+          if (workspace === null && !this.ensureLease(run)) continue;
+        }
+        this.launch(run, id);
       }
     }
-    if (run.running.size === 0) this.finish(run);
+    // Queued steps with nothing running can only be waiting for the lease: the run isn't over yet.
+    const waitingForLease = !run.stopping && !!run.stopWaiting && run.order.some((id) => run.meta.nodes[id].status === 'queued');
+    if (run.running.size === 0 && !waitingForLease) this.finish(run);
+  }
+
+  /** Another write-capable step of this run is running in the same workspace. */
+  private writerRunning(run: ActiveRun, workspace: string | null): boolean {
+    for (const id of run.running.keys()) {
+      const n = run.meta.snapshot.nodes.find((x) => x.id === id);
+      if (n && isWriteCapable(n) && workspaceOf(n) === workspace) return true;
+    }
+    return false;
+  }
+
+  private holderOf(run: ActiveRun): Omit<LeaseHolder, 'pid'> {
+    return { runId: run.meta.id, graphId: run.meta.graphId, folder: this.deps.projectDir, startedAt: run.meta.startedAt };
+  }
+
+  /** A write-capable checkout step may start only while its run holds the lease. A run without it takes it now, or waits (ruling R7). */
+  private ensureLease(run: ActiveRun): boolean {
+    if (run.holdsLease) return true;
+    if (run.stopWaiting) return false;
+    const got = this.deps.leases.acquire(run.leaseRoot, this.holderOf(run));
+    if (got.ok) {
+      run.holdsLease = true;
+      return true;
+    }
+    this.setWaiting(run, got.holder);
+    this.waitForLease(run, got.otherWindow);
+    return false;
+  }
+
+  /**
+   * Retries the lease whenever one is released in this process and, while the holder is in another window, every
+   * LEASE_RETRY_MS (spec §4.3). One listener per waiting run, subscribed when it starts waiting, so runs acquire in that order.
+   */
+  private waitForLease(run: ActiveRun, otherWindow: boolean): void {
+    if (run.stopWaiting) return;
+    let timer: NodeJS.Timeout | undefined;
+    const poll = (on: boolean) => {
+      if (on && !timer) {
+        timer = setInterval(retry, this.deps.leaseRetryMs ?? LEASE_RETRY_MS);
+        timer.unref?.();
+      } else if (!on && timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const retry = () => {
+      if (run.finished || run.stopping || run.holdsLease) return;
+      const got = this.deps.leases.acquire(run.leaseRoot, this.holderOf(run));
+      if (!got.ok) {
+        poll(got.otherWindow);
+        if (run.meta.waitingFor?.runId !== got.holder.runId) this.setWaiting(run, got.holder);
+        return;
+      }
+      run.holdsLease = true;
+      this.endWait(run);
+      this.setWaiting(run);
+      this.schedule(run);
+    };
+    const off = this.deps.leases.onRelease((root) => {
+      if (root === run.leaseRoot) retry();
+    });
+    poll(otherWindow);
+    run.stopWaiting = () => {
+      off();
+      poll(false);
+    };
+  }
+
+  private endWait(run: ActiveRun): void {
+    run.stopWaiting?.();
+    run.stopWaiting = undefined;
+  }
+
+  /** Records who the run waits for (or that it no longer waits), saves it and tells the clients. */
+  private setWaiting(run: ActiveRun, holder?: LeaseHolder): void {
+    if (holder) run.meta.waitingFor = waitingOn(holder);
+    else delete run.meta.waitingFor;
+    this.persist(run.meta);
+    this.safeEmit('run', run.meta);
   }
 
   private launch(run: ActiveRun, nodeId: string): void {
@@ -309,11 +490,18 @@ export class Runner extends EventEmitter {
   private finish(run: ActiveRun): void {
     if (run.finished) return;
     run.finished = true;
+    this.endWait(run);
+    delete run.meta.waitingFor;
     const statuses = Object.values(run.meta.nodes).map((s) => s.status);
     run.meta.status = run.stopping ? 'cancelled' : statuses.every((s) => DONE_OK.has(s)) ? 'succeeded' : 'failed';
     run.meta.endedAt = this.clock();
     this.persist(run.meta);
     this.runs.delete(run.meta.id);
+    // Released at any final status (spec §4.3): waiting runs hear it through onRelease.
+    if (run.holdsLease) {
+      run.holdsLease = false;
+      this.deps.leases.release(run.leaseRoot, run.meta.id);
+    }
     this.safeEmit('run', run.meta);
     run.resolveDone(run.meta);
   }

@@ -6,7 +6,7 @@ import { GraphStore } from '../src/graphStore';
 import { Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
 import { createStepGraphTools } from '../src/stepGraphTools';
-import { fixedClock, tmpProject } from './helpers';
+import { fixedClock, testLeases, tmpProject } from './helpers';
 
 const asRendered = (graph: Graph): RenderedRun => ({
   goal: graph.goal,
@@ -49,7 +49,7 @@ async function setup(hold: string[] = ['n1', 'n3']) {
       finishers.set(ctx.node.id, () => resolve({ ok: true, output: `out-${ctx.node.id}` }));
       ctx.signal.addEventListener('abort', () => resolve({ ok: false, output: '', error: 'cancelled' }), { once: true });
     });
-  const runner = new Runner({ runStore, broker, executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 3, clock, newRunId: () => '20261003-000000-0001' });
+  const runner = new Runner({ runStore, broker, executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 3, clock, leases: testLeases(), newRunId: () => '20261003-000000-0001' });
   const graph = graphStore.get(graphId);
   const r = runner.start({ graph, rendered: asRendered(graph) });
   if (!r.ok) throw new Error(r.error);

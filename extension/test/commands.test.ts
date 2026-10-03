@@ -6,6 +6,7 @@ import { createApp } from '@agent-stream/engine';
 import { MAX_IMPORT_CHARS, type ProviderStatus } from '@agent-stream/shared';
 import { graphCommands, type GraphTarget, type Ui } from '../src/commands';
 import { EngineManager, type Folder } from '../src/engines';
+import { noGit } from './helpers';
 
 type NodeOutcome = { ok: true; output: string };
 const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
@@ -23,6 +24,7 @@ function setup(folders: Folder[] = [folder('a')]) {
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+    git: noGit,
     events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, sessions() {}, auth() {}, warning() {} },
     checkAuth: async () => signedIn,
     findClaude: () => ({ ok: true, path: '/bin/claude' }),

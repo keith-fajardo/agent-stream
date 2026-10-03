@@ -5,14 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp, type App } from '@agent-stream/engine';
 import type { Folder } from '../src/engines';
 import { activeSessionKey, SessionManager, sessionStatusFolder, type GraphTabInfo } from '../src/sessions';
-import { signedIn, testProvider } from './helpers';
+import { engineTestDeps, signedIn, testProvider } from './helpers';
 
 function world() {
   const folders: Folder[] = ['a', 'b'].map((n) => {
     const path = mkdtempSync(join(tmpdir(), `cs-${n}-`));
     return { key: `file://${path}`, name: n, path };
   });
-  const apps = new Map<string, App>(folders.map((f) => [f.key, createApp({ projectDir: f.path, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json'), provider: testProvider(), status: signedIn, maxParallel: 1 })]));
+  const apps = new Map<string, App>(folders.map((f) => [f.key, createApp({ ...engineTestDeps(), projectDir: f.path, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json'), provider: testProvider(), status: signedIn, maxParallel: 1 })]));
   let tabs: GraphTabInfo[] = [];
   const calls: string[] = [];
   const memory = new Map<string, string | undefined>();

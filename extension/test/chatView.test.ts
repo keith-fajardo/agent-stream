@@ -6,12 +6,12 @@ import { createApp } from '@agent-stream/engine';
 import type { HostMessage } from '@agent-stream/shared';
 import { ChatViewController } from '../src/chatView';
 import type { Folder } from '../src/engines';
-import { signedIn, testProvider } from './helpers';
+import { engineTestDeps, signedIn, testProvider } from './helpers';
 
 function setup() {
   const path = mkdtempSync(join(tmpdir(), 'cs-chat-'));
   const folder: Folder = { key: `file://${path}`, name: 'a', path };
-  const app = createApp({ projectDir: path, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json'), provider: testProvider(), status: signedIn, maxParallel: 1 });
+  const app = createApp({ ...engineTestDeps(), projectDir: path, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json'), provider: testProvider(), status: signedIn, maxParallel: 1 });
   const g1 = app.createGraph('Orders').id;
   const g2 = app.createGraph('Billing').id;
   let session = { id: 'default', name: 'Default' };

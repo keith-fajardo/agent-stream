@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
+import { realGit } from '@agent-stream/engine';
 import { PROVIDER_IDS, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { ChatViewController, ChatViewProvider, type ChatSource } from './chatView';
@@ -40,7 +41,7 @@ export async function activate(context: vscode.ExtensionContext) {
     auth: showAuth,
     warning: (message) => void vscode.window.showWarningMessage(message),
   };
-  const manager = new EngineManager({ settings: readSettings, platform: process.platform, env: process.env, home: homedir(), events });
+  const manager = new EngineManager({ settings: readSettings, platform: process.platform, env: process.env, home: homedir(), git: realGit, events });
   engines = manager;
   showAuth(manager.status);
 

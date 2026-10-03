@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@agent-stream/engine';
 import type { ProviderStatus, ServerMessage } from '@agent-stream/shared';
-import { testProvider } from './helpers';
+import { noGit, testProvider } from './helpers';
 import { checkingStatus, isChecking, EngineManager, type EngineEvents, type Folder } from '../src/engines';
 
 const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
@@ -19,6 +19,7 @@ function baseDeps(events: Partial<EngineEvents> = {}) {
     platform: 'darwin' as const,
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+    git: noGit,
     events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), sessions: vi.fn(), auth: vi.fn(), warning: vi.fn(), ...events } as EngineEvents,
     findClaude: (): Found => ({ ok: true, path: '/bin/claude' }),
     checkAuth: async () => signedIn,
@@ -36,6 +37,7 @@ function setup(o: { found?: boolean } = {}) {
     platform: 'darwin',
     env: {},
     home,
+    git: noGit,
     events,
     checkAuth,
     findClaude: () => (o.found === false ? { ok: false, error: 'no claude' } : { ok: true, path: '/bin/claude' }),
@@ -161,6 +163,7 @@ describe('EngineManager', () => {
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
+        git: noGit,
         events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), sessions: vi.fn(), auth: vi.fn(), warning: vi.fn() },
         findGitBash,
         createApp: (deps) => {
@@ -216,5 +219,28 @@ describe('EngineManager', () => {
     await manager.checkProvider();
     expect(manager.currentProvider().id).toBe('claude');
     expect(warning.mock.calls).toEqual([["Unknown agentStream.provider 'gemini'; using Claude."]]);
+  });
+});
+
+describe('engines and the checkout', () => {
+  it('gives every folder engine the same write leases, Git and home folder', () => {
+    const seen: AppDeps[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'cs-home-'));
+    const manager = new EngineManager({
+      ...baseDeps(),
+      home,
+      git: noGit,
+      settings: () => defaults,
+      createApp: (deps) => {
+        seen.push(deps);
+        return createApp(deps);
+      },
+    });
+    manager.get(folder('a'));
+    manager.get(folder('b'));
+    expect(seen).toHaveLength(2);
+    expect(seen[0].leases).toBe(seen[1].leases);
+    expect(seen[0].git).toBe(noGit);
+    expect(seen[0].home).toBe(home);
   });
 });

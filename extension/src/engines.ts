@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import {
   createApp as realCreateApp,
   createClaudeProvider,
+  createWriteLeases,
   findClaude as realFindClaude,
   findGitBash as realFindGitBash,
   legacyValuesFileFor,
@@ -8,6 +10,8 @@ import {
   type AgentProvider,
   type App,
   type Found,
+  type GitExec,
+  type WriteLeases,
 } from '@agent-stream/engine';
 import type { ApprovalRequest, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
 import { createCopilotProvider } from './providers/copilot';
@@ -34,6 +38,8 @@ export type EngineManagerDeps = {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   home: string;
+  /** Runs git: realGit in VS Code, a fake in tests. */
+  git: GitExec;
   events: EngineEvents;
   checkAuth?: (claudePath: string) => Promise<ProviderStatus>;
   findClaude?: typeof realFindClaude;
@@ -57,8 +63,14 @@ export class EngineManager {
   private reportedWarning: string | undefined;
   private checkSeq = 0;
   private latest: Promise<ProviderStatus> | undefined;
+  /**
+   * The extension host's one lease store (spec §4.2), shared by every folder's engine. A second store in this
+   * process would take the first one's live locks (same pid) for stale, so only the manager creates it.
+   */
+  private readonly leases: WriteLeases;
 
   constructor(private d: EngineManagerDeps) {
+    this.leases = createWriteLeases({ locksDir: join(d.home, '.agent-stream', 'locks') });
     this.status = checkingStatus(this.providerFor('claude'));
   }
 
@@ -137,6 +149,9 @@ export class EngineManager {
       gitBash,
       valuesFile: valuesFileFor(folder.path, this.d.home),
       legacyValuesFile: legacyValuesFileFor(folder.path, this.d.home),
+      leases: this.leases,
+      git: this.d.git,
+      home: this.d.home,
     });
     // Registered before connecting: `hello` arrives synchronously and listeners may call get() again.
     const entry: Entry = { folder, app, detach: () => {} };
