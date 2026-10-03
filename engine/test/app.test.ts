@@ -1280,6 +1280,43 @@ describe('the checkout and the write lease', () => {
     }
   });
 
+  it("removes this attempt's worktrees when the run can't be recorded, logs one it can't remove, and rethrows", async () => {
+    const ran: string[] = [];
+    const { app } = gitApp({
+      git: (root) =>
+        repoGit({
+          root,
+          branch: 'main',
+          head: SHA,
+          answers: {
+            'worktree add --detach *': (_cwd, args) => (ran.push(`add ${args[3]}`), {}),
+            'worktree remove --force *': (_cwd, args) => (ran.push(`remove ${args[3]}`), args[3].endsWith('wh_b') ? { code: 128, stderr: 'fatal: locked\n' } : {}),
+          },
+        }).exec,
+    });
+    const c = client(app);
+    const g = graphWith(
+      app,
+      'AB',
+      { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } },
+      { type: 'addNode', node: { title: 'b', kind: 'command', command: 'make', workspace: 'wh_b' } },
+    );
+    const reviewed = (await reviewedBy(app, c, g.id)).signature;
+    const create = vi.spyOn(app.runStore, 'create').mockImplementation(() => {
+      throw new Error('ENOSPC: no space left on device');
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed })).rejects.toThrow('ENOSPC: no space left on device');
+      expect(ran).toHaveLength(4);
+      expect(ran.slice(2)).toEqual([ran[0].replace('add', 'remove'), ran[1].replace('add', 'remove')]);
+      expect(logged).toHaveBeenCalledWith('[agent-stream] could not remove a worktree after a refused start', ran[1].slice('add '.length), 'fatal: locked');
+    } finally {
+      logged.mockRestore();
+      create.mockRestore();
+    }
+  });
+
   it('refuses a step with a workspace outside Git or before the first commit', async () => {
     for (const { app } of [gitApp(), gitApp({ git: (root) => repoGit({ root, branch: 'main' }).exec })]) {
       const c = client(app);

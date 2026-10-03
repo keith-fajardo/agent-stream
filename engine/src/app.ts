@@ -493,25 +493,36 @@ export function createApp(d: AppDeps) {
           if (!made.ok) return error(made.error);
           workspaces = made.workspaces;
         }
-        const started = runner.start({
-          graph: r.graph,
-          rendered: p.outcome.rendered,
-          sourceRunId: msg.sourceRunId,
-          fromNodeId: msg.fromNodeId,
-          provider: provider.id,
-          runId,
-          checkout,
-          sequential: msg.sequential,
-          ...(workspaces && { workspaces }),
-          // Fixed for the whole run: a provider switch mid-run doesn't reach its later steps.
-          ...(d.executors ? {} : { agent: agentFor(provider) }),
-        });
-        if (started.ok) return;
-        // Nothing ran in them yet: the worktrees this attempt made go again. A failure is logged (ruling P3); the reply stays the same.
-        for (const w of Object.values(workspaces ?? {})) {
-          const removed = await removeWorkspace({ checkoutRoot: checkout.root, path: w.path, force: true, git: d.git });
-          if (!removed.ok) console.error('[agent-stream] could not remove a worktree after a refused start', w.path, removed.error);
+        /** Nothing ran in them yet: the worktrees this attempt made go again. A failure is logged (ruling P3). */
+        const removeAttempt = async () => {
+          for (const w of Object.values(workspaces ?? {})) {
+            const removed = await removeWorkspace({ checkoutRoot: checkout.root, path: w.path, force: true, git: d.git });
+            if (!removed.ok) console.error('[agent-stream] could not remove a worktree after a refused start', w.path, removed.error);
+          }
+        };
+        let started: ReturnType<typeof runner.start>;
+        try {
+          started = runner.start({
+            graph: r.graph,
+            rendered: p.outcome.rendered,
+            sourceRunId: msg.sourceRunId,
+            fromNodeId: msg.fromNodeId,
+            provider: provider.id,
+            runId,
+            checkout,
+            sequential: msg.sequential,
+            ...(workspaces && { workspaces }),
+            // Fixed for the whole run: a provider switch mid-run doesn't reach its later steps.
+            ...(d.executors ? {} : { agent: agentFor(provider) }),
+          });
+        } catch (e) {
+          // The run couldn't be recorded (a disk error): its worktrees would be recorded nowhere.
+          await removeAttempt();
+          throw e;
         }
+        if (started.ok) return;
+        // The reply stays the same whether or not every worktree could be removed.
+        await removeAttempt();
         if (!started.blocked) return error(started.error);
         const { holder, otherWindow, lockFile } = started.blocked;
         client.send({
