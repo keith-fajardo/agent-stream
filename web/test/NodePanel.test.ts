@@ -112,10 +112,12 @@ describe('NodePanel Refine with planner', () => {
     hello(true);
     const titleOnly = await mount({ ...step, prompt: undefined });
     expect(titleOnly.button('Refine with planner')!.disabled).toBe(true);
+    expect(titleOnly.button('Refine with planner')!.title).toBe('Write what the step should do first.');
     await act(async () => titleOnly.root.unmount());
     hello(false);
     const signedOut = await mount(step);
     expect(signedOut.button('Refine with planner')!.disabled).toBe(true);
+    expect(signedOut.button('Refine with planner')!.title).toBe('x');
     await act(async () => signedOut.root.unmount());
     hello(true);
   });

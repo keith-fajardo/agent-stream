@@ -159,6 +159,16 @@ describe('app', () => {
     expect(a.of('run')).toEqual([]);
   });
 
+  it("refuses to refine steps when the provider can't run", async () => {
+    const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+    await app.handle(a.c, { type: 'refineSteps', graphId: g.id, sessionId: 'default', nodeIds: ['n1'] });
+    expect(a.of('error').map((m) => m.message)).toEqual(['Chat is disabled: Not signed in.']);
+    expect(a.of('chatEntry')).toEqual([]);
+  });
+
   it('passes approval decisions to the broker and broadcasts the queue', async () => {
     const { app, client } = setup();
     const a = client();

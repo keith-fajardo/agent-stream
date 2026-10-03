@@ -51,6 +51,7 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
+  const canRefine = refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   useEffect(() => {
     post({ type: 'draftState', dirty });
   }, [dirty]);
@@ -147,8 +148,14 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
           Save
         </button>
         <button
-          disabled={!status?.ok || !refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command })}
-          title="Ask the planner to turn this step into a precise prompt or command, with a plain-language description"
+          disabled={!status?.ok || !canRefine}
+          title={
+            !status?.ok
+              ? status?.error
+              : canRefine
+                ? 'Ask the planner to turn this step into a precise prompt or command, with a plain-language description'
+                : 'Write what the step should do first.'
+          }
           onClick={() => {
             if (dirty) save();
             actions.refine([node.id]);
