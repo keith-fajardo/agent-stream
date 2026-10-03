@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op, type RenderedRun } from '@agent-stream/shared';
+import { applyOp, emptyGraph, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
@@ -345,6 +345,36 @@ describe('Runner when the filesystem or a listener fails', () => {
     expect(r.run).not.toHaveProperty('provider');
     await tick();
     fake.finish('n1');
+    await r.done;
+  });
+});
+
+describe('Runner.amend', () => {
+  const newNode = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({ id, title: id, kind: 'agent', prompt: `do ${id}`, createdBy: 'agent', updatedBy: 'agent', updatedAt: 't', ...over });
+
+  it('refuses to amend a finished run', async () => {
+    const { runner, fake } = setup();
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
+    await tick();
+    fake.finish('n1');
+    await r.done;
+    expect(runner.amend(r.run.id, { kind: 'add', node: newNode('n2'), text: 'x', after: ['n1'], before: [] }, 'n1', 's')).toEqual({ ok: false, error: 'The run was stopped.' });
+    expect(runner.amend('nope', { kind: 'change', node: newNode('n1'), text: 'x' }, 'n1', 's')).toEqual({ ok: false, error: 'The run was stopped.' });
+  });
+
+  it('refuses steps that started, unknown steps and cycles, and changes nothing', async () => {
+    const { runner } = setup();
+    const r = started(runner.start(withRendered(graphOf([agent('a'), agent('b'), link('n1', 'n2')]))));
+    await tick();
+    const before = structuredClone(runner.get(r.run.id));
+    expect(runner.amend(r.run.id, { kind: 'change', node: newNode('n1'), text: 'x' }, 'n1', 's')).toEqual({ ok: false, error: 'n1 already started; the change was not applied.' });
+    expect(runner.amend(r.run.id, { kind: 'add', node: newNode('n3'), text: 'x', after: [], before: ['n1'] }, 'n1', 's')).toEqual({ ok: false, error: 'n1 already started; the change was not applied.' });
+    expect(runner.amend(r.run.id, { kind: 'add', node: newNode('n3'), text: 'x', after: ['n9'], before: [] }, 'n1', 's')).toEqual({ ok: false, error: 'node n9 does not exist' });
+    expect(runner.amend(r.run.id, { kind: 'change', node: newNode('n9'), text: 'x' }, 'n1', 's')).toEqual({ ok: false, error: 'node n9 does not exist' });
+    expect(runner.amend(r.run.id, { kind: 'add', node: newNode('n2'), text: 'x', after: ['n1'], before: [] }, 'n1', 's')).toEqual({ ok: false, error: 'node n2 already exists' });
+    expect(runner.amend(r.run.id, { kind: 'add', node: newNode('n3'), text: 'x', after: ['n2'], before: ['n2'] }, 'n1', 's')).toEqual({ ok: false, error: 'The graph has a cycle.' });
+    expect(runner.get(r.run.id)).toEqual(before);
+    runner.stop(r.run.id);
     await r.done;
   });
 });

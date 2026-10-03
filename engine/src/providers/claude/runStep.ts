@@ -3,8 +3,11 @@ import type { NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../../executors';
 import { READ_ONLY_TOOLS, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
-import { blocksOf, toolResultText, type QueryFn } from './sdk';
+import { blocksOf, graphServer, toolResultText, type QueryFn } from './sdk';
 import { toSdkGate } from './sdkGate';
+
+/** The in-process MCP server that serves a step's graph tools: they are `mcp__run_graph__<name>`. */
+export const RUN_GRAPH = 'run_graph';
 
 /** What the Claude provider shares with its steps and planner turns. */
 export type ClaudeRunDeps = { claudePath: () => string | undefined; missing: () => string; queryFn: QueryFn; env?: NodeJS.ProcessEnv };
@@ -94,6 +97,11 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
       canUseTool: gate.canUseTool,
       abortController,
     };
+    if (ctx.graphTools?.length) {
+      // The step's own graph tools: each asks the user with the exact change (the gate lets them through).
+      options.mcpServers = { [RUN_GRAPH]: graphServer(RUN_GRAPH, ctx.graphTools) };
+      options.allowedTools = [...options.allowedTools!, `mcp__${RUN_GRAPH}__*`];
+    }
     try {
       let sawInit = false;
       for await (const message of deps.queryFn({ prompt: ctx.prompt, options })) {

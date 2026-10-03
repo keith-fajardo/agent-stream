@@ -9,6 +9,7 @@ import {
   type ClientMessage,
   type Graph,
   type GraphListItem,
+  type GraphNode,
   type GraphResult,
   type NodeEvent,
   type NodeStatus,
@@ -35,6 +36,7 @@ import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { Runner } from './runner';
 import { RunStore } from './runStore';
+import { createStepGraphTools } from './stepGraphTools';
 import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
@@ -95,12 +97,23 @@ export function createApp(d: AppDeps) {
   const broker = new ApprovalBroker(clock);
   /** The variable values files: no agent or planner may read them. */
   const privateFiles = () => [d.valuesFile, d.legacyValuesFile].filter((f): f is string => !!f);
-  /** Agent steps on `p`, each asking the user through its own step gate. */
+  /** A step's prompt or command filled in with the graph's values, exactly as a run would; or the first problem. */
+  function renderNode(graph: Graph, node: GraphNode): { ok: true; text: string } | { ok: false; error: string } {
+    const { preview } = previewRun({ graph: { ...graph, nodes: [node], edges: [] }, values: values.get(graph.id), env, commandShellProblem });
+    const text = preview.steps[0]?.text;
+    if (preview.problems.length || text === undefined) return { ok: false, error: preview.problems[0] ?? `${node.id} could not be filled in.` };
+    return { ok: true, text };
+  }
+  /**
+   * Agent steps on `p`, each asking the user through its own step gate. Each also gets the graph tools
+   * (add_step, change_step), which ask the user themselves, so the gate lets them through.
+   */
   const agentFor =
     (p: AgentProvider): NodeExecutor =>
-    (ctx) =>
-      p.runStep(
-        ctx,
+    (ctx) => {
+      const graphTools = createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
+      return p.runStep(
+        { ...ctx, graphTools },
         createStepGate({
           broker,
           runId: ctx.runId,
@@ -111,8 +124,10 @@ export function createApp(d: AppDeps) {
           privateFiles: privateFiles(),
           signal: ctx.signal,
           emit: ctx.emit,
+          selfApproving: new Set(graphTools.map((t) => `mcp__run_graph__${t.name}`)),
         }),
       );
+    };
   const executors = d.executors ?? {
     agent: agentFor(provider),
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
@@ -162,6 +177,7 @@ export function createApp(d: AppDeps) {
     const r = graphStore.delete(id);
     if (!r.ok) return r;
     values.deleteGraph(id);
+    agentChangeCounts.delete(id);
     try {
       sessions.removeGraph(id);
     } catch (e) {
@@ -223,7 +239,16 @@ export function createApp(d: AppDeps) {
     if (op.type === 'renameVariable') values.rename(graphId, op.name, op.newName);
     if (op.type === 'deleteVariable') values.delete(graphId, op.name);
   });
-  graphStore.on('changed', (graph: Graph) => broadcast({ type: 'graph', graph, ...review(graph.id) }));
+  /** Each graph's agent-change count as last broadcast, so the graphs list follows it. */
+  const agentChangeCounts = new Map<string, number>();
+  graphStore.on('changed', (graph: Graph) => {
+    const r = review(graph.id);
+    broadcast({ type: 'graph', graph, ...r });
+    if ((agentChangeCounts.get(graph.id) ?? 0) !== r.changes.length) {
+      agentChangeCounts.set(graph.id, r.changes.length);
+      broadcastGraphs();
+    }
+  });
   runner.on('run', (run: RunMeta) => {
     broadcast({ type: 'run', run });
     broadcast({ type: 'runs', graphId: run.graphId, runs: runStore.list(run.graphId) });

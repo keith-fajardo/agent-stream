@@ -14,6 +14,8 @@ export function toSdkGate(gate: ToolGate): ApprovalGate {
       const reason = gate.privacy(input.tool_name, input.tool_input);
       if (reason) return deny(reason);
       if (gate.isReadOnly(input.tool_name)) return {};
+      // The step graph tools ask the user themselves, showing the exact change: one approval, not two.
+      if (gate.isSelfApproving(input.tool_name)) return {};
       const d = await gate.approve(input.tool_name, input.tool_input, options.signal);
       if (!d.allow) return deny(d.reason);
       approvedToolUseIds.add(input.tool_use_id);
@@ -25,7 +27,7 @@ export function toSdkGate(gate: ToolGate): ApprovalGate {
 
   const canUseTool: CanUseTool = async (toolName, input, options) => {
     try {
-      if (approvedToolUseIds.has(options.toolUseID)) return { behavior: 'allow', updatedInput: input };
+      if (approvedToolUseIds.has(options.toolUseID) || gate.isSelfApproving(toolName)) return { behavior: 'allow', updatedInput: input };
       const d = await gate.approve(toolName, input, options.signal);
       return d.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: d.reason };
     } catch (error) {

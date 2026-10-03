@@ -1,4 +1,5 @@
-import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query, tool, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { GraphTool } from '../types';
 
 /** The slice of the SDK's `query` we use; tests substitute a fake. */
 export type QueryFn = (params: { prompt: string; options?: Options }) => AsyncIterable<SDKMessage>;
@@ -28,4 +29,18 @@ export function toolResultText(content: unknown): string {
     return (content as LooseBlock[]).map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.type}]`)).join('\n');
   }
   return '';
+}
+
+/** Provider-neutral graph tools, served to Claude Code as the in-process MCP server `name` (its tools are `mcp__<name>__*`). */
+export function graphServer(name: string, tools: GraphTool[]) {
+  return createSdkMcpServer({
+    name,
+    version: '1.0.0',
+    tools: tools.map((t) =>
+      tool(t.name, t.description, t.schema, async (args) => {
+        const r = await t.run(args);
+        return r.isError ? { content: [{ type: 'text' as const, text: r.text }], isError: true } : { content: [{ type: 'text' as const, text: r.text }] };
+      }),
+    ),
+  });
 }

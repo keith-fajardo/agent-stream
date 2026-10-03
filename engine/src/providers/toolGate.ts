@@ -12,9 +12,11 @@ export interface ToolGate {
   /** Sync privacy check: why this call may never touch its path, or null. */
   privacy(toolName: string, input: unknown): string | null;
   isReadOnly(toolName: string): boolean;
+  /** Tools that ask the user themselves (the step graph tools): passed through without a second approval. */
+  isSelfApproving(toolName: string): boolean;
   /** Steps: ask the user. Planner: allow graph tools, refuse anything else. Never throws. */
   approve(toolName: string, input: unknown, signal?: AbortSignal): Promise<ToolDecision>;
-  /** privacy → read-only → approve. What a provider without its own permission system calls. */
+  /** privacy → read-only → self-approving → approve. What a provider without its own permission system calls. */
   decide(toolName: string, input: unknown, signal?: AbortSignal): Promise<ToolDecision>;
 }
 
@@ -29,9 +31,12 @@ export type StepGateOptions = {
   privateFiles: readonly string[];
   signal: AbortSignal;
   emit: (event: NodeEventBody) => void;
+  /** Tool names that ask the user themselves (the step's graph tools, as the provider names them). */
+  selfApproving?: ReadonlySet<string>;
 };
 
-function denialReason(d: Decision, runStopped: boolean = false): string {
+/** Why a step's request was not approved, as the agent is told. */
+export function denialReason(d: Decision, runStopped: boolean = false): string {
   if (d.decision === 'cancelled' && runStopped) return 'The run was stopped.';
   if (d.decision === 'cancelled') return 'The approval request expired or was withdrawn.';
   if (d.decision === 'deny' && d.note) return `Denied by the user: ${d.note}`;
@@ -43,14 +48,17 @@ export function couldNotAsk(error: unknown): string {
   return `Agent Stream could not ask for approval: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-export function withDecide(base: Omit<ToolGate, 'decide'>): ToolGate {
+export function withDecide(base: Omit<ToolGate, 'decide' | 'isSelfApproving'> & { isSelfApproving?: ToolGate['isSelfApproving'] }): ToolGate {
+  const isSelfApproving = base.isSelfApproving ?? (() => false);
   return {
     ...base,
+    isSelfApproving,
     async decide(toolName, input, signal) {
       try {
         const reason = base.privacy(toolName, input);
         if (reason) return { allow: false, reason };
         if (base.isReadOnly(toolName)) return { allow: true, by: 'readOnly' };
+        if (isSelfApproving(toolName)) return { allow: true, by: 'graphTool' };
         return await base.approve(toolName, input, signal);
       } catch (error) {
         return { allow: false, reason: couldNotAsk(error) };
@@ -99,6 +107,7 @@ export function createStepGate(o: StepGateOptions): ToolGate {
   return withDecide({
     privacy: (toolName, input) => privatePathDenial(o.projectDir, toolName, input, o.privateFiles),
     isReadOnly: (toolName) => READ_ONLY_TOOLS.has(toolName),
+    isSelfApproving: (toolName) => o.selfApproving?.has(toolName) ?? false,
     async approve(toolName, input, signal) {
       try {
         const d = await ask(toolName, input, signal);

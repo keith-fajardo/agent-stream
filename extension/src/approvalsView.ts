@@ -11,7 +11,7 @@ export class ApprovalItem extends vscode.TreeItem {
   ) {
     super(`${request.nodeId} · ${request.nodeTitle}`, vscode.TreeItemCollapsibleState.None);
     this.id = `approval:${request.id}`;
-    this.description = approvalSummary(request.toolName, request.input);
+    this.description = approvalSummary(request.toolName, request.input, request.graphChange);
     const full = JSON.stringify(request.input, null, 2) ?? '';
     this.tooltip = full.length > TOOLTIP_CHARS ? `${full.slice(0, TOOLTIP_CHARS)}…` : full;
     this.contextValue = 'approval';

@@ -2,10 +2,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookInput, McpSdkServerConfigWithInstance, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext } from '../src/executors';
+import type { GraphTool } from '../src/providers/types';
 import { createClaudeProvider } from '../src/providers/claude';
 import type { QueryFn } from '../src/providers/claude/sdk';
 import { createStepGate } from '../src/providers/toolGate';
@@ -100,6 +103,45 @@ describe('Claude provider: steps', () => {
       { type: 'tool_call', toolUseId: 'tu1', name: 'Read', input: { file_path: 'a.sql' } },
       { type: 'tool_result', toolUseId: 'tu1', content: 'select 1', isError: false },
     ]);
+  });
+
+  it('serves the step graph tools as the run_graph server and allows them', async () => {
+    const calls: unknown[] = [];
+    const graphTools: GraphTool[] = [
+      { name: 'add_step', description: 'Add a step.', schema: {}, run: async (input) => (calls.push(input), { text: 'Applied: added' }) },
+      { name: 'change_step', description: 'Change a step.', schema: {}, run: async () => ({ text: 'n3 already started; the change was not applied.', isError: true }) },
+    ];
+    const { fn, calls: queries } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const { c } = ctx();
+    expect((await runStep({ queryFn: fn }, { ...c, graphTools })).ok).toBe(true);
+    const options = queries[0].options!;
+    expect(options.allowedTools).toEqual(['Read', 'Glob', 'Grep', 'mcp__run_graph__*']);
+    const server = options.mcpServers!.run_graph as McpSdkServerConfigWithInstance;
+    expect(server).toBeDefined();
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverSide);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientSide);
+    try {
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['add_step', 'change_step']);
+      expect(await client.callTool({ name: 'add_step', arguments: {} })).toEqual({ content: [{ type: 'text', text: 'Applied: added' }] });
+      expect(await client.callTool({ name: 'change_step', arguments: {} })).toEqual({ content: [{ type: 'text', text: 'n3 already started; the change was not applied.' }], isError: true });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('adds no graph server when the step has no graph tools', async () => {
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    await runStep({ queryFn: fn }, { ...ctx().c, graphTools: [] });
+    expect(calls[0].options!.mcpServers).toBeUndefined();
+    expect(calls[0].options!.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
   });
 
   it('refuses to continue when the session is not on the subscription', async () => {

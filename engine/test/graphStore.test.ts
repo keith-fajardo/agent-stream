@@ -397,6 +397,56 @@ describe('agent changes against the baseline', () => {
     expect(store.readOps(id).at(-1)).toMatchObject({ by: 'user', op: accept });
   });
 
+  it('lets only the user accept or revert agent changes', () => {
+    const { store, id, baselineFile } = withGraph([step('n1')]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'step', runId: 'r1', nodeId: 'n2' });
+    const ops = store.readOps(id).length;
+    const baseline = readFileSync(baselineFile, 'utf8');
+    for (const op of [
+      { type: 'acceptChange', target: { kind: 'all' } },
+      { type: 'acceptChange', target: { kind: 'node', id: 'n1' } },
+      { type: 'revertChange', target: { kind: 'node', id: 'n1' } },
+    ] as const) {
+      expect(store.apply(id, op, 'agent', { kind: 'step', runId: 'r1', nodeId: 'n2' })).toEqual({ ok: false, error: 'Only you can accept or revert agent changes.' });
+    }
+    expect(store.readOps(id)).toHaveLength(ops);
+    expect(readFileSync(baselineFile, 'utf8')).toBe(baseline);
+    expect(store.get(id).nodes[0].prompt).toBe('x');
+    expect(store.agentChanges(id)).toHaveLength(1);
+  });
+
+  it('refuses to accept or revert what no agent changed, without saving or logging', () => {
+    const { store, id, paths, baselineFile } = withGraph([step('n1'), step('n2'), step('n3')], [['n1', 'n2']]);
+    const changed = vi.fn();
+    store.on('changed', changed);
+    const ops = () => store.readOps(id).length;
+    const graphFile = join(paths.graphsDir, `${id}.json`);
+    const noChanges = { ok: false, error: 'There are no agent changes to review.' };
+    // Nothing differs: no baseline at all.
+    let logged = ops();
+    let file = readFileSync(graphFile, 'utf8');
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user')).toEqual(noChanges);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'all' } }, 'user')).toEqual(noChanges);
+    expect(ops()).toBe(logged);
+    expect(readFileSync(graphFile, 'utf8')).toBe(file);
+    // One agent change: other steps and connections have none.
+    store.apply(id, { type: 'updateNode', id: 'n3', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    changed.mockClear();
+    logged = ops();
+    file = readFileSync(graphFile, 'utf8');
+    const baseline = readFileSync(baselineFile, 'utf8');
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n1' } }, 'user')).toEqual(noChanges);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n2' } }, 'user')).toEqual(noChanges);
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'edge', id: 'n1->n2' } }, 'user')).toEqual(noChanges);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } }, 'user')).toEqual(noChanges);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n9' } }, 'user')).toEqual({ ok: false, error: 'node n9 does not exist' });
+    expect(ops()).toBe(logged);
+    expect(readFileSync(graphFile, 'utf8')).toBe(file);
+    expect(readFileSync(baselineFile, 'utf8')).toBe(baseline);
+    expect(changed).not.toHaveBeenCalled();
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n3' } }, 'user').ok).toBe(true);
+  });
+
   it('duplicates without the baseline', () => {
     const { store, id } = withGraph([step('n1')]);
     store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });

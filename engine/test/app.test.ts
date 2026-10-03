@@ -798,6 +798,88 @@ describe('app', () => {
       expect(app.graphStore.agentChanges(g.id)).toEqual([]);
     });
 
+    it('re-broadcasts the graphs list when an edit changes the number of agent changes', () => {
+      const { app, client } = setup();
+      const a = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+      const lists = () => a.of('graphs').length;
+      let seen = lists();
+      app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { prompt: 'agent prompt' } }, 'agent', planner);
+      expect(lists()).toBe(seen + 1);
+      expect(a.of('graphs').at(-1)?.graphs[0].agentChanges).toBe(1);
+      seen = lists();
+      // Same count: no new list.
+      app.graphStore.apply(g.id, { type: 'updateNode', id: 'n1', patch: { prompt: 'agent prompt 2' } }, 'agent', planner);
+      expect(lists()).toBe(seen);
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'agent', prompt: 'q' } }, 'agent', planner);
+      expect(lists()).toBe(seen + 1);
+      expect(a.of('graphs').at(-1)?.graphs[0].agentChanges).toBe(2);
+      app.graphStore.apply(g.id, { type: 'acceptChange', target: { kind: 'all' } }, 'user');
+      expect(lists()).toBe(seen + 2);
+      expect(a.of('graphs').at(-1)?.graphs[0]).not.toHaveProperty('agentChanges');
+    });
+
+    it('gives agent steps the add_step and change_step tools, approved by themselves', async () => {
+      const seen: { tools: string[]; selfApproving: boolean[] }[] = [];
+      const provider = testProvider({
+        runStep: async (ctx, gate) => {
+          const tools = (ctx.graphTools ?? []).map((t) => t.name);
+          seen.push({ tools, selfApproving: [...tools.map((t) => gate.isSelfApproving(`mcp__run_graph__${t}`)), gate.isSelfApproving('Bash')] });
+          return { ok: true, output: '' };
+        },
+      });
+      const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+      const c = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+      expect(seen).toEqual([{ tools: ['add_step', 'change_step'], selfApproving: [true, true, false] }]);
+    });
+
+    it('fills in a step agent\'s change with the graph\'s values before asking', async () => {
+      const held = deferred<void>();
+      let tools: import('../src/providers/types').GraphTool[] = [];
+      const prompts: Record<string, string | undefined> = {};
+      const provider = testProvider({
+        runStep: async (ctx) => {
+          prompts[ctx.node.id] = ctx.node.prompt;
+          if (ctx.node.id === 'n1') {
+            tools = ctx.graphTools ?? [];
+            await held.promise;
+          }
+          return { ok: true, output: '' };
+        },
+      });
+      const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+      const c = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addVariable', name: 'target' }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+      await app.handle(c.c, { type: 'setVariableValue', graphId: g.id, name: 'target', value: 'dev' });
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      await vi.waitFor(() => expect(tools).toHaveLength(2));
+      const change = tools.find((t) => t.name === 'change_step')!;
+      expect(await change.run({ id: 'n2', prompt: 'Deploy to {{ nope }}' })).toMatchObject({ isError: true, text: expect.stringContaining('nope') });
+      expect(c.of('approvals').at(-1)?.approvals ?? []).toEqual([]);
+      const pending = change.run({ id: 'n2', prompt: 'Deploy to {{ target }}' });
+      await vi.waitFor(() => expect(c.of('approvals').at(-1)?.approvals).toHaveLength(1));
+      const [request] = c.of('approvals').at(-1)!.approvals;
+      expect(request.graphChange).toEqual({ summary: "n1 wants to change n2's prompt", detail: 'Prompt:\nDeploy to dev' });
+      await app.handle(c.c, { type: 'decide', approvalId: request.id, decision: 'approve' });
+      expect(await pending).toEqual({ text: "Applied: n1 wants to change n2's prompt" });
+      held.resolve();
+      await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+      const run = c.of('run').at(-1)!.run;
+      expect(run.rendered!.nodes.n2).toBe('Deploy to dev');
+      expect(prompts.n2).toBe('Deploy to dev');
+      expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: "n1 wants to change n2's prompt" }]);
+      expect(app.graphStore.get(g.id).nodes.find((n) => n.id === 'n2')!.prompt).toBe('Deploy to {{ target }}');
+    });
+
     it('warns at startup about a baseline it cannot read', () => {
       const paths = tmpProject();
       writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify(emptyGraph('g1', 'G', 't')));

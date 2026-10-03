@@ -35,6 +35,7 @@ type ReviewOp = Extract<Op, { type: 'acceptChange' | 'revertChange' }>;
 type BaselineResult = { ok: true; graph?: Graph } | { ok: false; error: string };
 
 const NO_CHANGES = 'There are no agent changes to review.';
+const ONLY_USER_REVIEWS = 'Only you can accept or revert agent changes.';
 const BASELINE_SUFFIX = '.baseline.json';
 
 /** Whether an agent op made or touched this change (for attribution). */
@@ -194,7 +195,11 @@ export class GraphStore extends EventEmitter {
    * the first one); user edits go to the baseline too, when they fit there (agent changes spec §3.1).
    */
   apply(graphId: string, op: Op, by: Actor, source?: ChangeSource): GraphResult {
-    if (op.type === 'acceptChange' || op.type === 'revertChange') return this.reviewOp(graphId, op);
+    if (op.type === 'acceptChange' || op.type === 'revertChange') {
+      // Reviewing agent changes is the user's call: no agent may accept (or revert) its own.
+      if (by !== 'user') return { ok: false, error: ONLY_USER_REVIEWS };
+      return this.reviewOp(graphId, op);
+    }
     const current = this.load(graphId);
     if (!current.ok) return current;
     const at = this.clock();
@@ -259,12 +264,16 @@ export class GraphStore extends EventEmitter {
     const graph = current.graph;
     const at = this.clock();
     const base = this.baseline(graphId);
-    if (!base.ok || !base.graph) {
+    if (!base.ok) {
       if (op.type !== 'acceptChange' || op.target.kind !== 'all') return { ok: false, error: NO_CHANGES };
       // Accepting everything resolves an unreadable baseline: the graph is the user's again.
       rmSync(this.baselineFile(graphId), { force: true });
       return this.finishReview(graphId, op, graph, at);
     }
+    // No baseline: nothing an agent did differs.
+    if (!base.graph) return { ok: false, error: NO_CHANGES };
+    const pending = pendingProblem(base.graph, graph, op.target);
+    if (pending) return { ok: false, error: pending };
     const r = op.type === 'acceptChange' ? accept(base.graph, graph, op.target) : revert(base.graph, graph, op.target, at);
     if (!r.ok) return r;
     if (op.type === 'acceptChange') this.writeBaseline(r.graph);
@@ -312,6 +321,19 @@ const sameEnds = (a: { from: string; to: string }, b: { from: string; to: string
 /** The edge `id` names, from the graph or the baseline. */
 function findEdge(baseline: Graph, graph: Graph, id: string) {
   return graph.edges.find((e) => e.id === id) ?? baseline.edges.find((e) => e.id === id);
+}
+
+/** Why `target` can't be reviewed: it doesn't exist, or no agent changed it. Null when it has a pending change. */
+function pendingProblem(baseline: Graph, graph: Graph, target: ChangeTarget): string | null {
+  const changes = diffGraphs(baseline, graph);
+  if (target.kind === 'all') return changes.length ? null : NO_CHANGES;
+  if (target.kind === 'node') {
+    if (!graph.nodes.some((n) => n.id === target.id) && !baseline.nodes.some((n) => n.id === target.id)) return `node ${target.id} does not exist`;
+    return changes.some((c) => c.kind === 'node' && c.id === target.id) ? null : NO_CHANGES;
+  }
+  const edge = findEdge(baseline, graph, target.id);
+  if (!edge) return `edge ${target.id} does not exist`;
+  return changes.some((c) => c.kind === 'edge' && sameEnds(c, edge)) ? null : NO_CHANGES;
 }
 
 /** Validated like a graph file, so a result with a cycle or a dangling edge is refused. */

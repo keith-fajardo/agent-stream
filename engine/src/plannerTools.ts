@@ -15,10 +15,10 @@ export type PlannerToolDeps = {
   requestRun: (fromNodeId?: string) => string | null;
 };
 
-const reply = (text: string, isError = false): ToolReply => (isError ? { text, isError: true } : { text });
+export const reply = (text: string, isError = false): ToolReply => (isError ? { text, isError: true } : { text });
 
 /** One graph tool: its input is checked against `schema` before `handler` sees it. */
-function tool<S extends ZodRawShape>(name: string, description: string, schema: S, handler: (args: z.infer<z.ZodObject<S>>) => Promise<ToolReply>): GraphTool {
+export function defineTool<S extends ZodRawShape>(name: string, description: string, schema: S, handler: (args: z.infer<z.ZodObject<S>>) => Promise<ToolReply>): GraphTool {
   const parser = z.object(schema);
   return {
     name,
@@ -52,10 +52,10 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
   const outcome = (r: { ok: true } | { ok: false; error: string }, success: string) => (r.ok ? reply(success) : reply(r.error, true));
 
   return [
-    tool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command) and edges.', {}, async () =>
+    defineTool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command) and edges.', {}, async () =>
       reply(JSON.stringify(summarizeGraph(d.graphStore.get(d.graphId)), null, 2)),
     ),
-    tool(
+    defineTool(
       'add_node',
       'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why.',
       {
@@ -79,7 +79,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         return errors.length ? reply(`Added ${id}, but some edges failed:\n${errors.join('\n')}`, true) : reply(`Added ${id}.`);
       },
     ),
-    tool(
+    defineTool(
       'update_node',
       'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why.',
       {
@@ -93,25 +93,25 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
       },
       async ({ id, ...patch }) => outcome(apply({ type: 'updateNode', id, patch }), `Updated ${id}.`),
     ),
-    tool('delete_node', 'Delete a step and its edges.', { id: z.string() }, async ({ id }) =>
+    defineTool('delete_node', 'Delete a step and its edges.', { id: z.string() }, async ({ id }) =>
       outcome(apply({ type: 'deleteNode', id }), `Deleted ${id}.`),
     ),
-    tool('connect', 'Make `to` run after `from` and receive its output.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
+    defineTool('connect', 'Make `to` run after `from` and receive its output.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
       outcome(apply({ type: 'connect', from, to }), `Connected ${from} -> ${to}.`),
     ),
-    tool('disconnect', 'Remove the edge from `from` to `to`.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
+    defineTool('disconnect', 'Remove the edge from `from` to `to`.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
       outcome(apply({ type: 'disconnect', from, to }), `Disconnected ${from} -> ${to}.`),
     ),
-    tool('set_goal', 'Set the workflow goal: shared context every agent step receives.', { goal: z.string() }, async ({ goal }) =>
+    defineTool('set_goal', 'Set the workflow goal: shared context every agent step receives.', { goal: z.string() }, async ({ goal }) =>
       outcome(apply({ type: 'setGoal', goal }), 'Goal updated.'),
     ),
-    tool(
+    defineTool(
       'set_instructions',
       'Set the instructions & context: longer guidance every agent step receives after the goal (targets, conventions, what never to touch).',
       { instructions: z.string() },
       async ({ instructions }) => outcome(apply({ type: 'setInstructions', instructions }), 'Instructions updated.'),
     ),
-    tool(
+    defineTool(
       'set_variable',
       'Define a variable steps can use as {{ name }} (Jinja), or change its description. The user sets its value on their machine; you never see values.',
       { name: z.string(), description: z.string().optional() },
@@ -121,10 +121,10 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         return outcome(apply({ type: 'addVariable', name, description }), `Added variable ${name}. Ask the user to set its value (Variables menu).`);
       },
     ),
-    tool('delete_variable', 'Remove a variable definition. Steps still using it fail the run check until updated.', { name: z.string() }, async ({ name }) =>
+    defineTool('delete_variable', 'Remove a variable definition. Steps still using it fail the run check until updated.', { name: z.string() }, async ({ name }) =>
       outcome(apply({ type: 'deleteVariable', name }), `Deleted variable ${name}.`),
     ),
-    tool(
+    defineTool(
       'request_run',
       "Ask the user to start a run. This opens a confirmation dialog in Agent Stream; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
       { fromNodeId: z.string().optional() },
@@ -133,7 +133,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         return error ? reply(error, true) : reply('Asked the user to confirm the run in the UI. Call get_run later to see results.');
       },
     ),
-    tool('get_run', 'Show the latest run (or runId): status of each step, errors, and output excerpts.', { runId: z.string().optional() }, async ({ runId }) => {
+    defineTool('get_run', 'Show the latest run (or runId): status of each step, errors, and output excerpts.', { runId: z.string().optional() }, async ({ runId }) => {
       const id = runId ?? d.runStore.list(d.graphId)[0]?.id;
       const meta = id ? d.runStore.get(id) : undefined;
       if (!meta || meta.graphId !== d.graphId) return runId ? reply(`Run ${runId} not found.`, true) : reply('No runs yet.');

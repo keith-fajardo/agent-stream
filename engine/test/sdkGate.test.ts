@@ -94,6 +94,27 @@ describe('approval gate', () => {
     expect(await second).toEqual({ behavior: 'deny', message: 'Denied by the user.' });
   });
 
+  it('passes self-approving tools through without a second approval, and only those', async () => {
+    const broker = new ApprovalBroker();
+    const ac = new AbortController();
+    const events: NodeEventBody[] = [];
+    const selfApproving = new Set(['mcp__run_graph__add_step']);
+    const gate = makeApprovalGate({ broker, runId: 'r1', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', signal: ac.signal, projectDir: '/p', privateFiles: [], emit: (e) => events.push(e), selfApproving });
+    const hook = (input: HookInput) => gate.hooks.PreToolUse[0].hooks[0](input, 'tu', { signal: ac.signal });
+    expect(await hook(preToolUse('mcp__run_graph__add_step', { title: 'x' }))).toEqual({});
+    expect(await gate.canUseTool('mcp__run_graph__add_step', { title: 'x' }, { signal: ac.signal, toolUseID: 'tu2', requestId: 'req' } as Parameters<CanUseTool>[2])).toEqual({
+      behavior: 'allow',
+      updatedInput: { title: 'x' },
+    });
+    expect(broker.pending()).toEqual([]);
+    expect(events).toEqual([]);
+    // A name outside the set still asks.
+    const other = hook(preToolUse('mcp__run_graph__delete_step', {}));
+    expect(broker.pending()).toHaveLength(1);
+    broker.decide(broker.pending()[0].id, { decision: 'deny' });
+    expect(decisionOf(await other)?.permissionDecision).toBe('deny');
+  });
+
   it('gates every tool with a day-long hook timeout', () => {
     const { gate } = setup();
     expect(gate.hooks.PreToolUse).toHaveLength(1);
@@ -172,6 +193,7 @@ describe('sdk gate over a stub ToolGate (fails closed)', () => {
   const stub = (over: Partial<ToolGate> = {}): ToolGate => ({
     privacy: () => null,
     isReadOnly: () => false,
+    isSelfApproving: () => false,
     approve: async () => ({ allow: true, by: 'user' }),
     decide: async () => ({ allow: true, by: 'user' }),
     ...over,

@@ -52,6 +52,16 @@ describe('step gate', () => {
     run.abort();
     expect(await decision).toEqual({ allow: false, reason: 'The run was stopped.' });
   });
+
+  it('lets self-approving tools through without asking, after the privacy check', async () => {
+    const broker = new ApprovalBroker(() => 't');
+    const gate = createStepGate({ broker, runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: PROJECT, privateFiles: [VALUES], signal: new AbortController().signal, emit: vi.fn(), selfApproving: new Set(['mcp__run_graph__add_step']) });
+    expect(gate.isSelfApproving('mcp__run_graph__add_step')).toBe(true);
+    expect(gate.isSelfApproving('Bash')).toBe(false);
+    expect(await gate.decide('mcp__run_graph__add_step', {})).toEqual({ allow: true, by: 'graphTool' });
+    expect(broker.pending()).toEqual([]);
+    expect(stepGate().gate.isSelfApproving('mcp__run_graph__add_step')).toBe(false);
+  });
 });
 
 describe('planner gate', () => {

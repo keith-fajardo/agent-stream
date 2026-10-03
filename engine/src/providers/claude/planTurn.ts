@@ -1,25 +1,11 @@
-import { createSdkMcpServer, tool, type HookJSONOutput, type Options } from '@anthropic-ai/claude-agent-sdk';
+import type { HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
 import { couldNotAsk } from '../toolGate';
-import type { GraphTool, PlannerTurn, PlannerTurnResult } from '../types';
+import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { authSourceError, isSubscriptionAuthSource, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { ClaudeRunDeps } from './runStep';
-import { blocksOf } from './sdk';
+import { blocksOf, graphServer } from './sdk';
 
 const GRAPH_PREFIX = 'mcp__graph__';
-
-/** The provider-neutral graph tools, served to Claude Code as the in-process `graph` MCP server. */
-function graphServer(tools: GraphTool[]) {
-  return createSdkMcpServer({
-    name: 'graph',
-    version: '1.0.0',
-    tools: tools.map((t) =>
-      tool(t.name, t.description, t.schema, async (args) => {
-        const r = await t.run(args);
-        return r.isError ? { content: [{ type: 'text' as const, text: r.text }], isError: true } : { content: [{ type: 'text' as const, text: r.text }] };
-      }),
-    ),
-  });
-}
 
 const deny = (reason: string): HookJSONOutput => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
 
@@ -40,7 +26,7 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
       allowedTools: ['Read', 'Glob', 'Grep', `${GRAPH_PREFIX}*`],
       permissionMode: 'dontAsk',
       settingSources: ['project'],
-      mcpServers: { graph: graphServer(turn.tools) },
+      mcpServers: { graph: graphServer('graph', turn.tools) },
       systemPrompt: { type: 'preset', preset: 'claude_code', append: turn.systemAppend },
       hooks: {
         PreToolUse: [

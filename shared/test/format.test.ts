@@ -43,4 +43,11 @@ describe('approval text', () => {
     expect(shown('   ')).toBe('Bash: (empty command)');
     expect(approvalSentence(request('Bash', { command: 'dbt build\nrm -rf ~' }))).toBe('n2 Build new wants to run: dbt build … (+1 more line)');
   });
+
+  it('uses the summary of a graph change', () => {
+    const graphChange = { summary: 'n2 wants to change n4\'s command', detail: 'Command:\nnpm ci' };
+    const a: ApprovalRequest = { ...request('Change graph', { id: 'n4', command: 'npm ci' }), graphChange };
+    expect(approvalSentence(a)).toBe("n2 wants to change n4's command");
+    expect(approvalSummary(a.toolName, a.input, a.graphChange)).toBe("n2 wants to change n4's command");
+  });
 });

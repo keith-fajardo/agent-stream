@@ -155,7 +155,12 @@ export type RunMeta = {
   rendered?: RenderedRun;
   /** Which provider ran this run's agent steps (absent for runs made before providers). */
   provider?: ProviderId;
+  /** Graph changes a step agent made to this run while it ran, each approved by the user. */
+  amendments?: RunAmendment[];
 };
+
+/** One approved change a step agent made to a run in progress. */
+export type RunAmendment = { at: string; byNodeId: string; summary: string };
 
 export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId };
 
@@ -185,7 +190,11 @@ export type ApprovalRequest = {
   toolName: string;
   input: unknown;
   createdAt: string;
+  /** A step agent's graph change: what it wants (`summary`) and the exact text that would run (`detail`). */
+  graphChange?: GraphChangeRequest;
 };
+
+export type GraphChangeRequest = { summary: string; detail: string };
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'error' | 'note';
 export type ChatEntry = { at: string; role: ChatRole; text: string };

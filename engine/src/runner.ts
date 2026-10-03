@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
+  edgeId,
   reusableNodeIds,
   topoOrder,
   upstream,
@@ -47,6 +48,11 @@ export type StartRunInput = {
   /** Which provider runs the agent steps, recorded in the run. */
   provider?: ProviderId;
 };
+/** An approved change a step agent makes to its run: a new step with its connections, or new text for a step that hasn't started. */
+export type RunChange =
+  | { kind: 'add'; node: GraphNode; text: string; after: string[]; before: string[] }
+  | { kind: 'change'; node: GraphNode; text: string };
+
 export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string };
 
 type ActiveRun = {
@@ -132,6 +138,45 @@ export class Runner extends EventEmitter {
     this.safeEmit('run', meta);
     this.schedule(run);
     return { ok: true, run: meta, done };
+  }
+
+  /**
+   * Applies a step agent's approved graph change to the running run (agent changes spec §4.3): an added
+   * step joins as queued with its rendered text and edges; a changed step that hasn't started gets its
+   * new definition and text. Refused, changing nothing, once the run stops or a target started.
+   */
+  amend(runId: string, change: RunChange, byNodeId: string, summary: string): { ok: true } | { ok: false; error: string } {
+    const run = this.runs.get(runId);
+    if (!run || run.finished || run.stopping) return { ok: false, error: 'The run was stopped.' };
+    const meta = run.meta;
+    const exists = (id: string) => meta.snapshot.nodes.some((n) => n.id === id) && meta.nodes[id] !== undefined;
+    const started = (id: string) => `${id} already started; the change was not applied.`;
+    const notStarted = (id: string) => meta.nodes[id]?.status === 'queued';
+    if (change.kind === 'change') {
+      if (!exists(change.node.id)) return { ok: false, error: `node ${change.node.id} does not exist` };
+      if (!notStarted(change.node.id)) return { ok: false, error: started(change.node.id) };
+      meta.snapshot = { ...meta.snapshot, nodes: meta.snapshot.nodes.map((n) => (n.id === change.node.id ? change.node : n)) };
+    } else {
+      if (exists(change.node.id) || meta.nodes[change.node.id] !== undefined) return { ok: false, error: `node ${change.node.id} already exists` };
+      for (const id of [...change.after, ...change.before]) if (!exists(id)) return { ok: false, error: `node ${id} does not exist` };
+      for (const id of change.before) if (!notStarted(id)) return { ok: false, error: started(id) };
+      const edges = [
+        ...[...new Set(change.after)].map((from) => ({ id: edgeId(from, change.node.id), from, to: change.node.id })),
+        ...[...new Set(change.before)].map((to) => ({ id: edgeId(change.node.id, to), from: change.node.id, to })),
+      ];
+      const next = { ...meta.snapshot, nodes: [...meta.snapshot.nodes, change.node], edges: [...meta.snapshot.edges, ...edges] };
+      const problems = validateRunnable(next);
+      if (problems.length) return { ok: false, error: problems.join('\n') };
+      meta.snapshot = next;
+      meta.nodes[change.node.id] = { status: 'queued' };
+      run.order = topoOrder(next);
+    }
+    meta.rendered = { ...meta.rendered!, nodes: { ...meta.rendered!.nodes, [change.node.id]: change.text } };
+    meta.amendments = [...(meta.amendments ?? []), { at: this.clock(), byNodeId, summary }];
+    this.persist(meta);
+    this.safeEmit('run', meta);
+    this.schedule(run);
+    return { ok: true };
   }
 
   stop(runId: string): boolean {

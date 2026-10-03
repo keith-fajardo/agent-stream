@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ProviderStatus, NodeStatus, RunStatus } from './types';
+import type { ApprovalRequest, GraphChangeRequest, ProviderStatus, NodeStatus, RunStatus } from './types';
 
 export function providerLabel(status: ProviderStatus): string {
   if (!status.ok) return `⚠ ${status.error ?? status.label}`;
@@ -54,8 +54,9 @@ const firstLine = (text: string, max = 80) => {
 };
 const fieldsOf = (input: unknown) => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {});
 
-/** One line for lists: "Bash: dbt build …", "Edit: models/x.sql". */
-export function approvalSummary(toolName: string, input: unknown): string {
+/** One line for lists: "Bash: dbt build …", "Edit: models/x.sql", or a graph change's own summary. */
+export function approvalSummary(toolName: string, input: unknown, graphChange?: GraphChangeRequest): string {
+  if (graphChange) return graphChange.summary;
   const f = fieldsOf(input);
   if ((toolName === 'Bash' || toolName === 'PowerShell') && typeof f.command === 'string') return `${toolName}: ${firstLine(f.command)}`;
   if (typeof f.file_path === 'string') return `${toolName}: ${f.file_path}`;
@@ -64,6 +65,7 @@ export function approvalSummary(toolName: string, input: unknown): string {
 
 /** A sentence for notifications: "n2 Build new wants to run: dbt build". */
 export function approvalSentence(a: ApprovalRequest): string {
+  if (a.graphChange) return a.graphChange.summary;
   const f = fieldsOf(a.input);
   const who = `${a.nodeId} ${a.nodeTitle}`;
   if ((a.toolName === 'Bash' || a.toolName === 'PowerShell') && typeof f.command === 'string') return `${who} wants to run: ${firstLine(f.command)}`;
