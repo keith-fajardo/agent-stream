@@ -1,9 +1,11 @@
-import { readdirSync, readFileSync, statSync, type Dirent, type Stats } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, type Dirent, type Stats } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
+import { writeFileAtomic } from '../fsutil';
 import { truncateHead } from '../prompt';
+import type { RunShell } from '../shell';
 import type { ToolSpec } from './chatModel';
 import { globToRegExp } from './glob';
 
@@ -69,8 +71,8 @@ function isUpstreamOutput(resolved: string): boolean {
   return i >= 0 && parts[i] === '.agent-stream' && parts[i + 1] === 'runs' && parts[i + 3] === 'nodes' && parts[i + 5] === 'output.md';
 }
 
-/** Private, and not an upstream output.md that a step is told to read. */
-const refusedFile = (resolved: string) => isPrivatePath(resolved) && !isUpstreamOutput(resolved);
+/** Private, and not an upstream output.md that a step is told to read (which must be a regular file, not a folder of that name). */
+const refusedFile = (resolved: string) => isPrivatePath(resolved) && !(isUpstreamOutput(resolved) && statOf(resolved)?.isFile());
 
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 /** Agent Stream's own private folders, skipped wherever a `.agent-stream` folder is met. */
@@ -291,4 +293,67 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
       return { text: lines.join('\n') };
     }),
   ];
+}
+
+export const BASH_TIMEOUT_SEC = 600;
+
+const editInput = z.object({
+  file_path: z.string().describe('The file to change.'),
+  old_string: z.string().describe('The exact text to replace.'),
+  new_string: z.string().describe('The text to put in its place.'),
+  replace_all: z.boolean().optional().describe('Replace every occurrence. Without it, old_string must occur exactly once.'),
+});
+const writeInput = z.object({
+  file_path: z.string().describe('The file to create or overwrite.'),
+  content: z.string().describe('The full content of the file.'),
+});
+const bashInput = z.object({
+  command: z.string().describe('The shell command to run.'),
+  description: z.string().optional().describe('What the command does, in a few words.'),
+});
+
+const occurrences = (text: string, s: string) => text.split(s).length - 1;
+
+/** Edit, Write and Bash: each runs only after the gate allowed it (the loop asks first). */
+function writeTools(cwd: string, runShell: RunShell): LoopTool[] {
+  return [
+    defineLoopTool('Edit', 'Replace text in a file. old_string must occur exactly once unless replace_all is true.', editInput, async ({ file_path, old_string, new_string, replace_all }) => {
+      const file = toolPath(cwd, file_path);
+      if (old_string === '') return { text: 'old_string is empty; use Write to create or replace a whole file.', isError: true };
+      if (!statOf(file)?.isFile()) return { text: `File not found: ${file}`, isError: true };
+      const text = readFileSync(file, 'utf8');
+      let from = old_string;
+      let to = new_string;
+      let count = occurrences(text, from);
+      if (count === 0 && text.includes('\r\n') && from.includes('\n') && !from.includes('\r')) {
+        // Read shows lines without their \r, so on a CRLF file the model writes \n: match with the file's line ends.
+        from = from.replace(/\n/g, '\r\n');
+        to = to.replace(/\r?\n/g, '\r\n');
+        count = occurrences(text, from);
+      }
+      if (count === 0) return { text: `old_string was not found in ${file}.`, isError: true };
+      if (count > 1 && !replace_all) return { text: `old_string was found ${count} times in ${file}. Add more surrounding text to make it unique, or set replace_all.`, isError: true };
+      writeFileAtomic(file, text.split(from).join(to));
+      return { text: `Edited ${file} (${count} replacement${count === 1 ? '' : 's'}).` };
+    }),
+    defineLoopTool('Write', 'Create or overwrite a file with the given content. Missing folders are created.', writeInput, async ({ file_path, content }) => {
+      const file = toolPath(cwd, file_path);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileAtomic(file, content);
+      return { text: `Wrote ${file} (${Buffer.byteLength(content)} bytes).` };
+    }),
+    defineLoopTool('Bash', 'Run a shell command in the working folder (a login shell; Git Bash on Windows). Returns its output and exit code.', bashInput, async ({ command }, signal) => {
+      const r = await runShell({ command, cwd, signal, timeoutSec: BASH_TIMEOUT_SEC });
+      const output = r.output && !r.output.endsWith('\n') ? `${r.output}\n` : r.output;
+      if (r.error !== undefined) return { text: `${output}${r.error}`, isError: true };
+      // A non-zero exit is information for the model, not a tool error.
+      return { text: `${output}exit code ${r.exitCode}` };
+    }),
+  ];
+}
+
+/** The built-in tools (spec §4.2). A read-only step gets only Read, Grep and Glob. */
+export function builtinTools(o: { cwd: string; runShell: RunShell; readOnly: boolean }): LoopTool[] {
+  const tools = readOnlyTools(o.cwd);
+  return o.readOnly ? tools : [...tools, ...writeTools(o.cwd, o.runShell)];
 }

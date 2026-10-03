@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { clipResult, readOnlyTools, toolPath, type LoopTool } from '../src/agentLoop/tools';
+import { builtinTools, clipResult, readOnlyTools, toolPath, type LoopTool } from '../src/agentLoop/tools';
+import { createRunShell, type RunShell, type RunShellResult } from '../src/shell';
 
 const signal = new AbortController().signal;
 
@@ -252,4 +253,147 @@ describe('private folders: exceptions and edges', () => {
     const lines = (await run(project(files), 'Glob', { pattern: '**/*.txt' })).text.split('\n');
     expect(lines.at(-1)).toBe('(Showing the newest 1000 of more than 10000 files.)');
   }, 30_000);
+});
+
+/** A RunShell that records each call and answers `result`. */
+function fakeShell(result: RunShellResult) {
+  const calls: Parameters<RunShell>[0][] = [];
+  const runShell: RunShell = async (o) => {
+    calls.push(o);
+    return result;
+  };
+  return { runShell, calls };
+}
+const all = (cwd: string, runShell: RunShell = fakeShell({ exitCode: 0, output: '' }).runShell) => builtinTools({ cwd, runShell, readOnly: false });
+const runTool = (cwd: string, name: string, input: unknown, runShell?: RunShell, s: AbortSignal = signal) => find(all(cwd, runShell), name).run(input, s);
+
+async function waitFor(condition: () => boolean, ms = 3000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > end) throw new Error('timed out waiting');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+describe('builtinTools', () => {
+  it('offers Read, Grep, Glob, Edit, Write and Bash, each gated under its own name', () => {
+    const tools = all(project());
+    expect(tools.map((t) => t.spec.name)).toEqual(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash']);
+    expect(tools.map((t) => t.gateName)).toEqual(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash']);
+  });
+
+  it('gives a read-only step only the three read tools', () => {
+    const tools = builtinTools({ cwd: project(), runShell: fakeShell({ exitCode: 0, output: '' }).runShell, readOnly: true });
+    expect(tools.map((t) => t.spec.name)).toEqual(['Read', 'Grep', 'Glob']);
+  });
+});
+
+describe('Edit', () => {
+  it('replaces a unique match, literally', async () => {
+    const cwd = project({ 'a.txt': 'a = 1\nb = 2\n' });
+    const file = join(cwd, 'a.txt');
+    expect(await runTool(cwd, 'Edit', { file_path: 'a.txt', old_string: 'b = 2', new_string: 'b = "$&"' })).toEqual({ text: `Edited ${file} (1 replacement).` });
+    expect(readFileSync(file, 'utf8')).toBe('a = 1\nb = "$&"\n');
+  });
+
+  it('refuses zero matches, and several without replace_all, saying how many', async () => {
+    const cwd = project({ 'x.txt': 'x x x' });
+    const file = join(cwd, 'x.txt');
+    expect(await runTool(cwd, 'Edit', { file_path: 'x.txt', old_string: 'y', new_string: 'z' })).toEqual({ text: `old_string was not found in ${file}.`, isError: true });
+    expect(await runTool(cwd, 'Edit', { file_path: 'x.txt', old_string: 'x', new_string: 'y' })).toEqual({
+      text: `old_string was found 3 times in ${file}. Add more surrounding text to make it unique, or set replace_all.`,
+      isError: true,
+    });
+    expect(readFileSync(file, 'utf8')).toBe('x x x');
+  });
+
+  it('replaces every match with replace_all', async () => {
+    const cwd = project({ 'x.txt': 'x x x' });
+    expect(await runTool(cwd, 'Edit', { file_path: 'x.txt', old_string: 'x', new_string: 'y', replace_all: true })).toEqual({ text: `Edited ${join(cwd, 'x.txt')} (3 replacements).` });
+    expect(readFileSync(join(cwd, 'x.txt'), 'utf8')).toBe('y y y');
+  });
+
+  it('matches an old_string written with \\n in a CRLF file, keeping CRLF', async () => {
+    const cwd = project({ 'win.txt': 'one\r\ntwo\r\nthree\r\n' });
+    expect(await runTool(cwd, 'Edit', { file_path: 'win.txt', old_string: 'one\ntwo', new_string: 'uno\ndos' })).toEqual({ text: `Edited ${join(cwd, 'win.txt')} (1 replacement).` });
+    expect(readFileSync(join(cwd, 'win.txt'), 'utf8')).toBe('uno\r\ndos\r\nthree\r\n');
+  });
+
+  it('refuses a missing file and an empty old_string', async () => {
+    const cwd = project({ 'a.txt': 'a' });
+    expect(await runTool(cwd, 'Edit', { file_path: 'nope.txt', old_string: 'a', new_string: 'b' })).toEqual({ text: `File not found: ${join(cwd, 'nope.txt')}`, isError: true });
+    expect(await runTool(cwd, 'Edit', { file_path: 'a.txt', old_string: '', new_string: 'b' })).toEqual({ text: 'old_string is empty; use Write to create or replace a whole file.', isError: true });
+  });
+});
+
+describe('Write', () => {
+  it('creates missing folders, then writes or overwrites the file', async () => {
+    const cwd = project();
+    const file = join(cwd, 'a', 'b', 'c.txt');
+    expect(await runTool(cwd, 'Write', { file_path: 'a/b/c.txt', content: 'hi' })).toEqual({ text: `Wrote ${file} (2 bytes).` });
+    expect(readFileSync(file, 'utf8')).toBe('hi');
+    await runTool(cwd, 'Write', { file_path: file, content: 'again' });
+    expect(readFileSync(file, 'utf8')).toBe('again');
+  });
+});
+
+describe('Bash', () => {
+  it('runs the command in the working folder with a 600 s timeout and reports output and exit code', async () => {
+    const cwd = project();
+    const shell = fakeShell({ exitCode: 2, output: 'boom\n' });
+    expect(await runTool(cwd, 'Bash', { command: 'make', description: 'Build' }, shell.runShell)).toEqual({ text: 'boom\nexit code 2' });
+    expect(shell.calls[0]).toMatchObject({ command: 'make', cwd, timeoutSec: 600 });
+    expect(await runTool(cwd, 'Bash', { command: 'true' }, fakeShell({ exitCode: 0, output: 'ok' }).runShell)).toEqual({ text: 'ok\nexit code 0' });
+    expect(await runTool(cwd, 'Bash', { command: 'true' }, fakeShell({ exitCode: 0, output: '' }).runShell)).toEqual({ text: 'exit code 0' });
+  });
+
+  it('reports a timeout, a Stop or a missing Git Bash as an error, with the output so far', async () => {
+    const shell = fakeShell({ exitCode: null, output: 'partial', error: 'timed out after 600 s' });
+    expect(await runTool(project(), 'Bash', { command: 'sleep 999' }, shell.runShell)).toEqual({ text: 'partial\ntimed out after 600 s', isError: true });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('Bash through createRunShell', () => {
+  const real = createRunShell({ shell: '/bin/sh' });
+
+  it('returns the real output and exit code', async () => {
+    expect(await runTool(project(), 'Bash', { command: 'echo hi; exit 3' }, real)).toEqual({ text: 'hi\nexit code 3' });
+  });
+
+  it('kills the command and what it started when the step is stopped', async () => {
+    const cwd = project();
+    const ac = new AbortController();
+    const pending = runTool(cwd, 'Bash', { command: 'sleep 30 & echo $! > child.pid; wait' }, real, ac.signal);
+    const pidFile = join(cwd, 'child.pid');
+    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '');
+    const childPid = Number(readFileSync(pidFile, 'utf8'));
+    ac.abort();
+    const r = await pending;
+    expect(r.isError).toBe(true);
+    expect(r.text.endsWith('cancelled')).toBe(true);
+    await waitFor(() => {
+      try {
+        process.kill(childPid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  });
+});
+
+describe('private folders: output.md must be a regular file (T2-1)', () => {
+  const refusal = { text: 'That folder holds Agent Stream run records and sessions, which are private.', isError: true };
+  const cwd = project({ '.agent-stream/runs/r1/run.json': 'secret', '.agent-stream/runs/r1/nodes/n1/z/keep.txt': 'x', '.agent-stream/runs/r1/nodes/n2/output.md/inner.txt': 'secret' });
+
+  it('refuses a directory named output.md for Grep roots and Read', async () => {
+    const dir = '.agent-stream/runs/r1/nodes/n2/output.md';
+    expect(await run(cwd, 'Grep', { pattern: 'secret', path: dir })).toEqual(refusal);
+    expect(await run(cwd, 'Read', { file_path: dir })).toEqual(refusal);
+  });
+
+  it('refuses an output.md/.. path that normalises to run.json, and an extra segment', async () => {
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/output.md/../run.json' })).toEqual(refusal);
+    expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/z/output.md' })).toEqual(refusal);
+  });
 });
