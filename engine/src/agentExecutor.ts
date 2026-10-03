@@ -3,7 +3,8 @@ import type { NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { NodeExecutor, NodeOutcome } from './executors';
-import { makeApprovalGate, READ_ONLY_TOOLS } from './gate';
+import { toSdkGate } from './providers/claude/sdkGate';
+import { createStepGate, READ_ONLY_TOOLS } from './providers/toolGate';
 import { blocksOf, realQuery, toolResultText, type QueryFn } from './sdk';
 
 export type AgentExecutorDeps = {
@@ -88,7 +89,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
     const onAbort = () => abortController.abort();
     ctx.signal.addEventListener('abort', onAbort, { once: true });
     if (ctx.signal.aborted) onAbort();
-    const gate = makeApprovalGate({
+    const gate = toSdkGate(createStepGate({
       broker: deps.broker,
       runId: ctx.runId,
       graphId: ctx.graph.id,
@@ -98,7 +99,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
       privateFiles: [deps.valuesFile, deps.legacyValuesFile].filter((f): f is string => !!f),
       signal: abortController.signal,
       emit: ctx.emit,
-    });
+    }));
     const options: Options = {
       cwd: ctx.cwd,
       pathToClaudeCodeExecutable: typeof deps.claudePath === 'function' ? deps.claudePath() : deps.claudePath,

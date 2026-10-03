@@ -1,0 +1,65 @@
+import { join, resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { ApprovalBroker } from '../src/approvals';
+import { createPlannerGate, createStepGate } from '../src/providers/toolGate';
+
+const VALUES = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
+const PROJECT = resolve('/', 'work', 'proj');
+
+function stepGate(signal = new AbortController().signal) {
+  const broker = new ApprovalBroker(() => 't');
+  const emit = vi.fn();
+  const gate = createStepGate({ broker, runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: PROJECT, privateFiles: [VALUES], signal, emit });
+  return { broker, emit, gate };
+}
+
+describe('step gate', () => {
+  it('refuses private files before anything else', async () => {
+    const { gate, broker } = stepGate();
+    expect(gate.privacy('Read', { file_path: VALUES })).toMatch(/private to this machine/);
+    expect(await gate.decide('Read', { file_path: VALUES })).toEqual({ allow: false, reason: expect.stringMatching(/private to this machine/) });
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('lets read-only tools through without asking', async () => {
+    const { gate, broker } = stepGate();
+    expect(gate.isReadOnly('Grep')).toBe(true);
+    expect(await gate.decide('Grep', { pattern: 'x', path: join(PROJECT, 'src') })).toEqual({ allow: true, by: 'readOnly' });
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('asks the user for everything else and reports both events', async () => {
+    const { gate, broker, emit } = stepGate();
+    const decision = gate.decide('Bash', { command: 'ls' });
+    const [request] = broker.pending();
+    expect(request).toMatchObject({ runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', toolName: 'Bash' });
+    broker.decide(request.id, { decision: 'approve' });
+    expect(await decision).toEqual({ allow: true, by: 'user' });
+    expect(emit.mock.calls.map((c) => c[0].type)).toEqual(['approval_requested', 'approval_decided']);
+  });
+
+  it('turns a denial note into the reason', async () => {
+    const { gate, broker } = stepGate();
+    const decision = gate.decide('Edit', { file_path: 'a' });
+    broker.decide(broker.pending()[0].id, { decision: 'deny', note: 'not now' });
+    expect(await decision).toEqual({ allow: false, reason: 'Denied by the user: not now' });
+  });
+
+  it('says the run was stopped when its signal aborts', async () => {
+    const run = new AbortController();
+    const { gate } = stepGate(run.signal);
+    const decision = gate.decide('Bash', { command: 'ls' });
+    run.abort();
+    expect(await decision).toEqual({ allow: false, reason: 'The run was stopped.' });
+  });
+});
+
+describe('planner gate', () => {
+  const gate = createPlannerGate({ projectDir: PROJECT, privateFiles: [VALUES], graphToolNames: new Set(['add_node']) });
+  it('allows read-only and graph tools, refuses the rest, and keeps privacy first', async () => {
+    expect(await gate.decide('Glob', { pattern: '*' })).toEqual({ allow: true, by: 'readOnly' });
+    expect(await gate.decide('add_node', { kind: 'agent', title: 't' })).toEqual({ allow: true, by: 'graphTool' });
+    expect(await gate.decide('Bash', { command: 'ls' })).toEqual({ allow: false, reason: 'The planner can only read files and edit the graph.' });
+    expect(await gate.decide('Grep', { pattern: 'x', path: '/' })).toMatchObject({ allow: false });
+  });
+});

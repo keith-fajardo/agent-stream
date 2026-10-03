@@ -5,8 +5,8 @@ import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sani
 import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
-import { privatePathDenial } from './privatePaths';
 import { createGraphMcpServer } from './plannerTools';
+import { createPlannerGate } from './providers/toolGate';
 import type { RunStore } from './runStore';
 import { blocksOf, realQuery, type QueryFn } from './sdk';
 
@@ -141,6 +141,11 @@ export class Planner extends EventEmitter {
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
       const prompt = userEditsPreamble(ops.slice(graph.plannerOpCursor ?? 0)) + text;
+      const plannerGate = createPlannerGate({
+        projectDir: this.d.projectDir,
+        privateFiles: [this.d.valuesFile, this.d.legacyValuesFile].filter((f): f is string => !!f),
+        graphToolNames: new Set(),
+      });
       const options: Options = {
         cwd: this.d.projectDir,
         pathToClaudeCodeExecutable: typeof this.d.claudePath === 'function' ? this.d.claudePath() : this.d.claudePath,
@@ -164,7 +169,7 @@ export class Planner extends EventEmitter {
               hooks: [
                 async (input) => {
                   if (input.hook_event_name !== 'PreToolUse') return {};
-                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input, [this.d.valuesFile, this.d.legacyValuesFile].filter((f): f is string => !!f));
+                  const reason = plannerGate.privacy(input.tool_name, input.tool_input);
                   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
                 },
               ],

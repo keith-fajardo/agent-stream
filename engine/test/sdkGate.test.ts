@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { CanUseTool, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
-import { makeApprovalGate } from '../src/gate';
+import { toSdkGate } from '../src/providers/claude/sdkGate';
+import { createStepGate, type StepGateOptions } from '../src/providers/toolGate';
+
+const makeApprovalGate = (options: StepGateOptions) => toSdkGate(createStepGate(options));
 
 const preToolUse = (tool_name: string, tool_input: unknown, tool_use_id = 'tu1') =>
   ({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id, session_id: 's', transcript_path: '/t', cwd: '/p' }) as HookInput;
