@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { ProviderStatus } from '@agent-stream/shared';
 import { checkingStatus } from '../src/engines';
-import { sessionStatusText, statusBarText } from '../src/statusBar';
+import { sessionStatusText, signInDetails, statusBarText } from '../src/statusBar';
 
 describe('statusBarText', () => {
   it('shows the provider and plan when it can run', () => {
@@ -32,5 +33,31 @@ describe('statusBarText', () => {
 describe('sessionStatusText', () => {
   it('shows the active session', () => {
     expect(sessionStatusText('Default')).toEqual({ text: '$(layers) Default', tooltip: 'Agent Stream session: Default. Click to switch.' });
+  });
+});
+
+describe('signInDetails', () => {
+  const deps = (choice?: string) => ({ info: vi.fn(), warn: vi.fn(async () => choice), recheck: vi.fn(async () => {}) });
+
+  it('names the provider when it can run', async () => {
+    const d = deps();
+    await signInDetails({ provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' }, d);
+    expect(d.info).toHaveBeenCalledWith('Agent Stream runs on Claude Max · me@example.com.');
+    expect(d.warn).not.toHaveBeenCalled();
+  });
+
+  it('shows the reason with Check again, which checks again', async () => {
+    const d = deps('Check again');
+    await signInDetails({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in to Claude Code.' }, d);
+    expect(d.warn).toHaveBeenCalledWith('Not signed in to Claude Code.', 'Check again');
+    expect(d.recheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the status's own label, never a Claude sign-in message", async () => {
+    const d = deps();
+    const copilot: ProviderStatus = { provider: 'copilot', ok: false, label: 'Copilot unavailable' };
+    await signInDetails(copilot, d);
+    expect(d.warn).toHaveBeenCalledWith('Copilot unavailable', 'Check again');
+    expect(d.recheck).not.toHaveBeenCalled();
   });
 });

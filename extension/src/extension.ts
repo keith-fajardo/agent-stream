@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { PROVIDER_IDS, providerLabel, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
+import { PROVIDER_IDS, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { ChatViewController, ChatViewProvider, type ChatSource } from './chatView';
 import { graphCommands } from './commands';
@@ -14,7 +14,7 @@ import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
 import { SessionManager, sessionStatusFolder, type GraphTabInfo } from './sessions';
 import { SessionItem, SessionsView } from './sessionsView';
-import { sessionStatusText, statusBarText } from './statusBar';
+import { sessionStatusText, signInDetails, statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
 
 let engines: EngineManager | undefined;
@@ -336,14 +336,13 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('agentStream.provider') || e.affectsConfiguration('agentStream.claudePath')) void manager.checkProvider();
     }),
-    vscode.commands.registerCommand('agentStream.signInDetails', async () => {
-      const current = manager.status;
-      if (current.ok) {
-        void vscode.window.showInformationMessage(`Agent Stream runs on ${providerLabel(current)}.`);
-        return;
-      }
-      if ((await vscode.window.showWarningMessage(current.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkProvider();
-    }),
+    vscode.commands.registerCommand('agentStream.signInDetails', () =>
+      signInDetails(manager.status, {
+        info: (message) => void vscode.window.showInformationMessage(message),
+        warn: (message, action) => vscode.window.showWarningMessage(message, action),
+        recheck: () => manager.checkProvider(),
+      }),
+    ),
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
       for (const f of e.removed) manager.remove(f.uri.toString());
     }),
