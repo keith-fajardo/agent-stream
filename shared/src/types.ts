@@ -141,7 +141,7 @@ export type RunMeta = {
   provider?: ProviderId;
 };
 
-export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string };
+export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId };
 
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 

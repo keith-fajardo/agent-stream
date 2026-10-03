@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createApp } from '@agent-stream/engine';
+import { createApp, createClaudeProvider } from '@agent-stream/engine';
 import type { HostMessage, ServerMessage } from '@agent-stream/shared';
 import type { Folder } from '../src/engines';
 import { createMessageHandler, GraphPanel, GraphPanels, graphIdFromPath, graphTarget, hostCommandArgs, openAndSend } from '../src/graphEditor';
@@ -18,7 +18,14 @@ function fakeView() {
 function setup() {
   const f = folder('a');
   const done = async () => ({ ok: true, output: '' });
-  const app = createApp({ projectDir: f.path, claudePath: 'claude', status: { provider: 'claude', ok: true, label: 'Claude Max' }, maxParallel: 1, executors: { agent: done, command: done }, queryFn: async function* () {}, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json') });
+  const app = createApp({
+    projectDir: f.path,
+    provider: createClaudeProvider({ findClaude: () => ({ ok: true, path: '/bin/claude' }) }),
+    status: { provider: 'claude', ok: true, label: 'Claude Max' },
+    maxParallel: 1,
+    executors: { agent: done, command: done },
+    valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json'),
+  });
   const graph = app.createGraph('G');
   const { posted, view } = fakeView();
   const panel = new GraphPanel(f, graph.id, view);

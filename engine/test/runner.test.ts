@@ -318,4 +318,33 @@ describe('Runner when the filesystem or a listener fails', () => {
     expect(done.snapshot.nodes[0].command).toBe('dbt build -s {{ model }}');
     expect(runStore.get(done.id)?.rendered).toEqual(rendered);
   });
+
+  it("runs agent steps with the run's own executor and records its provider", async () => {
+    const { runner, fake, runStore } = setup();
+    const ran: string[] = [];
+    const own: NodeExecutor = async (ctx) => {
+      ran.push(ctx.node.id);
+      return { ok: true, output: `own-${ctx.node.id}` };
+    };
+    const g = graphOf([agent('a'), { type: 'addNode', node: { title: 'c', kind: 'command', command: 'ls' } }, link('n1', 'n2')]);
+    const r = started(runner.start({ ...withRendered(g), agent: own, provider: 'copilot' }));
+    expect(r.run.provider).toBe('copilot');
+    await tick();
+    expect(ran).toEqual(['n1']);
+    expect(fake.started).toEqual(['n2']);
+    fake.finish('n2');
+    const done = await r.done;
+    expect(done.status).toBe('succeeded');
+    expect(runStore.readOutput(done.id, 'n1')).toBe('own-n1');
+    expect(runStore.get(done.id)?.provider).toBe('copilot');
+  });
+
+  it('records no provider when the run names none', async () => {
+    const { runner, fake } = setup();
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
+    expect(r.run).not.toHaveProperty('provider');
+    await tick();
+    fake.finish('n1');
+    await r.done;
+  });
 });

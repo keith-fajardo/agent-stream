@@ -8,5 +8,8 @@ describe('engine public API', () => {
     expect(typeof engine.projectSettingsProblem).toBe('function');
     expect(typeof engine.sanitizedEnv).toBe('function');
     expect(typeof engine.valuesFileFor).toBe('function');
+    expect(typeof engine.createClaudeProvider).toBe('function');
+    expect(typeof engine.createStepGate).toBe('function');
+    expect(typeof engine.createPlannerGate).toBe('function');
   });
 });

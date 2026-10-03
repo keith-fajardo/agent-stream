@@ -11,12 +11,13 @@ import {
   type NodeEventBody,
   type NodeRunState,
   type NodeStatus,
+  type ProviderId,
   type RenderedRun,
   type RunMeta,
 } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
-import type { Executors, NodeOutcome } from './executors';
+import type { Executors, NodeExecutor, NodeOutcome } from './executors';
 import { buildNodePrompt } from './prompt';
 import type { RunStore } from './runStore';
 
@@ -36,11 +37,22 @@ export type RunnerDeps = {
   newRunId?: () => string;
 };
 
-export type StartRunInput = { graph: Graph; rendered: RenderedRun; sourceRunId?: string; fromNodeId?: string };
+export type StartRunInput = {
+  graph: Graph;
+  rendered: RenderedRun;
+  sourceRunId?: string;
+  fromNodeId?: string;
+  /** Runs this run's agent steps instead of `executors.agent`: the provider chosen when the run started. */
+  agent?: NodeExecutor;
+  /** Which provider runs the agent steps, recorded in the run. */
+  provider?: ProviderId;
+};
 export type StartRunResult = { ok: true; run: RunMeta; done: Promise<RunMeta> } | { ok: false; error: string };
 
 type ActiveRun = {
   meta: RunMeta;
+  /** The run's own agent executor; a provider switch mid-run doesn't reach it. */
+  agent?: NodeExecutor;
   order: string[];
   running: Map<string, AbortController>;
   waiting: Map<string, number>;
@@ -95,7 +107,15 @@ export class Runner extends EventEmitter {
     }
     const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered) : new Set<string>();
 
-    const meta: RunMeta = { id: this.makeRunId(), graphId: graph.id, status: 'running', startedAt: this.clock(), snapshot: graph, nodes: {} };
+    const meta: RunMeta = {
+      id: this.makeRunId(),
+      graphId: graph.id,
+      status: 'running',
+      startedAt: this.clock(),
+      snapshot: graph,
+      nodes: {},
+      ...(input.provider && { provider: input.provider }),
+    };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
     if (input.fromNodeId) meta.fromNodeId = input.fromNodeId;
@@ -107,7 +127,7 @@ export class Runner extends EventEmitter {
 
     let resolveDone!: (m: RunMeta) => void;
     const done = new Promise<RunMeta>((resolve) => (resolveDone = resolve));
-    const run: ActiveRun = { meta, order: topoOrder(graph), running: new Map(), waiting: new Map(), stopping: false, finished: false, resolveDone };
+    const run: ActiveRun = { meta, agent: input.agent, order: topoOrder(graph), running: new Map(), waiting: new Map(), stopping: false, finished: false, resolveDone };
     this.runs.set(meta.id, run);
     this.safeEmit('run', meta);
     this.schedule(run);
@@ -152,7 +172,7 @@ export class Runner extends EventEmitter {
     run.running.set(nodeId, controller);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
-    const executor = this.deps.executors[node.kind];
+    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
     Promise.resolve()
       .then(() => {
         // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.

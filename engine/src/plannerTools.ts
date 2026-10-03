@@ -1,8 +1,8 @@
-import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
-import { z } from 'zod';
+import { z, type ZodRawShape } from 'zod';
 import type { Graph, Op } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
+import type { GraphTool, ToolReply } from './providers/types';
 import type { RunStore } from './runStore';
 
 export type PlannerToolDeps = {
@@ -13,10 +13,21 @@ export type PlannerToolDeps = {
   requestRun: (fromNodeId?: string) => string | null;
 };
 
-type ToolReply = { content: { type: 'text'; text: string }[]; isError?: boolean };
+const reply = (text: string, isError = false): ToolReply => (isError ? { text, isError: true } : { text });
 
-const reply = (text: string, isError = false): ToolReply =>
-  isError ? { content: [{ type: 'text', text }], isError: true } : { content: [{ type: 'text', text }] };
+/** One graph tool: its input is checked against `schema` before `handler` sees it. */
+function tool<S extends ZodRawShape>(name: string, description: string, schema: S, handler: (args: z.infer<z.ZodObject<S>>) => Promise<ToolReply>): GraphTool {
+  const parser = z.object(schema);
+  return {
+    name,
+    description,
+    schema,
+    async run(input) {
+      const parsed = parser.safeParse(input ?? {});
+      return parsed.success ? handler(parsed.data) : reply(z.prettifyError(parsed.error), true);
+    },
+  };
+}
 
 const kind = z.enum(['agent', 'command']);
 const RUN_EXCERPT_CHARS = 2000;
@@ -34,7 +45,7 @@ export function summarizeGraph(graph: Graph) {
 }
 
 /** The planner edits the graph only through these tools; every change is tagged `agent`. */
-export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
+export function graphTools(d: PlannerToolDeps): GraphTool[] {
   const apply = (op: Op) => d.graphStore.apply(d.graphId, op, 'agent');
   const outcome = (r: { ok: true } | { ok: false; error: string }, success: string) => (r.ok ? reply(success) : reply(r.error, true));
 
@@ -44,7 +55,7 @@ export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
     ),
     tool(
       'add_node',
-      'Add a step. kind "agent" runs a separate Claude agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each.',
       {
         kind,
         title: z.string(),
@@ -134,8 +145,4 @@ export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
       return reply(lines.join('\n'));
     }),
   ];
-}
-
-export function createGraphMcpServer(d: PlannerToolDeps) {
-  return createSdkMcpServer({ name: 'graph', version: '1.0.0', tools: graphTools(d) });
 }

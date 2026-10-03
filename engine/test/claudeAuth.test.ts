@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { authSourceError, checkAuth, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv } from '../src/auth';
+import { authSourceError, checkAuth, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv } from '../src/providers/claude/auth';
 
 describe('checkAuth', () => {
   const status = (s: object) => async () => JSON.stringify(s);

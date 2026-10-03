@@ -1,21 +1,19 @@
 import { EventEmitter } from 'node:events';
-import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatEntry, ChatRole, Op, OpRecord } from '@agent-stream/shared';
-import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
-import { createGraphMcpServer } from './plannerTools';
+import { graphTools } from './plannerTools';
 import { createPlannerGate } from './providers/toolGate';
+import type { AgentProvider } from './providers/types';
 import type { RunStore } from './runStore';
-import { blocksOf, realQuery, type QueryFn } from './sdk';
 
 const SESSION_RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
 
 export const PLANNER_APPEND = `You are the planner inside Agent Stream, a local tool where the user and you co-create a workflow graph that is then executed step by step.
 
 How the graph works:
-- Each node is a step. kind "agent" is a separate Claude agent run that receives the workflow goal, its own prompt, and the outputs of the nodes it depends on. kind "command" is an exact shell command run in the project root, with no LLM involved.
+- Each node is a step. kind "agent" is a separate AI agent run that receives the workflow goal, its own prompt, and the outputs of the nodes it depends on. kind "command" is an exact shell command run in the project root, with no LLM involved.
 - An edge from A to B means B runs after A and receives A's output. Nodes with no path between them run in parallel.
 - Agent nodes ask the user before every file edit or shell command. Command nodes run exactly as written once the user starts the run.
 
@@ -83,27 +81,22 @@ export type PlannerDeps = {
   runStore: RunStore;
   chatLog: ChatLog;
   projectDir: string;
-  /** The variable values file; the planner is denied reading it. */
-  valuesFile?: string;
-  /** The pre-rename values file, denied too until it has been moved. */
-  legacyValuesFile?: string;
-  claudePath: string | (() => string);
+  /** The provider that runs planner turns, read per turn: the user can switch it at any time. */
+  provider: () => AgentProvider;
+  /** Files the planner is denied reading (the variable values files). */
+  privateFiles: () => string[];
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
-  queryFn?: QueryFn;
-  env?: NodeJS.ProcessEnv;
   clock?: Clock;
 };
 
-/** The chat agent: one resumable SDK session per graph. Events: 'entry', 'busy'. */
+/** The chat agent: one resumable provider conversation per graph. Events: 'entry', 'busy'. */
 export class Planner extends EventEmitter {
   private busy = new Set<string>();
   private clock: Clock;
-  private queryFn: QueryFn;
 
   constructor(private d: PlannerDeps) {
     super();
     this.clock = d.clock ?? systemClock;
-    this.queryFn = d.queryFn ?? realQuery;
   }
 
   isBusy(graphId: string): boolean {
@@ -131,96 +124,35 @@ export class Planner extends EventEmitter {
     try {
       this.emit('busy', graphId, true);
       this.add(graphId, 'user', text);
-      // Re-checked per turn: the project's settings can change while the server runs.
-      const settingsProblem = projectSettingsProblem(this.d.projectDir);
-      if (settingsProblem) {
-        this.add(graphId, 'error', settingsProblem);
+      // Re-checked per turn: the project's settings can change while VS Code runs.
+      const provider = this.d.provider();
+      const problem = provider.folderProblem?.(this.d.projectDir);
+      if (problem) {
+        this.add(graphId, 'error', problem);
         return;
       }
       const graph = this.d.graphStore.get(graphId);
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
-      const prompt = userEditsPreamble(ops.slice(graph.plannerOpCursor ?? 0)) + text;
-      const plannerGate = createPlannerGate({
-        projectDir: this.d.projectDir,
-        privateFiles: [this.d.valuesFile, this.d.legacyValuesFile].filter((f): f is string => !!f),
-        graphToolNames: new Set(),
-      });
-      const options: Options = {
+      const tools = graphTools({ graphStore: this.d.graphStore, runStore: this.d.runStore, graphId, requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId) });
+      const r = await provider.planTurn({
+        prompt: userEditsPreamble(ops.slice(graph.plannerOpCursor ?? 0)) + text,
+        systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
-        pathToClaudeCodeExecutable: typeof this.d.claudePath === 'function' ? this.d.claudePath() : this.d.claudePath,
-        env: sanitizedEnv(this.d.env ?? process.env),
-        tools: ['Read', 'Glob', 'Grep'],
-        allowedTools: ['Read', 'Glob', 'Grep', 'mcp__graph__*'],
-        permissionMode: 'dontAsk',
-        settingSources: ['project'],
-        mcpServers: {
-          graph: createGraphMcpServer({
-            graphStore: this.d.graphStore,
-            runStore: this.d.runStore,
-            graphId,
-            requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
-          }),
-        },
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: PLANNER_APPEND },
-        hooks: {
-          PreToolUse: [
-            {
-              hooks: [
-                async (input) => {
-                  if (input.hook_event_name !== 'PreToolUse') return {};
-                  const reason = plannerGate.privacy(input.tool_name, input.tool_input);
-                  return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
-                },
-              ],
-            },
-          ],
-        },
-        abortController,
-      };
-      if (graph.plannerSessionId) options.resume = graph.plannerSessionId;
-
-      let sessionId: string | undefined;
-      let sawInit = false;
-      for await (const message of this.queryFn({ prompt, options })) {
-        const m = message as unknown as { type: string; subtype?: string; apiKeySource?: string; session_id?: string; parent_tool_use_id?: string | null; message?: unknown };
-        if (m.session_id) sessionId = m.session_id;
-        if (m.type === 'system' && m.subtype === 'init') sawInit = true;
-        if (m.type === 'system' && m.subtype === 'init' && m.apiKeySource !== undefined && !isSubscriptionAuthSource(m.apiKeySource)) {
-          this.add(graphId, 'error', authSourceError(m.apiKeySource));
-          abortController.abort();
-          return;
-        }
-        if (message.type === 'result' && !sawInit) {
-          if (message.subtype !== 'success' || message.is_error) {
-            // The session failed before it started (e.g. resuming a session that no longer
-            // exists), so no model turn ran: show the real error, and drop a stale session
-            // so the next message starts fresh instead of failing the same way forever.
-            const detail = (message.subtype !== 'success' ? message.errors.join('\n') : message.result) || message.subtype;
-            if (options.resume) {
-              this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
-              this.add(graphId, 'error', `${detail}${SESSION_RESET_NOTE}`);
-            } else {
-              this.add(graphId, 'error', detail);
-            }
-          } else {
-            this.add(graphId, 'error', UNVERIFIED_AUTH);
-          }
-          abortController.abort();
-          return;
-        }
-        if (message.type === 'assistant' && !m.parent_tool_use_id) {
-          for (const b of blocksOf(m.message)) {
-            if (b.type === 'text' && b.text?.trim()) this.add(graphId, 'assistant', b.text);
-            else if (b.type === 'tool_use' && b.name?.startsWith('mcp__graph__')) this.add(graphId, 'tool', describeToolCall(b.name, b.input));
-          }
-        }
-        if (message.type === 'result') {
-          if (message.subtype !== 'success') this.add(graphId, 'error', message.errors.join('\n') || message.subtype);
-          else if (message.is_error) this.add(graphId, 'error', message.result || 'The planner reported an error.');
-        }
+        tools,
+        resume: graph.plannerSessionId,
+        gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
+        signal: abortController.signal,
+        onEvent: (e) => (e.type === 'text' ? this.add(graphId, 'assistant', e.text) : this.add(graphId, 'tool', describeToolCall(e.name, e.input))),
+      });
+      if (!r.ok) {
+        // A conversation that could not be resumed is dropped, so the next message starts fresh instead of failing the same way forever.
+        if (r.resumeFailed) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
+        this.add(graphId, 'error', r.resumeFailed ? `${r.error}${SESSION_RESET_NOTE}` : r.error);
+        return;
       }
-      this.d.graphStore.setPlannerState(graphId, { plannerSessionId: sessionId ?? graph.plannerSessionId, plannerOpCursor: cursor });
+      if (r.error) this.add(graphId, 'error', r.error);
+      this.d.graphStore.setPlannerState(graphId, { plannerSessionId: r.sessionId ?? graph.plannerSessionId, plannerOpCursor: cursor });
     } catch (e) {
       try {
         const hadSession = !!this.d.graphStore.load(graphId).ok && !!this.d.graphStore.get(graphId).plannerSessionId;

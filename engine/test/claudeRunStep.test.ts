@@ -4,10 +4,12 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
-import { createAgentExecutor } from '../src/agentExecutor';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext } from '../src/executors';
-import type { QueryFn } from '../src/sdk';
+import { createClaudeProvider } from '../src/providers/claude';
+import type { QueryFn } from '../src/providers/claude/sdk';
+import { createStepGate } from '../src/providers/toolGate';
+import { signedIn } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
 const init = (apiKeySource = 'none') => msg({ type: 'system', subtype: 'init', apiKeySource, session_id: 's1' });
@@ -36,7 +38,31 @@ function ctx(signal: AbortSignal = new AbortController().signal, cwd = '/proj') 
   return { c, events };
 }
 
-describe('agent executor', () => {
+/** The step gate the App builds for one node. */
+function gateFor(c: NodeContext, o: { broker?: ApprovalBroker; privateFiles?: string[] } = {}) {
+  return createStepGate({
+    broker: o.broker ?? new ApprovalBroker(),
+    runId: c.runId,
+    graphId: c.graph.id,
+    nodeId: c.node.id,
+    nodeTitle: c.node.title,
+    projectDir: c.cwd,
+    privateFiles: o.privateFiles ?? [],
+    signal: c.signal,
+    emit: c.emit,
+  });
+}
+
+type StepDeps = { claudePath?: string; queryFn: QueryFn; env?: NodeJS.ProcessEnv; broker?: ApprovalBroker; privateFiles?: string[] };
+
+/** Runs one step on the Claude provider, set up as the extension does: the CLI found and signed in first. */
+async function runStep(d: StepDeps, c: NodeContext) {
+  const provider = createClaudeProvider({ findClaude: () => ({ ok: true, path: d.claudePath ?? 'claude' }), checkAuth: async () => signedIn, queryFn: d.queryFn, env: d.env });
+  await provider.status(); // records the CLI path, as the extension does on sign-in
+  return provider.runStep(c, gateFor(c, d));
+}
+
+describe('Claude provider: steps', () => {
   it('runs the node through the SDK with subscription-safe options', async () => {
     const { fn, calls } = fake(async function* () {
       yield init();
@@ -44,14 +70,13 @@ describe('agent executor', () => {
       yield toolResult('tu1', [{ type: 'text', text: 'select 1' }]);
       yield success('Done: wrote b.sql');
     });
-    const exec = createAgentExecutor({
+    const deps: StepDeps = {
       claudePath: '/opt/homebrew/bin/claude',
-      broker: new ApprovalBroker(),
       queryFn: fn,
       env: { PATH: '/bin', ANTHROPIC_API_KEY: 'sk-ant-xxx', ANTHROPIC_AUTH_TOKEN: 't' },
-    });
+    };
     const { c, events } = ctx();
-    expect(await exec(c)).toEqual({
+    expect(await runStep(deps, c)).toEqual({
       ok: true,
       output: 'Done: wrote b.sql',
       usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, costUsd: 0.12, turns: 2 },
@@ -84,7 +109,7 @@ describe('agent executor', () => {
       continued = true;
       yield success('should not get here');
     });
-    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx().c);
+    const out = await runStep({ queryFn: fn }, ctx().c);
     expect(out.ok).toBe(false);
     expect(out.error).toContain('"ANTHROPIC_API_KEY"');
     expect(continued).toBe(false);
@@ -95,7 +120,7 @@ describe('agent executor', () => {
       yield init();
       yield failure(['boom', 'worse']);
     });
-    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx().c);
+    const out = await runStep({ queryFn: fn }, ctx().c);
     expect(out).toMatchObject({ ok: false, error: 'boom\nworse' });
   });
 
@@ -103,7 +128,7 @@ describe('agent executor', () => {
     const { fn } = fake(async function* () {
       yield init();
     });
-    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx().c);
+    const out = await runStep({ queryFn: fn }, ctx().c);
     expect(out).toMatchObject({ ok: false, error: 'The agent session ended without a result.' });
   });
 
@@ -123,7 +148,7 @@ describe('agent executor', () => {
     const { c, events } = ctx();
     const seen: ApprovalRequest[] = [];
     broker.on('changed', (pending: ApprovalRequest[]) => seen.push(...pending));
-    const out = await createAgentExecutor({ claudePath: 'claude', broker, queryFn: fn })(c);
+    const out = await runStep({ broker, queryFn: fn }, c);
     expect(out.ok).toBe(true);
     expect(seen[0].graphId).toBe(c.graph.id);
     expect(hookResult).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
@@ -141,7 +166,7 @@ describe('agent executor', () => {
       yield success('ok');
     });
     const { c } = ctx();
-    expect((await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn, legacyValuesFile })(c)).ok).toBe(true);
+    expect((await runStep({ queryFn: fn, privateFiles: [legacyValuesFile] }, c)).ok).toBe(true);
     expect(results[0]).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
   });
 
@@ -159,7 +184,7 @@ describe('agent executor', () => {
       yield success('ok');
     });
     const { c, events } = ctx();
-    expect((await createAgentExecutor({ claudePath: 'claude', broker, queryFn: fn, valuesFile })(c)).ok).toBe(true);
+    expect((await runStep({ broker, queryFn: fn, privateFiles: [valuesFile] }, c)).ok).toBe(true);
     expect(results[0]).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('the variable values file') } });
     expect(results[1]).toEqual({});
     expect(broker.pending()).toEqual([]);
@@ -172,7 +197,7 @@ describe('agent executor', () => {
       yield init();
       await new Promise((_, reject) => options.abortController!.signal.addEventListener('abort', () => reject(new Error('aborted'))));
     });
-    const pending = createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx(ac.signal).c);
+    const pending = runStep({ queryFn: fn }, ctx(ac.signal).c);
     await new Promise((r) => setTimeout(r, 10));
     ac.abort();
     expect(await pending).toMatchObject({ ok: false, error: 'cancelled' });
@@ -186,7 +211,7 @@ describe('agent executor', () => {
       yield init();
       yield success('should not run');
     });
-    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx(undefined, dir).c);
+    const out = await runStep({ queryFn: fn }, ctx(undefined, dir).c);
     expect(out).toMatchObject({ ok: false, error: expect.stringContaining('sets CLAUDE_CODE_USE_BEDROCK') });
     expect(calls).toHaveLength(0);
   });
@@ -195,7 +220,40 @@ describe('agent executor', () => {
     const { fn } = fake(async function* () {
       yield success('unverified');
     });
-    const out = await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn })(ctx().c);
+    const out = await runStep({ queryFn: fn }, ctx().c);
     expect(out).toEqual({ ok: false, output: '', error: 'The Claude session did not report how it authenticated.' });
+  });
+
+  it('refuses to run before the CLI has been found', async () => {
+    const { fn: queryFn, calls } = fake(async function* () {
+      yield init();
+      yield success('should not run');
+    });
+    const p = createClaudeProvider({ findClaude: () => ({ ok: false, error: 'Claude Code not found.' }), queryFn });
+    const { c } = ctx();
+    expect(await p.runStep(c, gateFor(c))).toEqual({ ok: false, output: '', error: 'Agent Stream has not checked for Claude Code yet.' });
+    await p.status();
+    expect(await p.runStep(c, gateFor(c))).toEqual({ ok: false, output: '', error: 'Claude Code not found.' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('reports status through the CLI it found', async () => {
+    const p = createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }), checkAuth: async (path) => ({ provider: 'claude', ok: path === '/c', label: 'Claude Max' }) });
+    expect(await p.status()).toEqual({ provider: 'claude', ok: true, label: 'Claude Max' });
+    expect(p.id).toBe('claude');
+    expect(p.name).toBe('Claude');
+  });
+
+  it('reports a missing CLI as not signed in', async () => {
+    const p = createClaudeProvider({ findClaude: () => ({ ok: false, error: 'Claude Code not found.' }) });
+    expect(await p.status()).toEqual({ provider: 'claude', ok: false, label: 'not signed in', error: 'Claude Code not found.' });
+  });
+
+  it('names a folder whose .claude/settings.json reroutes Claude', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cs-'));
+    mkdirSync(join(dir, '.claude'));
+    writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x' }));
+    expect(createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }) }).folderProblem?.(dir)).toMatch(/apiKeyHelper/);
+    expect(createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }) }).folderProblem?.(mkdtempSync(join(tmpdir(), 'cs-')))).toBeUndefined();
   });
 });

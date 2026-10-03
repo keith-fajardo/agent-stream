@@ -82,6 +82,19 @@ describe('EngineManager', () => {
     expect(msgs.at(-1)).toEqual({ type: 'auth', status: signedIn });
   });
 
+  it('gives every engine the one Claude provider, and keeps it through a new check', async () => {
+    const { manager } = setup();
+    await manager.checkSignIn();
+    const a = manager.get(folder('a'));
+    const b = manager.get(folder('b'));
+    expect(a.provider().id).toBe('claude');
+    expect(b.provider()).toBe(a.provider());
+    const before = a.provider();
+    await manager.checkSignIn();
+    expect(a.provider()).toBe(before);
+    expect(a.status()).toEqual(signedIn);
+  });
+
   it('keeps approvals apart per folder even when graph ids match', async () => {
     const { manager, events } = setup();
     await manager.checkSignIn();

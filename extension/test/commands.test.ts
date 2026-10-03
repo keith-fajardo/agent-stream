@@ -27,7 +27,7 @@ function setup(folders: Folder[] = [folder('a')]) {
     checkAuth: async () => signedIn,
     findClaude: () => ({ ok: true, path: '/bin/claude' }),
     // Signed in from the start (no checkSignIn in these tests), with steps that wait for the test.
-    createApp: (deps) => createApp({ ...deps, status: signedIn, executors: { agent: held, command: held }, queryFn: async function* () {} }),
+    createApp: (deps) => createApp({ ...deps, status: signedIn, executors: { agent: held, command: held } }),
   });
   const ui = {
     inputBox: vi.fn(),

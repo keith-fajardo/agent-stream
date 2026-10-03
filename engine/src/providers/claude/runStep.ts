@@ -1,22 +1,13 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { NodeEventBody, NodeUsage } from '@agent-stream/shared';
-import type { ApprovalBroker } from './approvals';
+import type { NodeContext, NodeOutcome } from '../../executors';
+import { READ_ONLY_TOOLS, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
-import type { NodeExecutor, NodeOutcome } from './executors';
-import { toSdkGate } from './providers/claude/sdkGate';
-import { createStepGate, READ_ONLY_TOOLS } from './providers/toolGate';
-import { blocksOf, realQuery, toolResultText, type QueryFn } from './sdk';
+import { blocksOf, toolResultText, type QueryFn } from './sdk';
+import { toSdkGate } from './sdkGate';
 
-export type AgentExecutorDeps = {
-  claudePath: string | (() => string);
-  broker: ApprovalBroker;
-  queryFn?: QueryFn;
-  env?: NodeJS.ProcessEnv;
-  /** The variable values file; agents are denied reading it. */
-  valuesFile?: string;
-  /** The pre-rename values file, denied too until it has been moved. */
-  legacyValuesFile?: string;
-};
+/** What the Claude provider shares with its steps and planner turns. */
+export type ClaudeRunDeps = { claudePath: () => string | undefined; missing: () => string; queryFn: QueryFn; env?: NodeJS.ProcessEnv };
 
 function usageOf(msg: SDKResultMessage): NodeUsage {
   return {
@@ -78,10 +69,11 @@ export function translateMessage(msg: SDKMessage, emit: (event: NodeEventBody) =
 }
 
 /** One agent node = one SDK query on the user's Claude subscription (spec §3, §7.3). */
-export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
-  const queryFn = deps.queryFn ?? realQuery;
-  return async (ctx) => {
-    // Re-checked per node: the project's settings can change while the server runs.
+export function claudeRunStep(deps: ClaudeRunDeps) {
+  return async (ctx: NodeContext, toolGate: ToolGate): Promise<NodeOutcome> => {
+    const claudePath = deps.claudePath();
+    if (!claudePath) return { ok: false, output: '', error: deps.missing() };
+    // Re-checked per node: the project's settings can change while VS Code runs.
     const settingsProblem = projectSettingsProblem(ctx.cwd);
     if (settingsProblem) return { ok: false, output: '', error: settingsProblem };
     ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
@@ -89,20 +81,10 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
     const onAbort = () => abortController.abort();
     ctx.signal.addEventListener('abort', onAbort, { once: true });
     if (ctx.signal.aborted) onAbort();
-    const gate = toSdkGate(createStepGate({
-      broker: deps.broker,
-      runId: ctx.runId,
-      graphId: ctx.graph.id,
-      nodeId: ctx.node.id,
-      nodeTitle: ctx.node.title,
-      projectDir: ctx.cwd,
-      privateFiles: [deps.valuesFile, deps.legacyValuesFile].filter((f): f is string => !!f),
-      signal: abortController.signal,
-      emit: ctx.emit,
-    }));
+    const gate = toSdkGate(toolGate);
     const options: Options = {
       cwd: ctx.cwd,
-      pathToClaudeCodeExecutable: typeof deps.claudePath === 'function' ? deps.claudePath() : deps.claudePath,
+      pathToClaudeCodeExecutable: claudePath,
       env: sanitizedEnv(deps.env ?? process.env),
       permissionMode: 'default',
       settingSources: ['project'],
@@ -114,7 +96,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
     };
     try {
       let sawInit = false;
-      for await (const message of queryFn({ prompt: ctx.prompt, options })) {
+      for await (const message of deps.queryFn({ prompt: ctx.prompt, options })) {
         if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') sawInit = true;
         // Fail closed: a result we cannot tie to a checked auth source is not trusted.
         if (message.type === 'result' && !sawInit) return { ok: false, output: '', error: UNVERIFIED_AUTH };

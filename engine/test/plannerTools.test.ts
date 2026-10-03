@@ -23,8 +23,8 @@ function setup() {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const t = tools.find((x) => x.name === name);
     if (!t) throw new Error(`no tool ${name}`);
-    const r = await t.handler(args, {});
-    return { text: (r.content[0] as { text: string }).text, isError: r.isError === true };
+    const r = await t.run(args);
+    return { text: r.text, isError: r.isError === true };
   };
   return { tools, graphStore, runStore, graphId, call, runRequests, failRuns: (e: string | null) => (runError = e) };
 }
@@ -34,6 +34,20 @@ describe('planner graph tools', () => {
     expect(setup().tools.map((t) => t.name)).toEqual([
       'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run',
     ]);
+  });
+
+  it('refuses input that misses a required field, without touching the graph', async () => {
+    const s = setup();
+    const r = await s.call('add_node', { title: 'No kind' });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('kind');
+    expect(s.graphStore.get(s.graphId).nodes).toEqual([]);
+    expect(s.graphStore.readOps(s.graphId)).toEqual([]);
+  });
+
+  it('describes the tools without naming a model vendor', () => {
+    expect(setup().tools.find((t) => t.name === 'add_node')?.description).toContain('runs a separate AI agent');
+    for (const t of setup().tools) expect(t.description).not.toMatch(/Claude|Anthropic/);
   });
 
   it('adds agent-authored nodes and wires them after existing ones', async () => {

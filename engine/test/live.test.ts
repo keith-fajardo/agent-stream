@@ -3,11 +3,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { applyOp, emptyGraph, type ApprovalRequest, type Graph, type Op } from '@agent-stream/shared';
-import { createAgentExecutor } from '../src/agentExecutor';
 import { ApprovalBroker } from '../src/approvals';
-import { checkAuth } from '../src/auth';
 import { createCommandExecutor } from '../src/commandExecutor';
+import type { NodeExecutor } from '../src/executors';
 import { findClaude } from '../src/platform';
+import { createClaudeProvider } from '../src/providers/claude';
+import { createStepGate } from '../src/providers/toolGate';
 import { Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
 import { tmpProject } from './helpers';
@@ -16,10 +17,8 @@ const live = process.env.AGENT_STREAM_LIVE === '1';
 
 describe.skipIf(!live)('live: real Claude on the subscription', () => {
   it('runs agent and command steps with an approval round-trip', async () => {
-    const found = findClaude({ platform: process.platform, env: process.env, home: homedir() });
-    if (!found.ok) throw new Error(found.error);
-    const claudePath = found.path;
-    const auth = await checkAuth(claudePath);
+    const provider = createClaudeProvider({ findClaude: () => findClaude({ platform: process.platform, env: process.env, home: homedir() }) });
+    const auth = await provider.status();
     expect(auth.ok, auth.error).toBe(true);
 
     const paths = tmpProject();
@@ -33,10 +32,12 @@ describe.skipIf(!live)('live: real Claude on the subscription', () => {
       }
     });
     const runStore = new RunStore(paths);
+    const agent: NodeExecutor = (ctx) =>
+      provider.runStep(ctx, createStepGate({ broker, runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, projectDir: ctx.cwd, privateFiles: [], signal: ctx.signal, emit: ctx.emit }));
     const runner = new Runner({
       runStore,
       broker,
-      executors: { agent: createAgentExecutor({ claudePath, broker }), command: createCommandExecutor() },
+      executors: { agent, command: createCommandExecutor() },
       projectDir: paths.root,
       maxParallel: 2,
     });

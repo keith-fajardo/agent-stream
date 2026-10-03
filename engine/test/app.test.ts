@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type ProviderStatus, type ServerMessage } from '@agent-stream/shared';
-import { createApp } from '../src/app';
+import { emptyGraph, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
+import { createApp, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
+import { createClaudeProvider } from '../src/providers/claude';
 import { RunStore } from '../src/runStore';
-import { testGitBash, tmpProject, tmpValuesFile } from './helpers';
+import { deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
 const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
@@ -15,19 +16,19 @@ const instant: NodeExecutor = async (ctx) => {
 };
 const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' };
 
-function setup(status: ProviderStatus = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined) {
+function setup(status: ProviderStatus = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined, over: Partial<AppDeps> = {}) {
   const paths = tmpProject();
   const valuesFile = tmpValuesFile();
   const app = createApp({
     projectDir: paths.root,
     valuesFile,
-    claudePath: 'claude',
+    provider: testProvider(),
     status,
     maxParallel: 2,
     gitBash: testGitBash,
     env,
     executors: { agent: instant, command },
-    queryFn: async function* () {},
+    ...over,
   });
   const client = () => {
     const msgs: ServerMessage[] = [];
@@ -168,7 +169,7 @@ describe('app', () => {
       snapshot: emptyGraph('g', 'G', 't'),
       nodes: { n1: { status: 'running' } },
     });
-    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
+    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
     expect(app.runStore.get('20261001-120000-abcd')).toMatchObject({ status: 'interrupted', nodes: { n1: { status: 'interrupted' } } });
   });
 
@@ -188,14 +189,11 @@ describe('app', () => {
   it('denies Claude the values file in planner turns and agent steps', async () => {
     const paths = tmpProject();
     const valuesFile = tmpValuesFile();
+    const legacyValuesFile = tmpValuesFile();
     const sessions: Options[] = [];
-    const app = createApp({
-      projectDir: paths.root,
-      valuesFile,
-      claudePath: 'claude',
-      status: signedIn,
-      maxParallel: 1,
-      gitBash: testGitBash,
+    const provider = createClaudeProvider({
+      findClaude: () => ({ ok: true, path: 'claude' }),
+      checkAuth: async () => signedIn,
       queryFn: ({ options }) => {
         sessions.push(options!);
         return (async function* () {
@@ -204,6 +202,16 @@ describe('app', () => {
           yield { type: 'result', subtype: 'success', is_error: false, result: 'ok', num_turns: 1, total_cost_usd: 0, usage, session_id: 's' } as unknown as SDKMessage;
         })();
       },
+    });
+    await provider.status();
+    const app = createApp({
+      projectDir: paths.root,
+      valuesFile,
+      legacyValuesFile,
+      provider,
+      status: signedIn,
+      maxParallel: 1,
+      gitBash: testGitBash,
     });
     const sent: ServerMessage[] = [];
     const c = { send: (m: ServerMessage) => void sent.push(m) };
@@ -222,6 +230,8 @@ describe('app', () => {
       expect(await hook(read, 't', { signal: new AbortController().signal })).toMatchObject({
         hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('the variable values file') },
       });
+      const legacy = { ...read, tool_input: { file_path: legacyValuesFile } } as HookInput;
+      expect(await hook(legacy, 't', { signal: new AbortController().signal })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     }
   });
 
@@ -369,15 +379,15 @@ describe('app', () => {
     const app = createApp({
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
-      claudePath: 'claude',
+      provider: testProvider({
+        planTurn: async () => {
+          await new Promise<void>((resolve) => (gate.release = resolve));
+          return { ok: true, sessionId: 's' };
+        },
+      }),
       status: signedIn,
       maxParallel: 1,
       gitBash: testGitBash,
-      queryFn: () =>
-        (async function* () {
-          await new Promise<void>((resolve) => (gate.release = resolve));
-          yield { type: 'system', subtype: 'init', apiKeySource: 'none', session_id: 's' } as unknown as SDKMessage;
-        })(),
     });
     const c = { send: () => {} };
     const g = app.graphStore.create('G');
@@ -395,13 +405,12 @@ describe('app', () => {
     const app = createApp({
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
-      claudePath: 'claude',
+      provider: testProvider(),
       status: signedIn,
       maxParallel: 1,
       platform: 'win32',
       gitBash: { ok: false, error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.' },
       executors: { agent: instant, command: instant },
-      queryFn: async function* () {},
     });
     const msgs: ServerMessage[] = [];
     const c = { send: (m: ServerMessage) => void msgs.push(m) };
@@ -413,7 +422,7 @@ describe('app', () => {
   });
 
   describe('for the extension', () => {
-    it('changes sign-in state and the Claude Code path at runtime', async () => {
+    it('changes the provider and its sign-in state at runtime', async () => {
       const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
       const a = client();
       const g = app.graphStore.create('G');
@@ -421,8 +430,11 @@ describe('app', () => {
       const sig = (await reviewed(app, a, g.id)).signature;
       await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
       expect(a.of('error').at(-1)?.message).toBe('Runs are disabled: Not signed in.');
-      app.setAuth(signedIn, '/new/claude');
+      const next = testProvider();
+      app.setProvider(next, signedIn);
       expect(a.of('auth')).toEqual([{ type: 'auth', status: signedIn }]);
+      expect(app.provider()).toBe(next);
+      expect(app.status()).toEqual(signedIn);
       await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
       await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
     });
@@ -437,10 +449,59 @@ describe('app', () => {
       await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('cancelled'));
     });
 
+    it('a run keeps the provider it started with', async () => {
+      const first = { gate: deferred<void>(), ran: [] as string[] };
+      const a = testProvider({
+        id: 'claude',
+        runStep: async (ctx) => {
+          first.ran.push(`a:${ctx.node.id}`);
+          await first.gate.promise;
+          return { ok: true, output: '' };
+        },
+      });
+      const b = testProvider({
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        runStep: async (ctx) => {
+          first.ran.push(`b:${ctx.node.id}`);
+          return { ok: true, output: '' };
+        },
+      });
+      // No executors override: agent steps run on the App's provider.
+      const { app, client } = setup(signedIn, instant, undefined, { provider: a, executors: undefined });
+      const c = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+      app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+      const finished = async (runId: string): Promise<RunMeta> => {
+        await vi.waitFor(() => expect(c.of('run').filter((m) => m.run.id === runId).at(-1)?.run.status).toBe('succeeded'));
+        return c.of('run').filter((m) => m.run.id === runId).at(-1)!.run;
+      };
+
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      const runId = c.of('run')[0].run.id;
+      await vi.waitFor(() => expect(first.ran).toEqual(['a:n1']));
+      // n1 is waiting inside provider a: swap providers mid-run, then let it finish.
+      app.setProvider(b, { provider: 'copilot', ok: true, label: 'Copilot' });
+      first.gate.resolve();
+      const run = await finished(runId);
+      expect(first.ran).toEqual(['a:n1', 'a:n2']);
+      expect(run.provider).toBe('claude');
+
+      // The swap did happen: the next run starts on provider b.
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      const nextId = c.of('run').filter((m) => m.run.id !== runId)[0].run.id;
+      const next = await finished(nextId);
+      expect(first.ran).toEqual(['a:n1', 'a:n2', 'b:n1', 'b:n2']);
+      expect(next.provider).toBe('copilot');
+      expect(Object.fromEntries(app.runStore.list(g.id).map((r) => [r.id, r.provider]))).toEqual({ [runId]: 'claude', [nextId]: 'copilot' });
+    });
+
     describe('migrating the old names', () => {
       const mk = (extra: Partial<Parameters<typeof createApp>[0]> = {}) => {
         const root = mkdtempSync(join(tmpdir(), 'agent-stream-mig-'));
-        const base = { projectDir: root, valuesFile: tmpValuesFile(), claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} };
+        const base = { projectDir: root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } };
         return { root, make: () => createApp({ ...base, ...extra }) };
       };
 
@@ -493,7 +554,7 @@ describe('app', () => {
       const paths = tmpProject();
       const valuesFile = tmpValuesFile();
       writeFileSync(valuesFile, '{');
-      const app = createApp({ projectDir: paths.root, valuesFile, claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} });
+      const app = createApp({ projectDir: paths.root, valuesFile, provider: testProvider(), status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The variable values file \(.+\) could not be read/)]);
     });
   });

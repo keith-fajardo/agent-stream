@@ -14,21 +14,21 @@ import {
   type RunMeta,
   type ServerMessage,
 } from '@agent-stream/shared';
-import { createAgentExecutor } from './agentExecutor';
 import { ApprovalBroker } from './approvals';
 import { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
-import type { Executors } from './executors';
+import type { Executors, NodeExecutor } from './executors';
 import { GraphStore } from './graphStore';
 import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
 import { GIT_BASH_MISSING, type Found } from './platform';
+import { createStepGate } from './providers/toolGate';
+import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { Runner } from './runner';
 import { RunStore } from './runStore';
-import type { QueryFn } from './sdk';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
 
@@ -43,15 +43,16 @@ export type AppDeps = {
    * the project. Required, so nothing (a test included) writes into the home folder by default.
    */
   valuesFile: string;
-  /** The pre-rename values file (see legacyValuesFileFor): moved to valuesFile on startup, and denied to Claude meanwhile. */
+  /** The pre-rename values file (see legacyValuesFileFor): moved to valuesFile on startup, and denied to agents meanwhile. */
   legacyValuesFile?: string;
   /** For tests: replaces fs.renameSync in the migrations. */
   rename?: typeof renameSync;
-  claudePath: string;
+  /** Runs agent steps and planner turns. */
+  provider: AgentProvider;
   status: ProviderStatus;
   maxParallel: number;
+  /** For tests: replaces the step executors (agent steps then ignore the provider). */
   executors?: Executors;
-  queryFn?: QueryFn;
   clock?: Clock;
   env?: EnvLookup;
   platform?: NodeJS.Platform;
@@ -62,8 +63,8 @@ export type AppDeps = {
 export type App = ReturnType<typeof createApp>;
 
 export function createApp(d: AppDeps) {
+  let provider = d.provider;
   let status = d.status;
-  let claudePath = d.claudePath;
   const clock = d.clock ?? systemClock;
   const paths = projectPaths(d.projectDir);
   const migrationWarnings = migrateProjectFolder(d.projectDir, d.rename);
@@ -79,8 +80,28 @@ export function createApp(d: AppDeps) {
   const commandShellProblem: string | null = platform === 'win32' ? (d.gitBash?.ok ? null : (d.gitBash?.error ?? GIT_BASH_MISSING)) : null;
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
+  /** The variable values files: no agent or planner may read them. */
+  const privateFiles = () => [d.valuesFile, d.legacyValuesFile].filter((f): f is string => !!f);
+  /** Agent steps on `p`, each asking the user through its own step gate. */
+  const agentFor =
+    (p: AgentProvider): NodeExecutor =>
+    (ctx) =>
+      p.runStep(
+        ctx,
+        createStepGate({
+          broker,
+          runId: ctx.runId,
+          graphId: ctx.graph.id,
+          nodeId: ctx.node.id,
+          nodeTitle: ctx.node.title,
+          projectDir: ctx.cwd,
+          privateFiles: privateFiles(),
+          signal: ctx.signal,
+          emit: ctx.emit,
+        }),
+      );
   const executors = d.executors ?? {
-    agent: createAgentExecutor({ claudePath: () => claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile, legacyValuesFile: d.legacyValuesFile }),
+    agent: agentFor(provider),
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
@@ -149,7 +170,7 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, legacyValuesFile: d.legacyValuesFile, claudePath: () => claudePath, requestRun, queryFn: d.queryFn, clock });
+  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, provider: () => provider, privateFiles, requestRun, clock });
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op) => {
@@ -183,10 +204,10 @@ export function createApp(d: AppDeps) {
     return { type: 'graphOpened', graph, chat: chatLog.read(graph.id), chatBusy: planner.isBusy(graph.id), runs, run, variableValues: values.get(graph.id) };
   }
 
-  /** Sign-in changed (Retry in the sidebar): update every check and tell the tabs. */
-  function setAuth(next: ProviderStatus, nextClaudePath?: string): void {
-    status = next;
-    if (nextClaudePath) claudePath = nextClaudePath;
+  /** The provider or its status changed (settings, Check again): new runs and planner turns use it; running ones keep theirs. */
+  function setProvider(next: AgentProvider, nextStatus: ProviderStatus): void {
+    provider = next;
+    status = nextStatus;
     broadcast({ type: 'auth', status });
   }
 
@@ -251,7 +272,15 @@ export function createApp(d: AppDeps) {
         // Run only what the user reviewed: a step, a value or an environment variable may have changed since.
         if (p.outcome.preview.signature !== msg.reviewed) return error(CHANGED_SINCE_REVIEW);
         if (!p.outcome.rendered) return error(p.outcome.preview.problems.join('\n'));
-        const started = runner.start({ graph: r.graph, rendered: p.outcome.rendered, sourceRunId: msg.sourceRunId, fromNodeId: msg.fromNodeId });
+        const started = runner.start({
+          graph: r.graph,
+          rendered: p.outcome.rendered,
+          sourceRunId: msg.sourceRunId,
+          fromNodeId: msg.fromNodeId,
+          provider: provider.id,
+          // Fixed for the whole run: a provider switch mid-run doesn't reach its later steps.
+          ...(d.executors ? {} : { agent: agentFor(provider) }),
+        });
         if (!started.ok) return error(started.error);
         return;
       }
@@ -301,7 +330,9 @@ export function createApp(d: AppDeps) {
     deleteGraph,
     exportGraph: (id: string) => graphStore.exportGraph(id),
     importGraph,
-    setAuth,
+    setProvider,
+    provider: () => provider,
+    status: () => status,
     dispose,
     startupWarnings,
   };

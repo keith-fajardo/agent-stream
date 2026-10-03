@@ -27,6 +27,15 @@ describe('RunStore', () => {
     expect(store.get('20261002-120000-cccc')?.graphId).toBe('other');
   });
 
+  it('lists the provider a run recorded, and none for runs without one', () => {
+    const store = new RunStore(tmpProject());
+    store.create({ ...meta('20261002-100000-aaaa'), provider: 'claude' });
+    store.create(meta('20261002-110000-bbbb'));
+    const [plain, withProvider] = store.list('g');
+    expect(withProvider).toEqual({ id: '20261002-100000-aaaa', graphId: 'g', status: 'succeeded', startedAt: 'start-20261002-100000-aaaa', provider: 'claude' });
+    expect(plain).not.toHaveProperty('provider');
+  });
+
   it('stores events and outputs per node', () => {
     const store = new RunStore(tmpProject());
     const a = '20261002-100000-aaaa';
