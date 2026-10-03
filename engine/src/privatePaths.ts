@@ -24,12 +24,14 @@ export function privatePathDenial(projectDir: string, toolName: string, input: u
   const norm = (x: string) => (process.platform === 'win32' ? x.toLowerCase() : x);
   // Claude Code expands a leading ~ to the home folder, where the values file lives.
   const expanded = /^~(?=$|[\\/])/.test(p) ? join(homedir(), p.slice(1)) : p;
-  const full = norm(resolve(projectDir, expanded));
+  // One root for both the checked path and the runs folder, so a drive-less projectDir can't make them disagree on Windows.
+  const root = resolve(projectDir);
+  const full = norm(resolve(root, expanded));
   const files = privateFiles.map((f) => norm(resolve(f)));
   if (files.includes(full)) return VALUES_REASON;
   // A searched folder with a glob can override ripgrep's ignore rules, so searches may not aim at the file's folder or above it.
   if ((toolName === 'Grep' || toolName === 'Glob') && files.some((f) => within(full, dirname(f)) || within(f, full))) return VALUES_REASON;
-  const runsDir = norm(join(projectDir, '.claude-stream', 'runs'));
+  const runsDir = norm(join(root, '.claude-stream', 'runs'));
   // A searched directory can override ripgrep's ignore rules, so Grep may not aim at the runs tree (output.md files are fine).
   if (toolName === 'Grep' && (full === runsDir || full.startsWith(runsDir + sep)) && basename(full) !== 'output.md') return RUN_REASON;
   const runs = runsDir + sep;
