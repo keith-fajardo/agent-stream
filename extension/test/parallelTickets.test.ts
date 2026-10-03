@@ -269,6 +269,18 @@ describe('New A/B Test Graph', () => {
     expect(s.opened).toEqual([{ folder: s.folder, graphId: listed.id }]);
   });
 
+  it('trims variant names before validating and building the graph', async () => {
+    const s = setup();
+    names(s, 'Warehouse cost test', '  wh_small  ', ' wh_large ', '');
+    await s.cmds.newAbTestGraph();
+    const [, , v2] = s.ui.inputBox.mock.calls.map(([o]) => o);
+    expect(v2.validate(' wh_small ')).toBe('Variant 2 repeats wh_small.');
+    expect(v2.validate(' Small WH ')).toBe('Workspace names use lowercase letters, digits, - and _, starting with a letter.');
+    expect(s.ui.error).not.toHaveBeenCalled();
+    const app = s.manager.get(s.folder);
+    expect(app.graphStore.get(app.listGraphs()[0].id).nodes.map((n) => n.title)).toEqual(['Plan the comparison', 'Set up wh_small', 'Run wh_small', 'Set up wh_large', 'Run wh_large', 'Compare and recommend']);
+  });
+
   it('stops asking after six variants', async () => {
     const s = setup();
     names(s, 'Six', 'a', 'b', 'c', 'd', 'e', 'f');
