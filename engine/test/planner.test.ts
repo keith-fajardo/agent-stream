@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ChatLog } from '../src/chatLog';
@@ -284,7 +284,7 @@ describe('Planner private values', () => {
         permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
       },
     });
-    expect(await run('Grep', { pattern: 'x', path: '/', glob: '*' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await run('Grep', { pattern: 'x', path: parse(VALUES_FILE).root, glob: '*' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(await run('Glob', { pattern: '**/*', path: resolve('/', 'home', 'me', '.claude-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(await run('Grep', { pattern: 'x', path: join(s.paths.root, 'src') })).toEqual({});
     expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toEqual({});
