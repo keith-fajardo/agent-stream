@@ -48,6 +48,9 @@ const inside = (child: string, parent: string) => {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 };
 
+/** A failed check is a problem, never a clean result. */
+const couldntCheck = (r: GitResult) => `Couldn't check this checkout: ${r.stderr.trim() || r.stdout.trim() || `git exited with code ${r.code}`}`;
+
 /** Every problem at once; creates nothing (spec §5.1). */
 export async function checkSetup(plan: WorktreePlan, base: string, git: GitExec, fs: WorktreeFs = realWorktreeFs): Promise<SetupCheck> {
   const top = await git(['rev-parse', '--show-toplevel'], plan.root);
@@ -61,14 +64,18 @@ export async function checkSetup(plan: WorktreePlan, base: string, git: GitExec,
     if (r.code === 0 && r.stdout.trim()) sha = r.stdout.trim();
     else problems.push(`Can't find the base "${base}".`);
   }
-  const changed = lines(await git(['status', '--porcelain', '--untracked-files=no'], plan.root)).length;
-  if (changed > 0) {
+  const status = await git(['status', '--porcelain', '--untracked-files=no'], plan.root);
+  const changed = lines(status).length;
+  if (status.code !== 0) problems.push(couldntCheck(status));
+  else if (changed > 0) {
     problems.push(`This checkout has uncommitted changes to tracked files (${changed}). Worktrees start from ${base} and won't include them. Commit them yourself, or run this from a clean checkout.`);
   }
   const untracked = lines(await git(['status', '--porcelain', '--untracked-files=normal'], plan.root)).filter((l) => l.startsWith('?? ')).length;
   if (!fs.exists(plan.parent)) problems.push(`The folder ${plan.parent} doesn't exist.`);
   else if (inside(fs.realpath(plan.parent), fs.realpath(plan.root))) problems.push(`${plan.parent} is inside this checkout. Choose a folder outside it.`);
-  const registered = new Set(parseWorktreeList((await git(['worktree', 'list', '--porcelain'], plan.root)).stdout).map((w) => fs.realpath(w.path)));
+  const list = await git(['worktree', 'list', '--porcelain'], plan.root);
+  if (list.code !== 0) problems.push(couldntCheck(list));
+  const registered = new Set(parseWorktreeList(list.code === 0 ? list.stdout : '').map((w) => fs.realpath(w.path)));
   for (const item of plan.items) {
     if ((await git(['check-ref-format', '--branch', item.branch], plan.root)).code !== 0) problems.push(`${item.branch} isn't a valid branch name.`);
     else if ((await git(['show-ref', '--verify', '--quiet', `refs/heads/${item.branch}`], plan.root)).code === 0) problems.push(`The branch ${item.branch} already exists.`);

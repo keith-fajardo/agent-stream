@@ -98,6 +98,13 @@ describe('checkSetup', () => {
     ]);
   });
 
+  it("refuses when git status or git worktree list fails, instead of treating the checkout as clean", async () => {
+    const status = fakeGit(clean({ 'status --porcelain --untracked-files=no': { code: 128, stderr: 'fatal: timed out\n' } }));
+    expect((await checkSetup(plan(), 'main', status.exec, fsWith(PARENT))).problems).toEqual(["Couldn't check this checkout: fatal: timed out"]);
+    const list = fakeGit(clean({ 'worktree list --porcelain': { code: 1, stdout: 'worktree list failed\n' } }));
+    expect((await checkSetup(plan(), 'main', list.exec, fsWith(PARENT))).problems).toEqual(["Couldn't check this checkout: worktree list failed"]);
+  });
+
   it('refuses a parent folder that is missing, or inside the checkout', async () => {
     expect((await checkSetup(plan(), 'main', fakeGit(clean()).exec, fsWith())).problems).toEqual([`The folder ${PARENT} doesn't exist.`]);
     const trees = join(ROOT, 'trees');
