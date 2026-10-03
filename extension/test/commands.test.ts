@@ -141,6 +141,88 @@ describe('graph commands', () => {
     expect(s.ui.info).toHaveBeenCalledWith('Exported parity.agent-stream.json. Variable values were left out.');
   });
 
+  describe('Export Run Report', () => {
+    /** A finished run of a new graph, recorded straight into the run store. */
+    function withRun(s: ReturnType<typeof setup>, id = '20261003-100000-abcd') {
+      const app = s.manager.get(s.folders[0]);
+      const g = app.createGraph('Parity');
+      const graph = app.graphStore.load(g.id);
+      if (!graph.ok) throw new Error(graph.error);
+      app.runStore.create({ id, graphId: g.id, status: 'succeeded', startedAt: '2026-10-03T10:00:00.000Z', endedAt: '2026-10-03T10:00:05.000Z', snapshot: graph.graph, nodes: {} });
+      return { app, graphId: g.id, runId: id, target: { folder: s.folders[0], graphId: g.id } };
+    }
+    const savedFile = () => {
+      const file = { written: undefined as string | undefined, open: vi.fn(async () => {}), write: vi.fn(async (content: string) => void (file.written = content)) };
+      return file;
+    };
+
+    it("saves the run's report under the suggested name in the project folder, then opens it", async () => {
+      const s = setup();
+      const r = withRun(s);
+      const file = savedFile();
+      s.ui.saveFile.mockResolvedValueOnce(file);
+      await s.commands.exportRunReport({ ...r.target, runId: r.runId });
+      expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, `${r.graphId}-run-${r.runId}.md`), 'markdown');
+      expect(file.written).toContain('# Run report: Parity');
+      expect(file.written).toContain(`- Run: ${r.runId}`);
+      expect(file.open).toHaveBeenCalledTimes(1);
+      expect(file.write.mock.invocationCallOrder[0]).toBeLessThan(file.open.mock.invocationCallOrder[0]);
+    });
+
+    it('writes nothing and opens nothing when the save is cancelled', async () => {
+      const s = setup();
+      const r = withRun(s);
+      s.ui.saveFile.mockResolvedValueOnce(undefined);
+      await s.commands.exportRunReport({ ...r.target, runId: r.runId });
+      expect(s.ui.saveFile).toHaveBeenCalledTimes(1);
+      expect(s.ui.error).not.toHaveBeenCalled();
+    });
+
+    it('picks a graph, then one of its runs, newest first; cancelling either does nothing', async () => {
+      const s = setup();
+      const r = withRun(s);
+      r.app.runStore.create({ ...r.app.runStore.get(r.runId)!, id: '20261003-110000-bcde', status: 'failed' });
+      s.ui.pickGraph.mockResolvedValueOnce(undefined);
+      await s.commands.exportRunReport();
+      expect(s.ui.quickPick).not.toHaveBeenCalled();
+      s.ui.pickGraph.mockResolvedValueOnce(r.target);
+      s.ui.quickPick.mockResolvedValueOnce(undefined);
+      await s.commands.exportRunReport();
+      expect(s.ui.saveFile).not.toHaveBeenCalled();
+      const [items, placeHolder] = s.ui.quickPick.mock.calls[0];
+      expect(placeHolder).toBe('Which run?');
+      expect(items.map((i: { label: string; value: string }) => [i.label, i.value])).toEqual([
+        ['Run 20261003-110000-bcde · Failed', '20261003-110000-bcde'],
+        ['Run 20261003-100000-abcd · Succeeded', '20261003-100000-abcd'],
+      ]);
+      s.ui.pickGraph.mockResolvedValueOnce(r.target);
+      s.ui.quickPick.mockResolvedValueOnce('20261003-100000-abcd');
+      const file = savedFile();
+      s.ui.saveFile.mockResolvedValueOnce(file);
+      await s.commands.exportRunReport();
+      expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, `${r.graphId}-run-20261003-100000-abcd.md`), 'markdown');
+      expect(file.open).toHaveBeenCalled();
+    });
+
+    it("uses the active tab's graph, and says when it has no runs", async () => {
+      const s = setup();
+      const g = s.manager.get(s.folders[0]).createGraph('Empty');
+      s.setActive({ folder: s.folders[0], graphId: g.id });
+      await s.commands.exportRunReport();
+      expect(s.ui.pickGraph).not.toHaveBeenCalled();
+      expect(s.ui.info).toHaveBeenCalledWith('Empty has no runs yet.');
+      expect(s.ui.quickPick).not.toHaveBeenCalled();
+    });
+
+    it('shows the error for an unknown run', async () => {
+      const s = setup();
+      const r = withRun(s);
+      await s.commands.exportRunReport({ ...r.target, runId: '20261003-120000-ffff' });
+      expect(s.ui.error).toHaveBeenCalledWith('run 20261003-120000-ffff not found');
+      expect(s.ui.saveFile).not.toHaveBeenCalled();
+    });
+  });
+
   it('renames starting from the current name', async () => {
     const s = setup();
     const g = s.manager.get(s.folders[0]).createGraph('Parity');

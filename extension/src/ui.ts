@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { Ui } from './commands';
 
 const filters = { 'Agent Stream graph': ['json'] };
+const saveFilters = { graph: filters, markdown: { Markdown: ['md'] } };
 
 export const vscodeUi: Ui = {
   inputBox: async (o) => vscode.window.showInputBox({ prompt: o.prompt, value: o.value, placeHolder: o.placeHolder, validateInput: o.validate }),
@@ -23,9 +24,14 @@ export const vscodeUi: Ui = {
     const stat = await vscode.workspace.fs.stat(uri);
     return { size: stat.size, read: async () => new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)) };
   },
-  saveFile: async (defaultPath) => {
-    const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(defaultPath), filters });
-    return uri && { write: async (content: string) => vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content)) };
+  saveFile: async (defaultPath, kind = 'graph') => {
+    const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(defaultPath), filters: saveFilters[kind] });
+    return (
+      uri && {
+        write: async (content: string) => vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content)),
+        open: async () => void (await vscode.window.showTextDocument(uri)),
+      }
+    );
   },
   info: (message) => void vscode.window.showInformationMessage(message),
   error: (message) => void vscode.window.showErrorMessage(message),

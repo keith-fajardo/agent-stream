@@ -71,6 +71,7 @@ export async function activate(context: vscode.ExtensionContext) {
         minimap: () => context.globalState.get<boolean>('minimap', true),
         setMinimap: (value) => void context.globalState.update('minimap', value),
         setUpParallelTickets: (folder) => void vscode.commands.executeCommand('agentStream.setUpParallelTickets', { folder }),
+        exportRunReport: (folder, graphId, runId) => void vscode.commands.executeCommand('agentStream.exportRunReport', { folder, graphId, runId }),
       }),
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     ),

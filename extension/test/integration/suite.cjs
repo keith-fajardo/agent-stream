@@ -73,7 +73,7 @@ exports.run = async function run() {
   assert.equal(where.filter((m) => m.type === 'checkout').length, 2);
   detachWhere();
   const registered = await vscode.commands.getCommands(true);
-  for (const id of ['agentStream.setUpParallelTickets', 'agentStream.newAbTestGraph', 'agentStream.manageRunWorkspaces', 'agentStream.selectModel']) assert.ok(registered.includes(id), `${id} is registered`);
+  for (const id of ['agentStream.setUpParallelTickets', 'agentStream.newAbTestGraph', 'agentStream.manageRunWorkspaces', 'agentStream.selectModel', 'agentStream.exportRunReport']) assert.ok(registered.includes(id), `${id} is registered`);
   // The default model and effort settings exist and start at Default.
   assert.equal(vscode.workspace.getConfiguration('agentStream').get('model'), '');
   assert.equal(vscode.workspace.getConfiguration('agentStream').get('effort'), '');

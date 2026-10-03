@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { App } from '@agent-stream/engine';
-import { MAX_IMPORT_CHARS } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, statusLabel } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 
 export type GraphTarget = { folder: Folder; graphId: string };
@@ -16,7 +16,8 @@ export type Ui = {
   /** A modal confirmation; `detail` is shown under the message. */
   confirm(message: string, action: string, detail?: string): Promise<boolean>;
   openFile(): Promise<{ size: number; read(): Promise<string> } | undefined>;
-  saveFile(defaultPath: string): Promise<{ write(content: string): Promise<void> } | undefined>;
+  /** A save dialog starting at `defaultPath`, filtered to graph files (the default) or Markdown; `open` shows the saved file in an editor. */
+  saveFile(defaultPath: string, kind?: 'graph' | 'markdown'): Promise<{ write(content: string): Promise<void>; open(): Promise<void> } | undefined>;
   info(message: string): void;
   error(message: string): void;
   quickPick<T>(items: PickItem<T>[], placeHolder: string): Promise<T | undefined>;
@@ -37,6 +38,8 @@ export type CommandDeps = {
   activeTarget(): GraphTarget | undefined;
 };
 
+/** How many recent runs Export Run Report offers. */
+const MAX_RUN_PICKS = 50;
 const blankName = (value: string) => (value.trim() ? undefined : 'A graph needs a name.');
 const NO_FOLDER = "Open a folder first. Agent Stream keeps graphs in the folder's .agent-stream folder.";
 
@@ -110,6 +113,32 @@ export function graphCommands(d: CommandDeps) {
       if (!file) return;
       await file.write(r.content);
       d.ui.info(`Exported ${r.fileName}. Variable values were left out.`);
+    },
+
+    /**
+     * Saves a run's Markdown report (default folder: the project folder) and opens it. Without a run, picks the graph
+     * (the active tab's, else from a list) and then one of its runs, newest first.
+     */
+    async exportRunReport(target?: GraphTarget & { runId?: string }): Promise<void> {
+      const t = await targetFor(target);
+      if (!t) return;
+      const engine = app(t.folder);
+      let runId = target?.runId;
+      if (!runId) {
+        const runs = engine.runStore.list(t.graphId);
+        if (!runs.length) return d.ui.info(`${nameOf(t)} has no runs yet.`);
+        runId = await d.ui.quickPick(
+          runs.slice(0, MAX_RUN_PICKS).map((r) => ({ label: `Run ${r.id} · ${statusLabel(r.status)}`, description: r.startedAt, value: r.id })),
+          'Which run?',
+        );
+        if (!runId) return;
+      }
+      const r = engine.runReport(t.graphId, runId);
+      if (!r.ok) return d.ui.error(r.error);
+      const file = await d.ui.saveFile(join(t.folder.path, r.suggestedName), 'markdown');
+      if (!file) return;
+      await file.write(r.markdown);
+      await file.open();
     },
 
     async renameGraph(target?: GraphTarget): Promise<void> {

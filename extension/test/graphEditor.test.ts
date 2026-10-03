@@ -36,8 +36,9 @@ function setup() {
   const runHostCommand = vi.fn();
   const setMinimap = vi.fn();
   const setUpParallelTickets = vi.fn();
-  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap, setUpParallelTickets, activeSession: () => 'work' });
-  return { app, graph, panel, posted, received, handler, runHostCommand, setMinimap, setUpParallelTickets };
+  const exportRunReport = vi.fn();
+  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap, setUpParallelTickets, exportRunReport, activeSession: () => 'work' });
+  return { app, graph, panel, posted, received, handler, runHostCommand, setMinimap, setUpParallelTickets, exportRunReport };
 }
 
 describe('graph tab messages', () => {
@@ -54,6 +55,13 @@ describe('graph tab messages', () => {
     const s = setup();
     s.handler.handle({ type: 'setUpParallelTickets' });
     expect(s.setUpParallelTickets).toHaveBeenCalledWith(s.panel.folder);
+  });
+
+  it("exports the selected run's report for the tab's graph", () => {
+    const s = setup();
+    s.handler.handle({ type: 'exportRunReport', runId: '20261003-100000-abcd' });
+    expect(s.exportRunReport).toHaveBeenCalledWith(s.panel.folder, s.graph.id, '20261003-100000-abcd');
+    expect(s.received).toEqual([]);
   });
 
   it('keeps the latest draft state on the panel', () => {

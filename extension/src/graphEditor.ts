@@ -112,6 +112,8 @@ export type MessageHandlerDeps = {
   activeSession(folder: Folder): string;
   /** The tab's run dialog asked for Set Up Parallel Tickets (spec §5.3). */
   setUpParallelTickets(folder: Folder): void;
+  /** Run › Export Run Report… or the Report button: save the run's report and open it. */
+  exportRunReport(folder: Folder, graphId: string, runId: string): void;
 };
 
 /** Routes what a tab posts: engine messages to its folder's engine, the tab's own messages to the extension. */
@@ -151,6 +153,9 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
         case 'setUpParallelTickets':
           d.setUpParallelTickets(d.panel.folder);
           return;
+        case 'exportRunReport':
+          d.exportRunReport(d.panel.folder, d.panel.graphId, msg.runId);
+          return;
         case 'splitStep':
           d.app.handle(d.client, { type: 'splitStep', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeId: msg.nodeId }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
           return;
@@ -177,6 +182,7 @@ export type EditorDeps = {
   setMinimap(value: boolean): void;
   /** The tab's run dialog asked for Set Up Parallel Tickets (spec §5.3). */
   setUpParallelTickets(folder: Folder): void;
+  exportRunReport(folder: Folder, graphId: string, runId: string): void;
 };
 
 function messagePage(text: string): string {
@@ -227,6 +233,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
       runHostCommand: this.d.runHostCommand,
       activeSession: (f) => this.d.activeSession(f),
       setUpParallelTickets: (f) => this.d.setUpParallelTickets(f),
+      exportRunReport: (f, graphId, runId) => this.d.exportRunReport(f, graphId, runId),
       setMinimap: (value) => {
         this.d.setMinimap(value);
         for (const other of this.d.panels.all()) if (other !== panel) other.send({ type: 'prefs', minimap: value });

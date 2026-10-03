@@ -199,6 +199,11 @@
         "category": "Agent Stream"
       },
       {
+        "command": "agentStream.exportRunReport",
+        "title": "Export Run Report",
+        "category": "Agent Stream"
+      },
+      {
         "command": "agentStream.renameGraph",
         "title": "Rename Graph",
         "category": "Agent Stream"
