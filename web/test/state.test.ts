@@ -21,6 +21,25 @@ const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOp
 const apply = (...actions: Action[]): State => actions.reduce(reduce, initialState);
 
 describe('client state', () => {
+  it("keeps the provider's models and the open conversation's model choice", () => {
+    const target = { graphId: 'g', graphName: 'G', sessionId: 's', sessionName: 'S' };
+    const models = [{ value: 'sonnet', label: 'Sonnet', efforts: ['high' as const] }];
+    let s = apply(server({ type: 'chatTarget', target }), server({ type: 'models', provider: 'claude', models }));
+    expect(s.models).toEqual(models);
+    expect(s.plannerModel).toEqual({});
+    s = reduce(s, server({ type: 'chatOpened', graphId: 'g', sessionId: 's', chat: [], busy: false, model: 'sonnet', effort: 'high' }));
+    expect(s.plannerModel).toEqual({ model: 'sonnet', effort: 'high' });
+    // Another conversation's choice is not this one's.
+    expect(reduce(s, server({ type: 'plannerModel', graphId: 'g', sessionId: 'other', model: 'x' })).plannerModel).toEqual({ model: 'sonnet', effort: 'high' });
+    s = reduce(s, server({ type: 'plannerModel', graphId: 'g', sessionId: 's' }));
+    expect(s.plannerModel).toEqual({});
+    s = reduce(s, server({ type: 'plannerModel', graphId: 'g', sessionId: 's', model: 'sonnet' }));
+    // A different conversation starts at Default until its chatOpened arrives.
+    s = reduce(s, server({ type: 'chatTarget', target: { ...target, graphId: 'h' } }));
+    expect(s.plannerModel).toEqual({});
+    expect(s.models).toEqual(models);
+  });
+
   it('tracks the connection and account', () => {
     const s = apply(server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [{ id: 'a', name: 'A' }], approvals: [] }));
     expect(s).toMatchObject({ connected: true, status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [{ id: 'a', name: 'A' }] });

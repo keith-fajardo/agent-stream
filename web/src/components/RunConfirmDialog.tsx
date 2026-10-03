@@ -1,4 +1,4 @@
-import { checkoutChip } from '@agent-stream/shared';
+import { checkoutChip, modelLine } from '@agent-stream/shared';
 import { useEffect } from 'react';
 import { post, send } from '../bridge';
 import { dispatch, useStore } from '../store';
@@ -111,6 +111,7 @@ export function RunConfirmDialog() {
                 ⚠ {w}
               </p>
             ))}
+            {agents.length > 0 && <p className="model-line">{modelLine({ model: preview.model?.value, label: preview.model?.label, effort: preview.effort })}</p>}
             <p>
               {agents.length} agent step{agents.length === 1 ? '' : 's'} will run. Every file edit or shell command they attempt waits for your approval.
             </p>

@@ -2,6 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ModelChoice } from '@agent-stream/shared';
 import { ChatApp } from '../src/ChatApp';
 import { dispatch, resetStoreForTests } from '../src/store';
 
@@ -11,6 +12,10 @@ const posted: unknown[] = [];
 Element.prototype.scrollIntoView = vi.fn();
 
 const target = { graphId: 'g1', graphName: 'Orders parity', sessionId: 'default', sessionName: 'Default' };
+const MODELS: ModelChoice[] = [
+  { value: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'] },
+  { value: 'haiku', label: 'Haiku', efforts: [] },
+];
 async function render() {
   const el = document.createElement('div');
   await act(async () => createRoot(el).render(createElement(ChatApp)));
@@ -65,5 +70,66 @@ describe('ChatApp', () => {
     const box = el.querySelector('textarea')!;
     expect(box.disabled).toBe(true);
     expect(box.placeholder).toBe("Copilot support isn't implemented yet.");
+  });
+  it('offers Default plus the provider’s models, and Effort only for a model with levels', async () => {
+    const el = await render();
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS } });
+    });
+    const model = el.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
+    expect([...model.options].map((o) => o.textContent)).toEqual(['Default', 'Sonnet', 'Haiku']);
+    expect(model.value).toBe('');
+    expect(el.querySelector('select[aria-label="Effort"]')).toBeNull();
+    // The engine confirms a choice; the menus follow it.
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'plannerModel', graphId: 'g1', sessionId: 'default', model: 'sonnet', effort: 'high' } }));
+    const effort = el.querySelector('select[aria-label="Effort"]') as HTMLSelectElement;
+    expect(model.value).toBe('sonnet');
+    expect([...effort.options].map((o) => o.textContent)).toEqual(['Default', 'low', 'high']);
+    expect(effort.value).toBe('high');
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'plannerModel', graphId: 'g1', sessionId: 'default', model: 'haiku' } }));
+    expect(el.querySelector('select[aria-label="Effort"]')).toBeNull();
+  });
+
+  it('sends the choice for its conversation, dropping an effort the new model lacks', async () => {
+    const el = await render();
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'sonnet', effort: 'low' } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS } });
+    });
+    const pick = async (label: string, value: string) => {
+      const select = el.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement;
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    };
+    await pick('Effort', 'high');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', model: 'sonnet', effort: 'high' });
+    await pick('Model', 'haiku');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', model: 'haiku' });
+    await pick('Model', '');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default' });
+    await pick('Effort', '');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', model: 'sonnet' });
+  });
+
+  it('keeps showing a saved model the list no longer offers, and marks models that can’t run', async () => {
+    const el = await render();
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'old-model' } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'copilot', models: [{ value: 'gpt', label: 'GPT', efforts: [], unavailable: true }] } });
+    });
+    const model = el.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
+    expect(model.value).toBe('old-model');
+    expect([...model.options].map((o) => [o.textContent, o.disabled])).toEqual([
+      ['Default', false],
+      ['GPT (unavailable)', true],
+      ['old-model', false],
+    ]);
   });
 });

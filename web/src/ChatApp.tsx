@@ -1,5 +1,6 @@
 import { post } from './bridge';
 import { ChatPanel } from './components/ChatPanel';
+import { ModelPicker } from './components/ModelPicker';
 import { useStore } from './store';
 
 export function ChatApp() {
@@ -20,6 +21,7 @@ export function ChatApp() {
         <button className="link chat-session" data-action="switchSession" title="Switch session" onClick={() => post({ type: 'chatCommand', command: 'switchSession' })}>
           {target.sessionName} ▾
         </button>
+        <ModelPicker graphId={target.graphId} sessionId={target.sessionId} />
         <button data-action="newChat" title="Start a new conversation" onClick={() => post({ type: 'chatCommand', command: 'newChat' })}>
           New chat
         </button>

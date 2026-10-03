@@ -68,6 +68,12 @@ describe('TopBar run picker', () => {
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs } }));
     const options = [...container.querySelectorAll('option')];
     expect(options[0].textContent).toBe('Run 20261003-110000-bbbb · Running · Waiting for run 20261003-100000-aaaa ("Billing") to finish changing files');
-    expect(options[1].title).toBe('Ran in /work/app on main at a1b2c3d');
+    expect(options[1].title).toBe('Ran in /work/app on main at a1b2c3d\nModel: Default · Effort: Default');
+  });
+
+  it('names the model and effort each run used', async () => {
+    const runs: RunSummary[] = [{ id: '20261003-120000-cccc', graphId: 'g', status: 'succeeded', startedAt: 't', model: 'sonnet', effort: 'high' }];
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs } }));
+    expect(container.querySelector('option')?.title).toBe('Model: sonnet · Effort: high');
   });
 });

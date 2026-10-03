@@ -124,6 +124,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .chat-app > .chat { flex: 1; min-height: 0; }
 .chat-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .chat-graph { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-head select { padding: 2px 4px; min-width: 0; max-width: 9em; flex-shrink: 1; }
 .msg.busy { color: var(--muted); font-style: italic; }
 .chat-input { display: flex; gap: 8px; padding: 8px; border-top: 1px solid var(--border); align-items: flex-end; }
 .chat-input textarea { min-height: 60px; }
@@ -170,7 +171,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .variables-used td, .variables-used th { padding: 2px 8px 2px 0; text-align: left; }
 
 .checkout-chip { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.checkout-line { color: var(--muted); }
+.checkout-line, .model-line { color: var(--muted); }
 .run-note { color: var(--info); }
 .static-note { margin: 0; color: var(--muted); }
 .read-badge { padding: 0 4px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }

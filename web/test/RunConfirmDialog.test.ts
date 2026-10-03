@@ -63,6 +63,18 @@ describe('RunConfirmDialog', () => {
     expect(getState().confirm).toBeUndefined();
   });
 
+  it('names the model and effort agent steps will use', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ model: { value: 'sonnet', label: 'Sonnet' }, effort: 'high' }), requestId: lastRequestId() } }));
+    expect(container.querySelector('.model-line')?.textContent).toBe('Model: Sonnet · Effort: high');
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ signature: 'sig-2' }), requestId: lastRequestId() } }));
+    expect(container.querySelector('.model-line')?.textContent).toBe('Model: Default · Effort: Default');
+    // Command steps alone use no model.
+    const commandsOnly = preview({ signature: 'sig-3', steps: [{ id: 'n1', title: 'Build', kind: 'command', text: 'dbt build', reused: false }] });
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: commandsOnly, requestId: lastRequestId() } }));
+    expect(container.querySelector('.model-line')).toBeNull();
+  });
+
   it('shows each step\u2019s description as an In short line above its prompt or command', async () => {
     const steps: RunPreview['steps'] = [
       { id: 'n1', title: 'Build', kind: 'command', description: 'Builds the model.', text: 'dbt build', reused: false },

@@ -8,6 +8,8 @@ import type {
   GraphListItem,
   HostMessage,
   LeaseHolder,
+  ModelChoice,
+  ModelSelection,
   NodeEvent,
   ProviderStatus,
   RunMeta,
@@ -52,6 +54,10 @@ export type State = {
   chatBusy: boolean;
   /** The planner conversation the chat view shows; the extension picks it. */
   chatTarget?: ChatTarget;
+  /** The current provider's models, for the chat's Model menu. */
+  models: ModelChoice[];
+  /** The shown conversation's own model and effort choice, as the engine last confirmed it (absent fields: Default). */
+  plannerModel: ModelSelection;
   confirm?: ConfirmRequest;
   variableValues: Record<string, string>;
   preview?: RunPreview;
@@ -65,7 +71,7 @@ export type State = {
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -92,6 +98,7 @@ export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
 export { contentSignature } from '@agent-stream/shared';
 
+const selection = (m: ModelSelection): ModelSelection => ({ ...(m.model && { model: m.model }), ...(m.effort && { effort: m.effort }) });
 const sameTarget = (a?: ChatTarget, b?: ChatTarget) => !!a && !!b && a.graphId === b.graphId && a.sessionId === b.sessionId;
 const forTarget = (s: State, graphId: string, sessionId: string) => s.chatTarget?.graphId === graphId && s.chatTarget.sessionId === sessionId;
 
@@ -212,9 +219,13 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'approvals':
       return { ...state, approvals: msg.approvals };
     case 'chatTarget':
-      return sameTarget(state.chatTarget, msg.target) ? { ...state, chatTarget: msg.target } : { ...state, chatTarget: msg.target, chat: [], chatBusy: false };
+      return sameTarget(state.chatTarget, msg.target) ? { ...state, chatTarget: msg.target } : { ...state, chatTarget: msg.target, chat: [], chatBusy: false, plannerModel: {} };
     case 'chatOpened':
-      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: msg.chat, chatBusy: msg.busy } : state;
+      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: msg.chat, chatBusy: msg.busy, plannerModel: selection(msg) } : state;
+    case 'plannerModel':
+      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, plannerModel: selection(msg) } : state;
+    case 'models':
+      return { ...state, models: msg.models };
     case 'chatEntry':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':

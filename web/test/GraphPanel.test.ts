@@ -123,8 +123,8 @@ describe('TopBar run picker', () => {
     await act(async () => r.render(createElement(TopBar)));
     const options = [...c.querySelectorAll<HTMLOptionElement>('select[aria-label="Run"] option')];
     expect(options.map((o) => o.textContent)).toEqual(['Run r1 · Succeeded · 2 changes by agents', 'Run r2 · Succeeded · 1 change by agents', 'Run r3 · Failed']);
-    expect(options[0].title).toBe(`n1 wants to change n2's prompt\nn1 wants to add step "Install" after n1, before n2`);
-    expect(options[1].title).toBe('');
+    expect(options[0].title).toBe(`n1 wants to change n2's prompt\nn1 wants to add step "Install" after n1, before n2\nModel: Default · Effort: Default`);
+    expect(options[1].title).toBe('Model: Default · Effort: Default');
     await act(async () => r.unmount());
   });
 });
