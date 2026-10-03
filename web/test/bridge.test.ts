@@ -18,11 +18,7 @@ describe('bridge', () => {
     expect(posted.at(-1)).toEqual({ type: 'openGraph', graphId: 'parity' });
     deliver({ type: 'graphOpened', graph: emptyGraph('parity', 'Parity', 't'), runs: [], variableValues: {} });
     expect(getState().graph?.id).toBe('parity');
-    // Then it asks for the Default session's chat (interim, until the chat view).
-    expect(posted.slice(-2)).toEqual([
-      { type: 'opened', graphId: 'parity' },
-      { type: 'openChat', graphId: 'parity', sessionId: 'default' },
-    ]);
+    expect(posted.at(-1)).toEqual({ type: 'opened', graphId: 'parity' });
   });
 
   it('ignores messages that are not from the extension', () => {

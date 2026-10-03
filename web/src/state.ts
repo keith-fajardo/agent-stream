@@ -1,6 +1,7 @@
 import type {
   ApprovalRequest,
   ChatEntry,
+  ChatTarget,
   Graph,
   GraphListItem,
   HostMessage,
@@ -11,7 +12,7 @@ import type {
   RunSummary,
 } from '@agent-stream/shared';
 
-export type Tab = 'chat' | 'node' | 'graph';
+export type Tab = 'node' | 'graph';
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
 
 export type State = {
@@ -28,6 +29,8 @@ export type State = {
   approvals: ApprovalRequest[];
   chat: ChatEntry[];
   chatBusy: boolean;
+  /** The planner conversation the chat view shows; the extension picks it. */
+  chatTarget?: ChatTarget;
   confirm?: ConfirmRequest;
   variableValues: Record<string, string>;
   preview?: RunPreview;
@@ -41,7 +44,7 @@ export type State = {
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'chat', minimap: true, logsHidden: false };
+export const initialState: State = { connected: false, graphs: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, logsHidden: false };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -60,6 +63,9 @@ export type Action =
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
 export { contentSignature } from '@agent-stream/shared';
+
+const sameTarget = (a?: ChatTarget, b?: ChatTarget) => !!a && !!b && a.graphId === b.graphId && a.sessionId === b.sessionId;
+const forTarget = (s: State, graphId: string, sessionId: string) => s.chatTarget?.graphId === graphId && s.chatTarget.sessionId === sessionId;
 
 export function reduce(state: State, action: Action): State {
   switch (action.kind) {
@@ -101,7 +107,7 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, graphs: msg.graphs };
     case 'graphDeleted':
       return msg.graphId === current
-        ? { ...state, graph: undefined, run: undefined, runs: [], chat: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
+        ? { ...state, graph: undefined, run: undefined, runs: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
         : state;
     case 'graphOpened':
       return {
@@ -145,13 +151,14 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, logs: { ...state.logs, [logKey(msg.runId, msg.nodeId)]: msg.events } };
     case 'approvals':
       return { ...state, approvals: msg.approvals };
-    // Interim (ruling P5): the tab shows the Default session's chat until the chat view replaces it.
+    case 'chatTarget':
+      return sameTarget(state.chatTarget, msg.target) ? { ...state, chatTarget: msg.target } : { ...state, chatTarget: msg.target, chat: [], chatBusy: false };
     case 'chatOpened':
-      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chat: msg.chat, chatBusy: msg.busy } : state;
+      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: msg.chat, chatBusy: msg.busy } : state;
     case 'chatEntry':
-      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chat: [...state.chat, msg.entry] } : state;
+      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':
-      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chatBusy: msg.busy } : state;
+      return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chatBusy: msg.busy } : state;
     case 'sessions':
       return state;
     case 'confirmRun':

@@ -3,13 +3,14 @@ import { createRoot } from 'react-dom/client';
 import '@xyflow/react/dist/style.css';
 import './styles.css';
 import { App } from './App';
+import { ChatApp } from './ChatApp';
 import { connect } from './bridge';
+import { connectChat } from './chatBridge';
 import { dispatch } from './store';
+import { viewMode } from './viewMode';
 
-dispatch({ kind: 'setMinimap', value: document.body.dataset.minimap !== 'false' });
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
-connect();
+const view = viewMode(document.body.dataset);
+if (view === 'graph') dispatch({ kind: 'setMinimap', value: document.body.dataset.minimap !== 'false' });
+createRoot(document.getElementById('root')!).render(<StrictMode>{view === 'chat' ? <ChatApp /> : <App />}</StrictMode>);
+if (view === 'chat') connectChat();
+else connect();

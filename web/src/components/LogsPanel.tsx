@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { fmtDuration, statusLabel } from '@agent-stream/shared';
+import { PROVIDER_NAMES, fmtDuration, statusLabel } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
@@ -48,6 +48,7 @@ export function LogsPanel() {
           Logs · {node.id} {node.title}
           {state && ` · ${statusLabel(state.status)}`}
           {state?.durationMs !== undefined && ` · ${fmtDuration(state.durationMs)}`}
+          {run?.provider && ` · ${PROVIDER_NAMES[run.provider]}`}
         </span>
         <button className="link" aria-label="Close logs" onClick={() => dispatch({ kind: 'selectNode' })}>
           ✕

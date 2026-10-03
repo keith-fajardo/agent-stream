@@ -241,14 +241,18 @@ export type ClientMessage =
   | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string };
 
 /** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
-export type HostCommand = 'newGraph' | 'openGraph' | 'importGraph' | 'exportGraph' | 'renameGraph' | 'duplicateGraph' | 'deleteGraph' | 'showSidebar';
+export type ChatTarget = { graphId: string; graphName: string; sessionId: string; sessionName: string };
+
+export type HostCommand = 'newGraph' | 'openGraph' | 'importGraph' | 'exportGraph' | 'renameGraph' | 'duplicateGraph' | 'deleteGraph' | 'showSidebar' | 'focusChat';
 
 /** Messages a graph tab sends that the extension handles itself (not the engine). */
 export type WebviewHostMessage =
   | { type: 'ready' }
   | { type: 'opened'; graphId: string }
   | { type: 'host'; command: HostCommand }
-  | { type: 'setMinimap'; value: boolean };
+  | { type: 'setMinimap'; value: boolean }
+  | { type: 'chatCommand'; command: 'switchSession' | 'newChat' }
+  | { type: 'draftState'; dirty: boolean };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 
@@ -258,4 +262,5 @@ export type HostMessage =
   | { type: 'revealNode'; nodeId: string }
   | { type: 'openRunDialog'; fromNodeId?: string; sourceRunId?: string }
   | { type: 'openVariables' }
-  | { type: 'prefs'; minimap: boolean };
+  | { type: 'prefs'; minimap: boolean }
+  | { type: 'chatTarget'; target?: ChatTarget };

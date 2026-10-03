@@ -51,12 +51,17 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'opened', graphId: 'g' })).toEqual({ ok: true, kind: 'host', msg: { type: 'opened', graphId: 'g' } });
     expect(parseWebviewMessage({ type: 'host', command: 'exportGraph' })).toEqual({ ok: true, kind: 'host', msg: { type: 'host', command: 'exportGraph' } });
     expect(parseWebviewMessage({ type: 'setMinimap', value: false }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'chatCommand', command: 'switchSession' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'chatCommand', command: 'newChat' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'draftState', dirty: true })).toEqual({ ok: true, kind: 'host', msg: { type: 'draftState', dirty: true } });
+    expect(parseWebviewMessage({ type: 'host', command: 'focusChat' }).ok).toBe(true);
   });
 
   it('rejects unknown types, bad fields and oversized values', () => {
     expect(parseWebviewMessage('{nope').ok).toBe(false);
     expect(parseWebviewMessage({ type: 'format_disk' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'host', command: 'rm' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'chatCommand', command: 'other' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'decide', approvalId: 'a', decision: 'maybe' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'startRun', graphId: 'g' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) }).ok).toBe(false);

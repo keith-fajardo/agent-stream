@@ -5,7 +5,7 @@ import { useStore } from '../store';
 export function ChatPanel() {
   const chat = useStore((s) => s.chat);
   const busy = useStore((s) => s.chatBusy);
-  const graph = useStore((s) => s.graph);
+  const target = useStore((s) => s.chatTarget);
   const status = useStore((s) => s.status);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
@@ -14,11 +14,11 @@ export function ChatPanel() {
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
   }, [chat.length, busy]);
-  const canType = !!graph && !!status?.ok;
+  const canType = !!target && !!status?.ok;
   const submit = () => {
     const t = text.trim();
-    if (!t || !graph || !canType || busy) return;
-    send({ type: 'chat', graphId: graph.id, sessionId: 'default', text: t });
+    if (!t || !target || !canType || busy) return;
+    send({ type: 'chat', graphId: target.graphId, sessionId: target.sessionId, text: t });
     setText('');
   };
   return (

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { GraphNode, NodeKind, NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
-import { send } from '../bridge';
+import { post, send } from '../bridge';
 import { useStore } from '../store';
 
 type Draft = { title: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
@@ -34,6 +34,10 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
+  useEffect(() => {
+    post({ type: 'draftState', dirty });
+  }, [dirty]);
+  useEffect(() => () => post({ type: 'draftState', dirty: false }), []);
   const changedUnderneath = node.updatedAt !== base.at;
 
   useEffect(() => {

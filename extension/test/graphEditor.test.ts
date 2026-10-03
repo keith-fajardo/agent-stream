@@ -174,6 +174,7 @@ describe('hostCommandArgs', () => {
     const panel = { folder: f, graphId: 'g' };
     expect(hostCommandArgs('openGraph', panel)).toEqual([]);
     expect(hostCommandArgs('showSidebar', panel)).toEqual([]);
+    expect(hostCommandArgs('focusChat', panel)).toEqual([]);
     expect(hostCommandArgs('newGraph', panel)).toEqual([{ folder: f }]);
     expect(hostCommandArgs('importGraph', panel)).toEqual([{ folder: f }]);
     expect(hostCommandArgs('deleteGraph', panel)).toEqual([{ folder: f, graphId: 'g' }]);

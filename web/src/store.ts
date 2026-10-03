@@ -8,6 +8,12 @@ export function getState(): State {
   return state;
 }
 
+/** Test-only: puts the store back to its initial state. */
+export function resetStoreForTests(): void {
+  state = initialState;
+  for (const listener of listeners) listener();
+}
+
 export function dispatch(action: Action): void {
   state = reduce(state, action);
   for (const listener of listeners) listener();

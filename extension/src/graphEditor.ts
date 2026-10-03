@@ -207,7 +207,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
 
 /** What a tab's menu passes to `agentStream.<command>`: Open… must show the picker, New/Import act on the folder. */
 export function hostCommandArgs(command: HostCommand, panel: { folder: Folder; graphId: string }): unknown[] {
-  if (command === 'openGraph' || command === 'showSidebar') return [];
+  if (command === 'openGraph' || command === 'showSidebar' || command === 'focusChat') return [];
   if (command === 'newGraph' || command === 'importGraph') return [{ folder: panel.folder }];
   return [{ folder: panel.folder, graphId: panel.graphId }];
 }

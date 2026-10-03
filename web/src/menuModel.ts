@@ -70,7 +70,7 @@ export function buildMenus(s: State): Menu[] {
         item('Logs panel', selected, actions.toggleLogs, { checked: selected && !s.logsHidden }),
         item('Minimap', hasGraph, actions.toggleMinimap, { checked: s.minimap }),
         SEPARATOR,
-        tab('Chat', 'chat'),
+        host('Chat', 'focusChat'),
         tab('Node', 'node'),
         tab('Graph', 'graph'),
         SEPARATOR,

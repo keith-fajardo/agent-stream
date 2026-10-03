@@ -56,6 +56,13 @@ describe('LogsPanel', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  it("names the run's provider in the header, and nothing when the run has none", async () => {
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    expect(text()).not.toContain('GitHub Copilot');
+    await act(async () => server({ type: 'run', run: { ...run, provider: 'copilot' } }));
+    expect(container.querySelector('.logs-head')?.textContent).toContain('GitHub Copilot');
+  });
+
   it("shows the selected step's status, error and log timeline, requesting the log once", async () => {
     await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
     expect(text()).toContain('Logs · n2 Build new');

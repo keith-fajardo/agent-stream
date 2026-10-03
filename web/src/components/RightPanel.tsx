@@ -1,10 +1,9 @@
 import type { Tab } from '../state';
 import { dispatch, useStore } from '../store';
-import { ChatPanel } from './ChatPanel';
 import { GraphPanel } from './GraphPanel';
 import { NodePanel } from './NodePanel';
 
-const LABELS: Record<Tab, string> = { chat: 'Chat', node: 'Node', graph: 'Graph' };
+const LABELS: Record<Tab, string> = { node: 'Node', graph: 'Graph' };
 
 export function RightPanel() {
   const tab = useStore((s) => s.tab);
@@ -17,7 +16,7 @@ export function RightPanel() {
           </button>
         ))}
       </nav>
-      <div className="tab-body">{tab === 'chat' ? <ChatPanel /> : tab === 'node' ? <NodePanel /> : <GraphPanel />}</div>
+      <div className="tab-body">{tab === 'node' ? <NodePanel /> : <GraphPanel />}</div>
     </aside>
   );
 }

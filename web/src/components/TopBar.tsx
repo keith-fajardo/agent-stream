@@ -1,4 +1,4 @@
-import { statusLabel } from '@agent-stream/shared';
+import { PROVIDER_NAMES, statusLabel } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { useStore } from '../store';
@@ -23,7 +23,7 @@ export function TopBar() {
         <select aria-label="Run" value={run?.id ?? ''} onChange={(e) => send({ type: 'selectRun', runId: e.target.value })}>
           {runs.map((r) => (
             <option key={r.id} value={r.id}>
-              Run {r.id} · {statusLabel(r.status)}
+              {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}`}
             </option>
           ))}
         </select>

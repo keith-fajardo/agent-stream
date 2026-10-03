@@ -9,6 +9,7 @@ const { send } = await import('../src/bridge');
 const { dispatch } = await import('../src/store');
 const { GraphPanel } = await import('../src/components/GraphPanel');
 const { RightPanel } = await import('../src/components/RightPanel');
+const { TopBar } = await import('../src/components/TopBar');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 Element.prototype.scrollIntoView = vi.fn() as unknown as Element['scrollIntoView'];
@@ -58,11 +59,27 @@ describe('GraphPanel', () => {
 });
 
 describe('RightPanel', () => {
-  it('has Chat, Node and Graph tabs', async () => {
+  it('has Node and Graph tabs', async () => {
     const c = document.createElement('div');
     const r = createRoot(c);
     await act(async () => r.render(createElement(RightPanel)));
-    expect([...c.querySelectorAll('.tabs button')].map((b) => b.textContent)).toEqual(['Chat', 'Node', 'Graph']);
+    expect([...c.querySelectorAll('.tabs button')].map((b) => b.textContent)).toEqual(['Node', 'Graph']);
+    await act(async () => r.unmount());
+  });
+});
+
+describe('TopBar run picker', () => {
+  it('names the provider of each run', async () => {
+    dispatch({
+      kind: 'server',
+      msg: { type: 'graphOpened', graph: graph(), runs: [{ id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', provider: 'claude' }, { id: 'r2', graphId: 'g', status: 'failed', startedAt: 't' }], variableValues: {} },
+    });
+    const c = document.createElement('div');
+    const r = createRoot(c);
+    await act(async () => r.render(createElement(TopBar)));
+    const options = [...c.querySelectorAll('select[aria-label="Run"] option')].map((o) => o.textContent);
+    expect(options[0]).toContain('Claude');
+    expect(options[1]).not.toContain('Claude');
     await act(async () => r.unmount());
   });
 });
