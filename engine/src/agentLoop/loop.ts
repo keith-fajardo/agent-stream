@@ -1,6 +1,7 @@
 import type { ToolGate } from '../providers/toolGate';
 import type { ChatMessage, ChatModel, ChatPart } from './chatModel';
 import type { LoopTool, ToolOutput } from './tools';
+import { compactIfNeeded } from './compact';
 
 export type LoopResult =
   | { ok: true; text: string; requests: number; messages: ChatMessage[] }
@@ -113,6 +114,10 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
   try {
     for (;;) {
       o.signal.throwIfAborted();
+      // A summary only when it and the real request both fit under the (normalised) cap (ruling R5).
+      const compacted = await compactIfNeeded({ model: o.model, system: o.system, messages, tools: specs, signal: o.signal, canSummarise: requests + 1 < maxRequests });
+      requests += compacted.requests;
+      messages = compacted.messages;
       const parts: ChatPart[] = [];
       requests++;
       for await (const part of o.model.send([userText(o.system), ...messages], specs, o.signal)) parts.push(part);
