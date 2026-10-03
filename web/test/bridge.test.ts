@@ -16,9 +16,13 @@ describe('bridge', () => {
     deliver({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
     expect(getState().status).toEqual({ provider: 'claude', ok: true, label: 'Claude Max' });
     expect(posted.at(-1)).toEqual({ type: 'openGraph', graphId: 'parity' });
-    deliver({ type: 'graphOpened', graph: emptyGraph('parity', 'Parity', 't'), chat: [], chatBusy: false, runs: [], variableValues: {} });
+    deliver({ type: 'graphOpened', graph: emptyGraph('parity', 'Parity', 't'), runs: [], variableValues: {} });
     expect(getState().graph?.id).toBe('parity');
-    expect(posted.at(-1)).toEqual({ type: 'opened', graphId: 'parity' });
+    // Then it asks for the Default session's chat (interim, until the chat view).
+    expect(posted.slice(-2)).toEqual([
+      { type: 'opened', graphId: 'parity' },
+      { type: 'openChat', graphId: 'parity', sessionId: 'default' },
+    ]);
   });
 
   it('ignores messages that are not from the extension', () => {

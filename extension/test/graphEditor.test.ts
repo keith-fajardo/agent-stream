@@ -52,7 +52,7 @@ describe('graph tab messages', () => {
       };
     });
     s.handler.handle({ type: 'ready' });
-    expect(s.received.map((m) => m.type)).toEqual(['hello']);
+    expect(s.received.map((m) => m.type)).toEqual(['hello', 'sessions']);
     s.handler.handle({ type: 'ready' }); // the page reloaded
     expect(active).toBe(1);
     s.received.length = 0;

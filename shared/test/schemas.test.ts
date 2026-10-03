@@ -61,6 +61,28 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'startRun', graphId: 'g' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) }).ok).toBe(false);
   });
+
+  it('accepts chat messages for a work session, and refuses chat without one', () => {
+    for (const msg of [
+      { type: 'openChat', graphId: 'g', sessionId: 'default' },
+      { type: 'chat', graphId: 'g', sessionId: 'default', text: 'hi' },
+      { type: 'newChat', graphId: 'g', sessionId: 'default' },
+    ]) {
+      expect(parseWebviewMessage(msg)).toEqual({ ok: true, kind: 'engine', msg });
+    }
+    expect(parseWebviewMessage({ type: 'chat', graphId: 'g', text: 'hi' }).ok).toBe(false);
+  });
+});
+
+describe('graph files from before work sessions', () => {
+  it('parses an old graph file with planner fields and drops them', () => {
+    const r = parseGraph({ id: 'g', name: 'G', plannerSessionId: 's', plannerOpCursor: 2 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.graph).not.toHaveProperty('plannerSessionId');
+      expect(r.graph).not.toHaveProperty('plannerOpCursor');
+    }
+  });
 });
 
 describe('format', () => {

@@ -4,9 +4,10 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
-import { createApp, type AppDeps } from '../src/app';
+import { createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { createClaudeProvider } from '../src/providers/claude';
+import type { PlannerTurnResult } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { deferred, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
@@ -48,6 +49,26 @@ async function reviewed(app: ReturnType<typeof setup>['app'], c: TestClient, gra
   await app.handle(c.c, { type: 'previewRun', graphId, ...extra });
   return c.of('runPreview').at(-1)!.preview;
 }
+
+/** An App with one graph; `over` replaces its dependencies (a planner provider, say). */
+function setupWithGraph(over: Partial<AppDeps> = {}) {
+  const paths = tmpProject();
+  const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, gitBash: testGitBash, ...over });
+  const graphId = app.graphStore.create('G').id;
+  return { app, graphId };
+}
+
+/** A connected client that records what it receives. */
+function client(app: App) {
+  const msgs: ServerMessage[] = [];
+  const c = { send: (m: ServerMessage) => void msgs.push(structuredClone(m)) };
+  app.connect(c);
+  const all = <T extends ServerMessage['type']>(type: T) => msgs.filter((m): m is Extract<ServerMessage, { type: T }> => m.type === type);
+  const last = <T extends ServerMessage['type']>(type: T) => all(type).at(-1)!;
+  return { client: c, msgs, all, last };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('app', () => {
   it('greets a client with auth, graphs and pending approvals', () => {
@@ -110,7 +131,7 @@ describe('app', () => {
     await app.handle(a.c, { type: 'selectRun', runId });
     expect(a.of('run').at(-1)).toMatchObject({ select: true, run: { id: runId } });
     await app.handle(a.c, { type: 'openGraph', graphId: g.id });
-    expect(a.of('graphOpened')[0]).toMatchObject({ graph: { id: g.id }, chat: [], chatBusy: false, runs: [{ id: runId }], run: { id: runId } });
+    expect(a.of('graphOpened')[0]).toMatchObject({ graph: { id: g.id }, runs: [{ id: runId }], run: { id: runId } });
   });
 
   it('refuses to start a run when the graph changed after the user reviewed it', async () => {
@@ -132,7 +153,7 @@ describe('app', () => {
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
     await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
-    await app.handle(a.c, { type: 'chat', graphId: g.id, text: 'hi' });
+    await app.handle(a.c, { type: 'chat', graphId: g.id, sessionId: 'default', text: 'hi' });
     expect(a.of('error').map((m) => m.message)).toEqual(['Runs are disabled: Not signed in.', 'Chat is disabled: Not signed in.']);
     expect(a.of('run')).toEqual([]);
   });
@@ -217,8 +238,8 @@ describe('app', () => {
     const c = { send: (m: ServerMessage) => void sent.push(m) };
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-    await app.handle(c, { type: 'chat', graphId: g.id, text: 'hi' });
-    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(false));
+    await app.handle(c, { type: 'chat', graphId: g.id, sessionId: 'default', text: 'hi' });
+    await vi.waitFor(() => expect(app.planner.isBusy('default', g.id)).toBe(false));
     await app.handle(c, { type: 'previewRun', graphId: g.id });
     const preview = sent.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
     await app.handle(c, { type: 'startRun', graphId: g.id, reviewed: preview.signature });
@@ -391,12 +412,12 @@ describe('app', () => {
     });
     const c = { send: () => {} };
     const g = app.graphStore.create('G');
-    await app.handle(c, { type: 'chat', graphId: g.id, text: 'hi' });
-    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(true));
+    await app.handle(c, { type: 'chat', graphId: g.id, sessionId: 'default', text: 'hi' });
+    await vi.waitFor(() => expect(app.planner.isBusy('default', g.id)).toBe(true));
     expect(app.deleteGraph(g.id)).toEqual({ ok: false, error: "The planner is still working on this graph. Try again when it's done." });
     expect(app.graphStore.load(g.id).ok).toBe(true);
     gate.release();
-    await vi.waitFor(() => expect(app.planner.isBusy(g.id)).toBe(false));
+    await vi.waitFor(() => expect(app.planner.isBusy('default', g.id)).toBe(false));
     expect(app.deleteGraph(g.id)).toEqual({ ok: true });
   });
 
@@ -419,6 +440,83 @@ describe('app', () => {
     await app.handle(c, { type: 'previewRun', graphId: g.id });
     const preview = msgs.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
     expect(preview.problems).toEqual(['Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.']);
+  });
+
+  describe('work sessions', () => {
+    it('migrates legacy planner state and chats into the Default session on start', () => {
+      const paths = tmpProject();
+      writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ id: 'g1', name: 'G', goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: 't', plannerSessionId: 's', plannerOpCursor: 2 }));
+      writeFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), `${JSON.stringify({ at: 't', role: 'user', text: 'old' })}\n`);
+      const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+      expect(app.sessionStore.plannerState('default', 'g1')).toEqual({ sessionId: 's', provider: 'claude', opCursor: 2 });
+      expect(app.sessionStore.chatLog('default').read('g1').map((e) => e.text)).toEqual(['old']);
+      expect(app.startupWarnings()).toEqual([]);
+    });
+
+    it('sends each chat only to the clients subscribed to that conversation', async () => {
+      const { app, graphId } = setupWithGraph();
+      app.createSession('B');
+      const a = client(app),
+        b = client(app);
+      await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+      await app.handle(b.client, { type: 'openChat', graphId, sessionId: 'b' });
+      expect(a.last('chatOpened')).toEqual({ type: 'chatOpened', graphId, sessionId: 'default', chat: [], busy: false });
+      await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'hello' });
+      await flush();
+      expect(a.all('chatEntry').map((m) => m.entry.text)).toContain('hello');
+      expect(b.all('chatEntry')).toEqual([]);
+    });
+
+    it('refuses chat for an unknown session, and cleans every session when a graph is deleted', async () => {
+      const { app, graphId } = setupWithGraph();
+      const a = client(app);
+      await app.handle(a.client, { type: 'chat', graphId, sessionId: 'nope', text: 'x' });
+      expect(a.last('error')).toEqual({ type: 'error', message: 'session "nope" not found' });
+      app.saveSessionTabs('default', [{ graphId, group: 1, index: 0 }], graphId);
+      expect(app.deleteGraph(graphId)).toEqual({ ok: true });
+      expect(app.sessionStore.get('default').tabs).toEqual([]);
+    });
+
+    it('broadcasts the session list on every change, and refuses to delete a session whose planner is busy', async () => {
+      const held = deferred<PlannerTurnResult>();
+      const { app, graphId } = setupWithGraph({ provider: testProvider({ planTurn: () => held.promise }) });
+      const watcher = client(app);
+      const b = app.createSession('B');
+      expect(app.renameSession(b.id, 'Bee')).toMatchObject({ ok: true });
+      const copy = app.duplicateSession(b.id);
+      expect(copy).toMatchObject({ ok: true });
+      expect(watcher.all('sessions').map((m) => m.sessions.map((s) => s.name).sort())).toEqual([
+        ['Default'], // on connect
+        ['B', 'Default'],
+        ['Bee', 'Default'],
+        ['Bee', 'Bee copy', 'Default'],
+      ]);
+      await app.handle(watcher.client, { type: 'chat', graphId, sessionId: b.id, text: 'slow' });
+      await flush();
+      expect(app.deleteSession(b.id)).toEqual({ ok: false, error: "The planner is still working in this session. Try again when it's done." });
+      held.resolve({ ok: true });
+      await flush();
+      expect(app.deleteSession(b.id)).toEqual({ ok: true });
+      expect(watcher.last('sessions').sessions.map((s) => s.id).sort()).toEqual(['bee-copy', 'default']);
+    });
+
+    it('sends the session list right after hello, and starts a new chat only for its own subscribers', async () => {
+      const { app, graphId } = setupWithGraph();
+      app.createSession('B');
+      const a = client(app),
+        b = client(app);
+      expect(a.msgs.slice(0, 2).map((m) => m.type)).toEqual(['hello', 'sessions']);
+      await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+      await app.handle(b.client, { type: 'openChat', graphId, sessionId: 'b' });
+      await app.handle(a.client, { type: 'chat', graphId, sessionId: 'default', text: 'hello' });
+      await flush();
+      await app.handle(a.client, { type: 'newChat', graphId, sessionId: 'default' });
+      expect(a.last('chatOpened')).toEqual({ type: 'chatOpened', graphId, sessionId: 'default', chat: [], busy: false });
+      expect(app.sessionStore.chatLog('default').read(graphId)).toEqual([]);
+      expect(b.all('chatOpened')).toHaveLength(1);
+      await app.handle(a.client, { type: 'newChat', graphId, sessionId: 'nope' });
+      expect(a.last('error')).toEqual({ type: 'error', message: 'session "nope" not found' });
+    });
   });
 
   describe('for the extension', () => {

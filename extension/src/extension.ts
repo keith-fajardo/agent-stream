@@ -33,6 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
     approvals: () => {},
     confirmRun: () => {},
     graphDeleted: () => {},
+    sessions: () => {},
     auth: showAuth,
     warning: (message) => void vscode.window.showWarningMessage(message),
   };

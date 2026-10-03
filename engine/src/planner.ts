@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events';
 import type { ChatEntry, ChatRole, Op, OpRecord } from '@agent-stream/shared';
-import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
 import { graphTools } from './plannerTools';
 import { createPlannerGate } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import type { RunStore } from './runStore';
+import type { SessionStore } from './sessionStore';
 
 const SESSION_RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
 
@@ -79,7 +79,8 @@ export function describeToolCall(name: string, input: unknown): string {
 export type PlannerDeps = {
   graphStore: GraphStore;
   runStore: RunStore;
-  chatLog: ChatLog;
+  /** Where each work session keeps its planner conversations: chats and provider state per graph. */
+  sessions: SessionStore;
   projectDir: string;
   /** The provider that runs planner turns, read per turn: the user can switch it at any time. */
   provider: () => AgentProvider;
@@ -89,8 +90,15 @@ export type PlannerDeps = {
   clock?: Clock;
 };
 
-/** The chat agent: one resumable provider conversation per graph. Events: 'entry', 'busy'. */
+const STILL_WORKING = 'The planner is still working on your previous message.';
+const key = (sessionId: string, graphId: string) => `${sessionId}|${graphId}`;
+
+/**
+ * The chat agent: one resumable provider conversation per work session and graph.
+ * Events: 'entry'(sessionId, graphId, entry), 'busy'(sessionId, graphId, busy), 'cleared'(sessionId, graphId).
+ */
 export class Planner extends EventEmitter {
+  /** `${sessionId}|${graphId}` of the conversations with a turn running. */
   private busy = new Set<string>();
   private clock: Clock;
 
@@ -99,73 +107,95 @@ export class Planner extends EventEmitter {
     this.clock = d.clock ?? systemClock;
   }
 
-  isBusy(graphId: string): boolean {
-    return this.busy.has(graphId);
+  isBusy(sessionId: string, graphId: string): boolean {
+    return this.busy.has(key(sessionId, graphId));
   }
 
-  private add(graphId: string, role: ChatRole, text: string): void {
+  isBusyInGraph(graphId: string): boolean {
+    return [...this.busy].some((k) => k.slice(k.indexOf('|') + 1) === graphId);
+  }
+
+  isBusyInSession(sessionId: string): boolean {
+    return [...this.busy].some((k) => k.slice(0, k.indexOf('|')) === sessionId);
+  }
+
+  private add(sessionId: string, graphId: string, role: ChatRole, text: string): void {
     const entry: ChatEntry = { at: this.clock(), role, text };
-    this.d.chatLog.append(graphId, entry);
-    this.emit('entry', graphId, entry);
+    this.d.sessions.chatLog(sessionId).append(graphId, entry);
+    this.emit('entry', sessionId, graphId, entry);
+  }
+
+  /** "New chat": forgets this session's conversation for the graph (its chat and provider session). */
+  newChat(sessionId: string, graphId: string): { ok: true } | { ok: false; error: string } {
+    if (this.isBusy(sessionId, graphId)) return { ok: false, error: STILL_WORKING };
+    this.d.sessions.clearPlanner(sessionId, graphId);
+    this.emit('cleared', sessionId, graphId);
+    return { ok: true };
   }
 
   /** Never rejects: failures become chat errors, or are logged when even that is impossible. */
-  async send(graphId: string, text: string): Promise<void> {
-    if (this.busy.has(graphId)) {
+  async send(sessionId: string, graphId: string, text: string): Promise<void> {
+    const k = key(sessionId, graphId);
+    if (this.busy.has(k)) {
       try {
-        this.add(graphId, 'error', 'The planner is still working on your previous message.');
+        this.add(sessionId, graphId, 'error', STILL_WORKING);
       } catch (e) {
         console.error('[agent-stream] planner error', e);
       }
       return;
     }
-    this.busy.add(graphId);
+    this.busy.add(k);
     const abortController = new AbortController();
+    /** The provider conversation this turn resumes, if any. */
+    let resume: string | undefined;
     try {
-      this.emit('busy', graphId, true);
-      this.add(graphId, 'user', text);
+      this.emit('busy', sessionId, graphId, true);
+      this.add(sessionId, graphId, 'user', text);
       // Re-checked per turn: the project's settings can change while VS Code runs.
       const provider = this.d.provider();
       const problem = provider.folderProblem?.(this.d.projectDir);
       if (problem) {
-        this.add(graphId, 'error', problem);
+        this.add(sessionId, graphId, 'error', problem);
         return;
       }
-      const graph = this.d.graphStore.get(graphId);
+      const state = this.d.sessions.plannerState(sessionId, graphId);
+      // State saved before providers existed is Claude's. Another provider can't resume it, so it starts fresh.
+      const sameProvider = (state.provider ?? 'claude') === provider.id;
+      if (state.sessionId && !sameProvider) this.add(sessionId, graphId, 'note', `Started a new planner conversation with ${provider.name}; it doesn't see earlier messages.`);
+      resume = sameProvider ? state.sessionId : undefined;
       const ops = this.d.graphStore.readOps(graphId);
       const cursor = ops.length;
       const tools = graphTools({ graphStore: this.d.graphStore, runStore: this.d.runStore, graphId, requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId) });
       const r = await provider.planTurn({
-        prompt: userEditsPreamble(ops.slice(graph.plannerOpCursor ?? 0)) + text,
+        prompt: userEditsPreamble(ops.slice(state.opCursor ?? 0)) + text,
         systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
         tools,
-        resume: graph.plannerSessionId,
+        resume,
         gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
         signal: abortController.signal,
-        onEvent: (e) => (e.type === 'text' ? this.add(graphId, 'assistant', e.text) : this.add(graphId, 'tool', describeToolCall(e.name, e.input))),
+        onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),
       });
       if (!r.ok) {
         // A conversation that could not be resumed is dropped, so the next message starts fresh instead of failing the same way forever.
-        if (r.resumeFailed) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
-        this.add(graphId, 'error', r.resumeFailed ? `${r.error}${SESSION_RESET_NOTE}` : r.error);
+        if (r.resumeFailed) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });
+        this.add(sessionId, graphId, 'error', r.resumeFailed ? `${r.error}${SESSION_RESET_NOTE}` : r.error);
         return;
       }
-      if (r.error) this.add(graphId, 'error', r.error);
-      this.d.graphStore.setPlannerState(graphId, { plannerSessionId: r.sessionId ?? graph.plannerSessionId, plannerOpCursor: cursor });
+      if (r.error) this.add(sessionId, graphId, 'error', r.error);
+      this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: r.sessionId ?? resume, provider: provider.id, opCursor: cursor });
     } catch (e) {
       try {
-        const hadSession = !!this.d.graphStore.load(graphId).ok && !!this.d.graphStore.get(graphId).plannerSessionId;
-        if (hadSession) this.d.graphStore.setPlannerState(graphId, { plannerSessionId: undefined });
+        if (resume) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });
         const message = e instanceof Error ? e.message : String(e);
-        this.add(graphId, 'error', hadSession ? `${message}${SESSION_RESET_NOTE}` : message);
+        this.add(sessionId, graphId, 'error', resume ? `${message}${SESSION_RESET_NOTE}` : message);
       } catch (inner) {
         console.error('[agent-stream] planner error', e, inner);
       }
     } finally {
-      this.busy.delete(graphId);
+      this.busy.delete(k);
       try {
-        this.emit('busy', graphId, false);
+        this.emit('busy', sessionId, graphId, false);
       } catch (e) {
         console.error('[agent-stream] planner error', e);
       }

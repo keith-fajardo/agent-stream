@@ -13,9 +13,11 @@ import {
   type Op,
   type RunMeta,
   type ServerMessage,
+  type Session,
+  type SessionResult,
+  type SessionTab,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
-import { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
@@ -29,6 +31,7 @@ import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { Runner } from './runner';
 import { RunStore } from './runStore';
+import { migrateLegacy, SessionStore } from './sessionStore';
 import type { EnvLookup } from './templates';
 import { VariableValues } from './variableValues';
 
@@ -71,7 +74,10 @@ export function createApp(d: AppDeps) {
   if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
   ensureDataDirs(paths);
   const graphStore = new GraphStore(paths, clock);
-  const chatLog = new ChatLog(paths.graphsDir);
+  const sessions = new SessionStore(paths, clock);
+  // Planner state and chats from before work sessions move into the Default session.
+  migrationWarnings.push(...migrateLegacy(paths, sessions));
+  sessions.ensureDefault();
   const runStore = new RunStore(paths);
   const platform = d.platform ?? process.platform;
   const env = d.env ?? envLookup(process.env, platform);
@@ -109,6 +115,11 @@ export function createApp(d: AppDeps) {
   const broadcast = (msg: ServerMessage) => {
     for (const c of clients) c.send(msg);
   };
+  /** The one planner conversation each client shows (openChat). */
+  const chatSubscriptions = new Map<Client, { graphId: string; sessionId: string }>();
+  const toConversation = (sessionId: string, graphId: string, msg: ServerMessage) => {
+    for (const [c, sub] of chatSubscriptions) if (sub.graphId === graphId && sub.sessionId === sessionId) c.send(msg);
+  };
 
   /** Planner's request_run: validate, then let the user confirm in the browser. */
   function listGraphs(): GraphListItem[] {
@@ -140,10 +151,11 @@ export function createApp(d: AppDeps) {
   }
   function deleteGraph(id: string): { ok: true } | { ok: false; error: string } {
     if (runner.activeFor(id)) return { ok: false, error: 'Stop the run first.' };
-    if (planner.isBusy(id)) return { ok: false, error: "The planner is still working on this graph. Try again when it's done." };
+    if (planner.isBusyInGraph(id)) return { ok: false, error: "The planner is still working on this graph. Try again when it's done." };
     const r = graphStore.delete(id);
     if (!r.ok) return r;
     values.deleteGraph(id);
+    sessions.removeGraph(id);
     broadcast({ type: 'graphDeleted', graphId: id });
     broadcastGraphs();
     return r;
@@ -170,7 +182,29 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, provider: () => provider, privateFiles, requestRun, clock });
+  const planner = new Planner({ graphStore, runStore, sessions, projectDir: d.projectDir, provider: () => provider, privateFiles, requestRun, clock });
+
+  /** Work sessions: the store's 'changed' event broadcasts the list. */
+  function listSessions() {
+    return sessions.list();
+  }
+  /** Throws on a blank name: the caller validates it. */
+  function createSession(name: string): Session {
+    return sessions.create(name);
+  }
+  function renameSession(id: string, name: string): SessionResult {
+    return sessions.rename(id, name);
+  }
+  function duplicateSession(id: string): SessionResult {
+    return sessions.duplicate(id);
+  }
+  function deleteSession(id: string): { ok: true } | { ok: false; error: string } {
+    if (planner.isBusyInSession(id)) return { ok: false, error: "The planner is still working in this session. Try again when it's done." };
+    return sessions.delete(id);
+  }
+  function saveSessionTabs(id: string, tabs: SessionTab[], activeGraphId?: string): void {
+    sessions.saveTabs(id, tabs, activeGraphId);
+  }
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op) => {
@@ -186,8 +220,10 @@ export function createApp(d: AppDeps) {
   runner.on('node', (runId: string, nodeId: string, state: NodeRunState) => broadcast({ type: 'runNode', runId, nodeId, state }));
   runner.on('event', (runId: string, nodeId: string, event: NodeEvent) => broadcast({ type: 'nodeEvent', runId, nodeId, event }));
   broker.on('changed', (approvals: ApprovalRequest[]) => broadcast({ type: 'approvals', approvals }));
-  planner.on('entry', (graphId: string, entry: ChatEntry) => broadcast({ type: 'chatEntry', graphId, entry }));
-  planner.on('busy', (graphId: string, busy: boolean) => broadcast({ type: 'chatBusy', graphId, busy }));
+  sessions.on('changed', () => broadcast({ type: 'sessions', sessions: sessions.list() }));
+  planner.on('entry', (sessionId: string, graphId: string, entry: ChatEntry) => toConversation(sessionId, graphId, { type: 'chatEntry', graphId, sessionId, entry }));
+  planner.on('busy', (sessionId: string, graphId: string, busy: boolean) => toConversation(sessionId, graphId, { type: 'chatBusy', graphId, sessionId, busy }));
+  planner.on('cleared', (sessionId: string, graphId: string) => toConversation(sessionId, graphId, { type: 'chatOpened', graphId, sessionId, chat: [], busy: false }));
 
   function preview(graph: Graph, fromNodeId?: string, sourceRunId?: string): { ok: true; outcome: PreviewOutcome } | { ok: false; error: string } {
     let source: RunMeta | undefined;
@@ -201,7 +237,7 @@ export function createApp(d: AppDeps) {
   function opened(graph: Graph): ServerMessage {
     const runs = runStore.list(graph.id);
     const run = runner.activeFor(graph.id) ?? (runs[0] ? runStore.get(runs[0].id) : undefined);
-    return { type: 'graphOpened', graph, chat: chatLog.read(graph.id), chatBusy: planner.isBusy(graph.id), runs, run, variableValues: values.get(graph.id) };
+    return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id) };
   }
 
   /** The provider or its status changed (settings, Check again): new runs and planner turns use it; running ones keep theirs. */
@@ -224,8 +260,10 @@ export function createApp(d: AppDeps) {
   function connect(client: Client): () => void {
     clients.add(client);
     client.send({ type: 'hello', status, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
+    client.send({ type: 'sessions', sessions: sessions.list() });
     return () => {
       clients.delete(client);
+      chatSubscriptions.delete(client);
     };
   }
 
@@ -248,11 +286,29 @@ export function createApp(d: AppDeps) {
         if (!r.ok) client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
         return;
       }
+      case 'openChat': {
+        const g = graphStore.load(msg.graphId);
+        if (!g.ok) return error(g.error);
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        chatSubscriptions.set(client, { graphId: msg.graphId, sessionId: msg.sessionId });
+        client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat: sessions.chatLog(msg.sessionId).read(msg.graphId), busy: planner.isBusy(msg.sessionId, msg.graphId) });
+        return;
+      }
       case 'chat': {
         if (!status.ok) return error(`Chat is disabled: ${status.error}`);
-        const r = graphStore.load(msg.graphId);
+        const g = graphStore.load(msg.graphId);
+        if (!g.ok) return error(g.error);
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        planner.send(msg.sessionId, msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
+        return;
+      }
+      case 'newChat': {
+        const s = sessions.load(msg.sessionId);
+        if (!s.ok) return error(s.error);
+        const r = planner.newChat(msg.sessionId, msg.graphId);
         if (!r.ok) return error(r.error);
-        planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
       }
       case 'previewRun': {
@@ -319,6 +375,7 @@ export function createApp(d: AppDeps) {
     requestRun,
     graphStore,
     runStore,
+    sessionStore: sessions,
     runner,
     broker,
     planner,
@@ -330,6 +387,12 @@ export function createApp(d: AppDeps) {
     deleteGraph,
     exportGraph: (id: string) => graphStore.exportGraph(id),
     importGraph,
+    listSessions,
+    createSession,
+    renameSession,
+    duplicateSession,
+    deleteSession,
+    saveSessionTabs,
     setProvider,
     provider: () => provider,
     status: () => status,

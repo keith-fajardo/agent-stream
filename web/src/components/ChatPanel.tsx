@@ -18,7 +18,7 @@ export function ChatPanel() {
   const submit = () => {
     const t = text.trim();
     if (!t || !graph || !canType || busy) return;
-    send({ type: 'chat', graphId: graph.id, text: t });
+    send({ type: 'chat', graphId: graph.id, sessionId: 'default', text: t });
     setText('');
   };
   return (

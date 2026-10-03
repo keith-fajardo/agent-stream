@@ -19,7 +19,7 @@ function baseDeps(events: Partial<EngineEvents> = {}) {
     platform: 'darwin' as const,
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
-    events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn(), ...events } as EngineEvents,
+    events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), sessions: vi.fn(), auth: vi.fn(), warning: vi.fn(), ...events } as EngineEvents,
     findClaude: (): Found => ({ ok: true, path: '/bin/claude' }),
     checkAuth: async () => signedIn,
   };
@@ -27,7 +27,7 @@ function baseDeps(events: Partial<EngineEvents> = {}) {
 
 function setup(o: { found?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cs-home-'));
-  const events: EngineEvents = { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn() };
+  const events: EngineEvents = { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), sessions: vi.fn(), auth: vi.fn(), warning: vi.fn() };
   let auth: ProviderStatus = signedIn;
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
@@ -109,6 +109,18 @@ describe('EngineManager', () => {
     expect(a.status()).toEqual(signedIn);
   });
 
+  it('reports the session list of a folder when it connects, and when it changes', async () => {
+    const { manager, events } = setup();
+    await manager.checkProvider();
+    const a = folder('a');
+    const app = manager.get(a);
+    expect(events.sessions).toHaveBeenCalledWith(a, [expect.objectContaining({ id: 'default', name: 'Default' })]);
+    app.createSession('Review');
+    const [where, sessions] = vi.mocked(events.sessions).mock.calls.at(-1)!;
+    expect(where).toBe(a);
+    expect(sessions.map((x) => x.id).sort()).toEqual(['default', 'review']);
+  });
+
   it('keeps approvals apart per folder even when graph ids match', async () => {
     const { manager, events } = setup();
     await manager.checkProvider();
@@ -149,7 +161,7 @@ describe('EngineManager', () => {
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
-        events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn() },
+        events: { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), sessions: vi.fn(), auth: vi.fn(), warning: vi.fn() },
         findGitBash,
         createApp: (deps) => {
           seen.push(deps);

@@ -38,7 +38,11 @@ export function connect(): void {
     if (!isHostMessage(msg)) return;
     dispatch({ kind: 'server', msg });
     if (msg.type === 'hello') send({ type: 'openGraph', graphId: bootGraphId() });
-    if (msg.type === 'graphOpened') post({ type: 'opened', graphId: msg.graph.id });
+    if (msg.type === 'graphOpened') {
+      post({ type: 'opened', graphId: msg.graph.id });
+      // Interim (ruling P5): the tab chats in the Default session until the chat view replaces it.
+      send({ type: 'openChat', graphId: msg.graph.id, sessionId: 'default' });
+    }
   });
   post({ type: 'ready' });
 }

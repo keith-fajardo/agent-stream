@@ -9,7 +9,7 @@ import {
   type App,
   type Found,
 } from '@agent-stream/engine';
-import type { ApprovalRequest, GraphListItem, ProviderId, ProviderStatus, ServerMessage } from '@agent-stream/shared';
+import type { ApprovalRequest, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
 import { createCopilotProvider } from './providers/copilot';
 import { parseProviderSetting } from './providers/registry';
 import type { Settings } from './settings';
@@ -23,6 +23,8 @@ export type EngineEvents = {
   approvals(): void;
   confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string): void;
   graphDeleted(folder: Folder, graphId: string): void;
+  /** A folder's work sessions: sent on connect and after every change. */
+  sessions(folder: Folder, sessions: SessionListItem[]): void;
   auth(status: ProviderStatus): void;
   warning(message: string): void;
 };
@@ -166,6 +168,8 @@ export class EngineManager {
         return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId);
       case 'graphDeleted':
         return this.d.events.graphDeleted(folder, msg.graphId);
+      case 'sessions':
+        return this.d.events.sessions(folder, msg.sessions);
     }
   }
 }

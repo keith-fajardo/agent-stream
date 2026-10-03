@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { HookInput, McpSdkServerConfigWithInstance, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ChatLog } from '../src/chatLog';
 import { GraphStore } from '../src/graphStore';
 import { Planner, PLANNER_APPEND } from '../src/planner';
 import { graphTools } from '../src/plannerTools';
@@ -14,6 +13,7 @@ import type { QueryFn } from '../src/providers/claude/sdk';
 import { couldNotAsk, createPlannerGate } from '../src/providers/toolGate';
 import type { PlannerEvent, PlannerTurn } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
+import { SessionStore } from '../src/sessionStore';
 import { fixedClock, signedIn, tmpProject } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
@@ -273,7 +273,9 @@ describe('Claude provider with the planner', () => {
   it('does not start a session when the project settings would leave the subscription', async () => {
     const paths = tmpProject();
     const graphStore = new GraphStore(paths, fixedClock());
-    const chatLog = new ChatLog(paths.graphsDir);
+    const sessions = new SessionStore(paths, fixedClock());
+    const sessionId = sessions.ensureDefault().id;
+    const chatLog = sessions.chatLog(sessionId);
     const graphId = graphStore.create('G').id;
     const calls: unknown[] = [];
     const provider = createClaudeProvider({
@@ -291,7 +293,7 @@ describe('Claude provider with the planner', () => {
     const planner = new Planner({
       graphStore,
       runStore: new RunStore(paths),
-      chatLog,
+      sessions,
       projectDir: paths.root,
       provider: () => provider,
       privateFiles: () => [VALUES_FILE],
@@ -299,10 +301,10 @@ describe('Claude provider with the planner', () => {
       clock: fixedClock(),
     });
     const busy: boolean[] = [];
-    planner.on('busy', (_graphId: string, b: boolean) => busy.push(b));
+    planner.on('busy', (_sessionId: string, _graphId: string, b: boolean) => busy.push(b));
     mkdirSync(join(paths.root, '.claude'));
     writeFileSync(join(paths.root, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'get-key.sh' }));
-    await planner.send(graphId, 'hi');
+    await planner.send(sessionId, graphId, 'hi');
     expect(calls).toHaveLength(0);
     const chat = chatLog.read(graphId);
     expect(chat.map((e) => e.role)).toEqual(['user', 'error']);

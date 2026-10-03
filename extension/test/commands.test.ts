@@ -23,7 +23,7 @@ function setup(folders: Folder[] = [folder('a')]) {
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
-    events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, auth() {}, warning() {} },
+    events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, sessions() {}, auth() {}, warning() {} },
     checkAuth: async () => signedIn,
     findClaude: () => ({ ok: true, path: '/bin/claude' }),
     // Signed in from the start (no checkSignIn in these tests), with steps that wait for the test.

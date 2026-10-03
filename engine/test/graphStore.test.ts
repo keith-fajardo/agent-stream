@@ -102,18 +102,6 @@ describe('GraphStore', () => {
     ]);
   });
 
-  it('stores planner state without logging an op or emitting a change', () => {
-    const paths = tmpProject();
-    const store = new GraphStore(paths, fixedClock());
-    const { id } = store.create('G');
-    const changed = vi.fn();
-    store.on('changed', changed);
-    store.setPlannerState(id, { plannerSessionId: 'sess-1', plannerOpCursor: 3 });
-    expect(new GraphStore(paths).get(id)).toMatchObject({ plannerSessionId: 'sess-1', plannerOpCursor: 3 });
-    expect(changed).not.toHaveBeenCalled();
-    expect(store.readOps(id)).toEqual([]);
-  });
-
   it('rewrites Jinja references when a variable is renamed', () => {
     const store = new GraphStore(tmpProject(), fixedClock());
     const { id } = store.create('G');
@@ -162,16 +150,19 @@ describe('ChatLog', () => {
     });
 
     it('duplicates the definition without planner state', () => {
-      const store = new GraphStore(tmpProject(), fixedClock());
+      const paths = tmpProject();
+      const store = new GraphStore(paths, fixedClock());
       const { id } = store.create('G');
       store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-      store.setPlannerState(id, { plannerSessionId: 's', plannerOpCursor: 1 });
+      // A graph file from before work sessions still carries planner state.
+      const file = join(paths.graphsDir, `${id}.json`);
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), plannerSessionId: 's', plannerOpCursor: 1 }));
       const first = store.duplicate(id);
       const second = store.duplicate(id);
       if (!first.ok || !second.ok) throw new Error('duplicate failed');
       expect([first.graph.name, second.graph.name]).toEqual(['G copy', 'G copy 2']);
       expect(first.graph.nodes).toHaveLength(1);
-      expect(first.graph.plannerSessionId).toBeUndefined();
+      expect((first.graph as Record<string, unknown>).plannerSessionId).toBeUndefined();
       expect(store.readOps(first.graph.id)).toEqual([]);
     });
 

@@ -30,8 +30,6 @@ const graphSchema = z.object({
   nodes: z.array(graphNodeSchema).default([]),
   edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
   nodeSeq: z.number().int().nonnegative().default(0),
-  plannerSessionId: z.string().optional(),
-  plannerOpCursor: z.number().int().nonnegative().optional(),
   updatedAt: z.string().default(''),
 });
 
@@ -98,7 +96,9 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openGraph'), graphId: z.string() }),
   z.object({ type: z.literal('createGraph'), name: z.string().min(1) }),
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
-  z.object({ type: z.literal('chat'), graphId: z.string(), text: z.string().min(1) }),
+  z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
+  z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
+  z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional() }),
   z.object({ type: z.literal('previewRun'), graphId: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),
   z.object({ type: z.literal('setVariableValue'), graphId: z.string(), name: z.string(), value: z.string().max(MAX_VARIABLE_VALUE_CHARS) }),

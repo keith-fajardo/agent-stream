@@ -5,7 +5,8 @@ import type { Graph, Op } from '../src/types';
 
 const T = '2026-10-02T12:00:00.000Z';
 function sample(): Graph {
-  let g: Graph = { ...emptyGraph('dbt-parity', 'dbt parity', T), goal: 'Prove parity', instructions: 'Use dev', plannerSessionId: 'secret-session' };
+  // A graph file from before work sessions still carried planner state.
+  let g = { ...emptyGraph('dbt-parity', 'dbt parity', T), goal: 'Prove parity', instructions: 'Use dev', plannerSessionId: 'secret-session' } as Graph;
   const ops: Op[] = [
     { type: 'addVariable', name: 'schema', description: 'Target schema' },
     { type: 'addNode', node: { title: 'Build', kind: 'command', command: 'dbt build --target {{ schema }}', timeoutSec: 60, position: { x: 1, y: 2 } } },
@@ -57,7 +58,7 @@ describe('export files', () => {
     const r = parseExportFile(JSON.stringify(toExportFile(sample(), T)), 'new-id', '2026-10-03T00:00:00.000Z');
     if (!r.ok) throw new Error(r.error);
     expect(r.graph).toMatchObject({ id: 'new-id', name: 'dbt parity', goal: 'Prove parity', instructions: 'Use dev', nodeSeq: 2, updatedAt: '2026-10-03T00:00:00.000Z' });
-    expect(r.graph.plannerSessionId).toBeUndefined();
+    expect((r.graph as Record<string, unknown>).plannerSessionId).toBeUndefined();
     expect(r.graph.nodes.map((n) => [n.id, n.createdBy, n.updatedBy, n.updatedAt])).toEqual([
       ['n1', 'user', 'user', '2026-10-03T00:00:00.000Z'],
       ['n2', 'user', 'user', '2026-10-03T00:00:00.000Z'],

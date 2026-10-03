@@ -22,7 +22,7 @@ function setup() {
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
-    events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, auth() {}, warning() {} },
+    events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, sessions() {}, auth() {}, warning() {} },
     checkAuth: async () => ({ provider: 'claude' as const, ok: true, label: 'Claude Max' }),
     findClaude: () => ({ ok: true, path: '/bin/claude' }),
     // Signed in from the start (no checkSignIn in these tests), with steps that wait to be stopped.

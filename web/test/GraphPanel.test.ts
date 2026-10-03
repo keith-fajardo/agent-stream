@@ -14,7 +14,7 @@ const { RightPanel } = await import('../src/components/RightPanel');
 Element.prototype.scrollIntoView = vi.fn() as unknown as Element['scrollIntoView'];
 
 const graph = (patch: Partial<Graph> = {}): Graph => ({ ...emptyGraph('g', 'G', 't'), goal: 'Prove parity', instructions: 'Use dev', ...patch });
-const open = (g: Graph) => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: {} } });
+const open = (g: Graph) => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, runs: [], variableValues: {} } });
 /** Sets a controlled field's value the way React notices. */
 function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;

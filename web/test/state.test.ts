@@ -17,7 +17,7 @@ const run = (id: string, graphId: string, status: RunMeta['status'] = 'running')
 });
 const server = (msg: HostMessage): Action => ({ kind: 'server', msg });
 const opened = (g: Graph, extra: Partial<Extract<ServerMessage, { type: 'graphOpened' }>> = {}): Action =>
-  server({ type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: {}, ...extra });
+  server({ type: 'graphOpened', graph: g, runs: [], variableValues: {}, ...extra });
 const apply = (...actions: Action[]): State => actions.reduce(reduce, initialState);
 
 describe('client state', () => {
@@ -70,11 +70,24 @@ describe('client state', () => {
   it('scopes chat and run confirmations to the open graph', () => {
     const entry = { at: T, role: 'assistant' as const, text: 'plan' };
     const s = apply(opened(graph('a')));
-    expect(reduce(s, server({ type: 'chatEntry', graphId: 'b', entry })).chat).toEqual([]);
-    expect(reduce(s, server({ type: 'chatEntry', graphId: 'a', entry })).chat).toEqual([entry]);
-    expect(reduce(s, server({ type: 'chatBusy', graphId: 'a', busy: true })).chatBusy).toBe(true);
+    expect(reduce(s, server({ type: 'chatEntry', graphId: 'b', sessionId: 'default', entry })).chat).toEqual([]);
+    expect(reduce(s, server({ type: 'chatEntry', graphId: 'a', sessionId: 'default', entry })).chat).toEqual([entry]);
+    expect(reduce(s, server({ type: 'chatBusy', graphId: 'a', sessionId: 'default', busy: true })).chatBusy).toBe(true);
     expect(reduce(s, server({ type: 'confirmRun', graphId: 'a', fromNodeId: 'n2', sourceRunId: 'r1' })).confirm).toEqual({ fromNodeId: 'n2', sourceRunId: 'r1' });
     expect(reduce(s, server({ type: 'confirmRun', graphId: 'b' })).confirm).toBeUndefined();
+  });
+
+  it('shows the Default session’s chat for the open graph only (interim, until the chat view)', () => {
+    const entry = { at: T, role: 'assistant' as const, text: 'plan' };
+    const s = apply(opened(graph('a')));
+    expect(s).toMatchObject({ chat: [], chatBusy: false });
+    const chatOpened = reduce(s, server({ type: 'chatOpened', graphId: 'a', sessionId: 'default', chat: [entry], busy: true }));
+    expect(chatOpened).toMatchObject({ chat: [entry], chatBusy: true });
+    expect(reduce(s, server({ type: 'chatOpened', graphId: 'b', sessionId: 'default', chat: [entry], busy: true }))).toMatchObject({ chat: [], chatBusy: false });
+    expect(reduce(s, server({ type: 'chatOpened', graphId: 'a', sessionId: 'other', chat: [entry], busy: true }))).toMatchObject({ chat: [], chatBusy: false });
+    expect(reduce(s, server({ type: 'chatEntry', graphId: 'a', sessionId: 'other', entry })).chat).toEqual([]);
+    expect(reduce(s, server({ type: 'chatBusy', graphId: 'a', sessionId: 'other', busy: true })).chatBusy).toBe(false);
+    expect(reduce(s, server({ type: 'sessions', sessions: [{ id: 'default', name: 'Default', tabCount: 0 }] }))).toBe(s);
   });
 
   it('shows errors and rejected edits as a toast', () => {

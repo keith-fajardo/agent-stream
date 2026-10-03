@@ -28,7 +28,7 @@ async function openDialog(request: { focus?: string; addRow?: boolean } = {}) {
 beforeEach(async () => {
   vi.mocked(send).mockClear();
   dispatch({ kind: 'closeVariables' });
-  dispatch({ kind: 'server', msg: { type: 'graphOpened', graph, chat: [], chatBusy: false, runs: [], variableValues: { schema: 'dev' } } });
+  dispatch({ kind: 'server', msg: { type: 'graphOpened', graph, runs: [], variableValues: { schema: 'dev' } } });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -94,7 +94,7 @@ describe('VariablesDialog', () => {
   describe('save safety', () => {
     const two: Graph = { ...graph, variables: [{ name: 'a', description: '' }, { name: 'b', description: '' }] };
     const reopen = async (g: Graph, values: Record<string, string> = {}) => {
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, chat: [], chatBusy: false, runs: [], variableValues: values } }));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: g, runs: [], variableValues: values } }));
     };
     const ambiguity = (n: string) => `Another variable is called "${n}" until you save. Rename that one first, then save again.`;
 

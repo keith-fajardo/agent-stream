@@ -107,8 +107,6 @@ function reduceServer(state: State, msg: HostMessage): State {
       return {
         ...state,
         graph: msg.graph,
-        chat: msg.chat,
-        chatBusy: msg.chatBusy,
         runs: msg.runs,
         run: msg.run,
         logs: {},
@@ -147,10 +145,15 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, logs: { ...state.logs, [logKey(msg.runId, msg.nodeId)]: msg.events } };
     case 'approvals':
       return { ...state, approvals: msg.approvals };
+    // Interim (ruling P5): the tab shows the Default session's chat until the chat view replaces it.
+    case 'chatOpened':
+      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chat: msg.chat, chatBusy: msg.busy } : state;
     case 'chatEntry':
-      return msg.graphId === current ? { ...state, chat: [...state.chat, msg.entry] } : state;
+      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':
-      return msg.graphId === current ? { ...state, chatBusy: msg.busy } : state;
+      return msg.graphId === current && msg.sessionId === 'default' ? { ...state, chatBusy: msg.busy } : state;
+    case 'sessions':
+      return state;
     case 'confirmRun':
       return msg.graphId === current ? { ...state, confirm: { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId } } : state;
     case 'variableValues':

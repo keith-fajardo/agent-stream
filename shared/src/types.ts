@@ -30,9 +30,6 @@ export type Graph = {
   edges: Edge[];
   /** Highest node number ever issued, so ids are never reused. */
   nodeSeq: number;
-  plannerSessionId?: string;
-  /** Length of the ops log when the planner's last turn started. */
-  plannerOpCursor?: number;
   updatedAt: string;
 };
 
@@ -171,7 +168,7 @@ export type ApprovalRequest = {
   createdAt: string;
 };
 
-export type ChatRole = 'user' | 'assistant' | 'tool' | 'error';
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'error' | 'note';
 export type ChatEntry = { at: string; role: ChatRole; text: string };
 
 export type ProviderId = 'claude' | 'copilot';
@@ -206,7 +203,7 @@ export type ServerMessage =
   | { type: 'hello'; status: ProviderStatus; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
   | { type: 'graphDeleted'; graphId: string }
-  | { type: 'graphOpened'; graph: Graph; chat: ChatEntry[]; chatBusy: boolean; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }
+  | { type: 'graphOpened'; graph: Graph; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }
   | { type: 'graph'; graph: Graph }
   | { type: 'opRejected'; graphId: string; error: string }
   | { type: 'runs'; graphId: string; runs: RunSummary[] }
@@ -215,8 +212,11 @@ export type ServerMessage =
   | { type: 'nodeEvent'; runId: string; nodeId: string; event: NodeEvent }
   | { type: 'nodeLogs'; runId: string; nodeId: string; events: NodeEvent[] }
   | { type: 'approvals'; approvals: ApprovalRequest[] }
-  | { type: 'chatEntry'; graphId: string; entry: ChatEntry }
-  | { type: 'chatBusy'; graphId: string; busy: boolean }
+  | { type: 'chatEntry'; graphId: string; sessionId: string; entry: ChatEntry }
+  | { type: 'chatBusy'; graphId: string; sessionId: string; busy: boolean }
+  /** A planner conversation (one work session, one graph): sent on openChat, and empty again after New chat. */
+  | { type: 'chatOpened'; graphId: string; sessionId: string; chat: ChatEntry[]; busy: boolean }
+  | { type: 'sessions'; sessions: SessionListItem[] }
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }
   | { type: 'variableValues'; graphId: string; values: Record<string, string> }
@@ -226,7 +226,11 @@ export type ClientMessage =
   | { type: 'openGraph'; graphId: string }
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
-  | { type: 'chat'; graphId: string; text: string }
+  /** Subscribes this client to one planner conversation; the engine answers with chatOpened. */
+  | { type: 'openChat'; graphId: string; sessionId: string }
+  | { type: 'chat'; graphId: string; sessionId: string; text: string }
+  /** Clears the conversation: its chat and the provider session. */
+  | { type: 'newChat'; graphId: string; sessionId: string }
   /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
   | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestId?: string }

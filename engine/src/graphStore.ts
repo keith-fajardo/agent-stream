@@ -127,8 +127,7 @@ export class GraphStore extends EventEmitter {
     const names = new Set(this.list().map((g) => g.name));
     let name = `${r.graph.name} copy`;
     for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
-    const { plannerSessionId: _session, plannerOpCursor: _cursor, ...definition } = r.graph;
-    const graph: Graph = { ...definition, id: this.uniqueId(name), name, updatedAt: this.clock() };
+    const graph: Graph = { ...r.graph, id: this.uniqueId(name), name, updatedAt: this.clock() };
     this.save(graph);
     return { ok: true, graph };
   }
@@ -172,13 +171,6 @@ export class GraphStore extends EventEmitter {
     this.emit('changed', r.graph);
     this.emit('op', graphId, resolved);
     return r;
-  }
-
-  /** Planner bookkeeping: not content, so it is neither logged nor broadcast. */
-  setPlannerState(graphId: string, patch: { plannerSessionId?: string; plannerOpCursor?: number }): Graph {
-    const graph = { ...this.get(graphId), ...patch };
-    this.save(graph);
-    return graph;
   }
 
   readOps(graphId: string): OpRecord[] {

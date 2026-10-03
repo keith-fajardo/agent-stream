@@ -5,6 +5,7 @@ import { GraphStore } from '../src/graphStore';
 import { Planner, PLANNER_APPEND, describeOp } from '../src/planner';
 import type { AgentProvider, PlannerTurn, PlannerTurnResult } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
+import { SessionStore } from '../src/sessionStore';
 import { deferred, fixedClock, signedIn, tmpProject } from './helpers';
 
 const VALUES_FILE = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
@@ -32,18 +33,21 @@ function fakeProvider(turns: Turn[], over: Partial<AgentProvider> = {}): AgentPr
 const ran =
   (sessionId = 'sess-1'): Turn =>
   async () => ({ ok: true, sessionId });
+const ok = (id: string): Turn => async () => ({ ok: true, sessionId: id });
 
 function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
   const paths = tmpProject();
   const graphStore = new GraphStore(paths, fixedClock());
   const runStore = new RunStore(paths);
-  const chatLog = new ChatLog(paths.graphsDir);
+  const sessions = new SessionStore(paths, fixedClock());
+  sessions.create('A', 'a');
+  sessions.create('B', 'b');
   const graphId = graphStore.create('G').id;
   const provider = fakeProvider(turns, over);
   const planner = new Planner({
     graphStore,
     runStore,
-    chatLog,
+    sessions,
     projectDir: paths.root,
     provider: () => provider,
     privateFiles: () => [VALUES_FILE],
@@ -51,9 +55,11 @@ function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
     clock: fixedClock(),
   });
   const busy: boolean[] = [];
-  planner.on('busy', (_graphId: string, b: boolean) => busy.push(b));
-  const chat = () => chatLog.read(graphId);
-  return { paths, graphStore, chatLog, graphId, planner, provider, seen: provider.seen, busy, chat };
+  planner.on('busy', (_sessionId: string, _graphId: string, b: boolean) => busy.push(b));
+  const chat = () => sessions.chatLog('a').read(graphId);
+  /** Session a's planner state for the graph. */
+  const state = () => sessions.plannerState('a', graphId);
+  return { paths, graphStore, sessions, graphId, planner, provider, seen: provider.seen, busy, chat, state };
 }
 
 describe('Planner', () => {
@@ -65,7 +71,7 @@ describe('Planner', () => {
         return { ok: true, sessionId: 'sess-1' };
       },
     ]);
-    await s.planner.send(s.graphId, 'Plan a parity test');
+    await s.planner.send('a', s.graphId, 'Plan a parity test');
     const t = s.seen[0];
     expect(t).toMatchObject({ prompt: 'Plan a parity test', systemAppend: PLANNER_APPEND, cwd: s.paths.root });
     expect(t.resume).toBeUndefined();
@@ -77,7 +83,7 @@ describe('Planner', () => {
       ['assistant', 'Here is a plan.'],
       ['tool', 'add_node {"kind":"agent","title":"Plan"}'],
     ]);
-    expect(s.graphStore.get(s.graphId)).toMatchObject({ plannerSessionId: 'sess-1', plannerOpCursor: 0 });
+    expect(s.state()).toMatchObject({ sessionId: 'sess-1', opCursor: 0 });
     expect(s.busy).toEqual([true, false]);
   });
 
@@ -88,27 +94,27 @@ describe('Planner', () => {
 
   it('resumes the session and tells the planner about user edits since its last turn', async () => {
     const s = setup([ran(), ran()]);
-    await s.planner.send(s.graphId, 'first');
+    await s.planner.send('a', s.graphId, 'first');
     s.graphStore.apply(s.graphId, { type: 'addNode', node: { title: 'Mine', kind: 'command', command: 'ls' } }, 'user');
     s.graphStore.apply(s.graphId, { type: 'updateNode', id: 'n1', patch: { title: 'Agent touch' } }, 'agent');
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'ship' }, 'user');
-    await s.planner.send(s.graphId, 'second');
+    await s.planner.send('a', s.graphId, 'second');
     expect(s.seen[1].resume).toBe('sess-1');
     expect(s.seen[1].prompt).toBe(
       '[Since your last turn, the user edited the graph:\n- added n1 "Mine" (command)\n- set the goal to "ship"\nCall get_graph for the full current state.]\n\nsecond',
     );
-    expect(s.graphStore.get(s.graphId).plannerOpCursor).toBe(3);
+    expect(s.state().opCursor).toBe(3);
   });
 
   it('lists only the user edits made since the cursor', async () => {
     const s = setup([ran(), ran(), ran()]);
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'before' }, 'user');
-    await s.planner.send(s.graphId, 'first');
+    await s.planner.send('a', s.graphId, 'first');
     expect(s.seen[0].prompt).toBe('[Since your last turn, the user edited the graph:\n- set the goal to "before"\nCall get_graph for the full current state.]\n\nfirst');
-    await s.planner.send(s.graphId, 'second');
+    await s.planner.send('a', s.graphId, 'second');
     expect(s.seen[1].prompt).toBe('second');
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'after' }, 'user');
-    await s.planner.send(s.graphId, 'third');
+    await s.planner.send('a', s.graphId, 'third');
     expect(s.seen[2].prompt).toBe('[Since your last turn, the user edited the graph:\n- set the goal to "after"\nCall get_graph for the full current state.]\n\nthird');
   });
 
@@ -120,22 +126,22 @@ describe('Planner', () => {
         return { ok: true, sessionId: 'sess-1' };
       },
     ]);
-    const first = s.planner.send(s.graphId, 'one');
-    expect(s.planner.isBusy(s.graphId)).toBe(true);
-    await s.planner.send(s.graphId, 'two');
+    const first = s.planner.send('a', s.graphId, 'one');
+    expect(s.planner.isBusy('a', s.graphId)).toBe(true);
+    await s.planner.send('a', s.graphId, 'two');
     gate.resolve();
     await first;
     expect(s.seen).toHaveLength(1);
     expect(s.chat().map((e) => e.role)).toEqual(['user', 'error']);
-    expect(s.planner.isBusy(s.graphId)).toBe(false);
+    expect(s.planner.isBusy('a', s.graphId)).toBe(false);
   });
 
   it('stops when the session is not on the subscription', async () => {
     const s = setup([async () => ({ ok: false, error: 'This Claude session authenticated with "apiKeyHelper" instead of your Claude subscription.' })]);
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     expect(s.chat().map((e) => e.role)).toEqual(['user', 'error']);
     expect(s.chat()[1].text).toContain('"apiKeyHelper"');
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
+    expect(s.state().sessionId).toBeUndefined();
   });
 
   it('resets a broken session so the next message starts fresh', async () => {
@@ -145,9 +151,9 @@ describe('Planner', () => {
         throw new Error('No conversation found');
       },
     ]);
-    await s.planner.send(s.graphId, 'one');
-    await s.planner.send(s.graphId, 'two');
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
+    await s.planner.send('a', s.graphId, 'one');
+    await s.planner.send('a', s.graphId, 'two');
+    expect(s.state().sessionId).toBeUndefined();
     const last = s.chat().at(-1)!;
     expect(last.role).toBe('error');
     expect(last.text).toContain('No conversation found');
@@ -156,32 +162,32 @@ describe('Planner', () => {
 
   it('resets a session that no longer exists, as the real CLI reports it', async () => {
     const s = setup([ran(), async (t) => ({ ok: false, error: `No conversation found with session ID: ${t.resume}`, resumeFailed: true }), ran()]);
-    await s.planner.send(s.graphId, 'one');
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBe('sess-1');
-    await s.planner.send(s.graphId, 'two');
+    await s.planner.send('a', s.graphId, 'one');
+    expect(s.state().sessionId).toBe('sess-1');
+    await s.planner.send('a', s.graphId, 'two');
     const last = s.chat().at(-1)!;
     expect(last.role).toBe('error');
     expect(last.text).toContain('No conversation found with session ID: sess-1');
     expect(last.text).toContain('reset');
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
-    await s.planner.send(s.graphId, 'three');
+    expect(s.state().sessionId).toBeUndefined();
+    await s.planner.send('a', s.graphId, 'three');
     expect(s.seen[2].resume).toBeUndefined();
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBe('sess-1');
+    expect(s.state().sessionId).toBe('sess-1');
   });
 
   it('clears the session and adds the reset note when resuming failed', async () => {
     const s = setup([ran(), async () => ({ ok: false, error: 'gone', resumeFailed: true })]);
-    await s.planner.send(s.graphId, 'one');
+    await s.planner.send('a', s.graphId, 'one');
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'ship' }, 'user');
-    await s.planner.send(s.graphId, 'two');
+    await s.planner.send('a', s.graphId, 'two');
     expect(s.chat().at(-1)).toMatchObject({ role: 'error', text: `gone${RESET_NOTE}` });
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
-    expect(s.graphStore.get(s.graphId).plannerOpCursor).toBe(0);
+    expect(s.state().sessionId).toBeUndefined();
+    expect(s.state().opCursor).toBe(0);
   });
 
   it('shows the real error when a session fails before it starts', async () => {
     const s = setup([async () => ({ ok: false, error: 'No conversation found with session ID: x' })]);
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'hi'],
       ['error', 'No conversation found with session ID: x'],
@@ -198,23 +204,24 @@ describe('Planner', () => {
       },
       ran(),
     ]);
-    const first = s.planner.send(s.graphId, 'one');
-    s.chatLog.append = () => {
+    const first = s.planner.send('a', s.graphId, 'one');
+    const append = vi.spyOn(ChatLog.prototype, 'append').mockImplementation(() => {
       throw new Error('ENOSPC: no space left on device, write');
-    };
-    await expect(s.planner.send(s.graphId, 'two')).resolves.toBeUndefined();
+    });
+    await expect(s.planner.send('a', s.graphId, 'two')).resolves.toBeUndefined();
     gate.resolve();
     await expect(first).resolves.toBeUndefined();
-    await expect(s.planner.send(s.graphId, 'three')).resolves.toBeUndefined();
+    await expect(s.planner.send('a', s.graphId, 'three')).resolves.toBeUndefined();
     expect(s.busy).toEqual([true, false, true, false]);
-    expect(s.planner.isBusy(s.graphId)).toBe(false);
+    expect(s.planner.isBusy('a', s.graphId)).toBe(false);
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+    append.mockRestore();
   });
 
   it('stops the turn before the provider runs when the folder has a problem', async () => {
     const s = setup([ran()], { folderProblem: (dir) => (dir === s.paths.root ? 'This folder reroutes the provider.' : undefined) });
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     expect(s.seen).toHaveLength(0);
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'hi'],
@@ -230,29 +237,29 @@ describe('Planner', () => {
         return { ok: false, error: 'The Claude session did not report how it authenticated.' };
       },
     ]);
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'hi'],
       ['assistant', 'unverified reply'],
       ['error', 'The Claude session did not report how it authenticated.'],
     ]);
-    expect(s.graphStore.get(s.graphId).plannerSessionId).toBeUndefined();
+    expect(s.state().sessionId).toBeUndefined();
   });
 
   it('saves the cursor and shows the error when a turn ran but the model reported one', async () => {
     const s = setup([async () => ({ ok: true, sessionId: 'sess-2', error: 'boom' })]);
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'ship' }, 'user');
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'hi'],
       ['error', 'boom'],
     ]);
-    expect(s.graphStore.get(s.graphId)).toMatchObject({ plannerSessionId: 'sess-2', plannerOpCursor: 1 });
+    expect(s.state()).toMatchObject({ sessionId: 'sess-2', opCursor: 1 });
   });
 
   it('gives the provider a gate that keeps the values file private and allows only the graph tools', async () => {
     const s = setup([ran()]);
-    await s.planner.send(s.graphId, 'hi');
+    await s.planner.send('a', s.graphId, 'hi');
     const gate = s.seen[0].gate;
     expect(gate.privacy('Read', { file_path: VALUES_FILE })).toContain('the variable values file');
     expect(gate.privacy('Read', { file_path: 'models/a.sql' })).toBeNull();
@@ -260,6 +267,67 @@ describe('Planner', () => {
     expect(await gate.decide('add_node', {})).toEqual({ allow: true, by: 'graphTool' });
     expect(await gate.decide('mcp__graph__add_node', {})).toMatchObject({ allow: false });
     expect(await gate.decide('Bash', { command: 'ls' })).toEqual({ allow: false, reason: 'The planner can only read files and edit the graph.' });
+  });
+
+  it('keeps each session’s conversation and edit cursor separate', async () => {
+    const s = setup([ok('s-a'), ok('s-b'), ok('s-a2')]);
+    await s.planner.send('a', s.graphId, 'first in a');
+    s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'g' }, 'user');
+    await s.planner.send('b', s.graphId, 'first in b');
+    await s.planner.send('a', s.graphId, 'second in a');
+    expect(s.sessions.chatLog('a').read(s.graphId).filter((e) => e.role === 'user').map((e) => e.text)).toEqual(['first in a', 'second in a']);
+    expect(s.sessions.chatLog('b').read(s.graphId).filter((e) => e.role === 'user').map((e) => e.text)).toEqual(['first in b']);
+    expect(s.provider.seen[1].prompt).toMatch(/set the goal to "g"/); // b has never seen the edit
+    expect(s.provider.seen[2].prompt).toMatch(/set the goal to "g"/); // a's cursor predates it
+    expect(s.provider.seen[2].resume).toBe('s-a');
+  });
+
+  it('runs turns for two sessions on one graph at once, but one at a time per session', async () => {
+    const gate = deferred<PlannerTurnResult>();
+    const s = setup([() => gate.promise, ok('s-b')]);
+    const first = s.planner.send('a', s.graphId, 'slow');
+    await s.planner.send('a', s.graphId, 'again');
+    await s.planner.send('b', s.graphId, 'other');
+    expect(s.sessions.chatLog('a').read(s.graphId).at(-1)).toMatchObject({ role: 'error', text: 'The planner is still working on your previous message.' });
+    expect(s.planner.isBusyInGraph(s.graphId)).toBe(true);
+    gate.resolve({ ok: true, sessionId: 's-a' });
+    await first;
+    expect(s.planner.isBusyInGraph(s.graphId)).toBe(false);
+  });
+
+  it('starts fresh with a note when the stored conversation belongs to another provider', async () => {
+    const s = setup([ok('new')], { id: 'copilot', name: 'GitHub Copilot' });
+    s.sessions.setPlannerState('a', s.graphId, { sessionId: 'claude-sess', provider: 'claude', opCursor: 0 });
+    await s.planner.send('a', s.graphId, 'hi');
+    expect(s.provider.seen[0].resume).toBeUndefined();
+    expect(s.sessions.chatLog('a').read(s.graphId).map((e) => [e.role, e.text])).toContainEqual(['note', "Started a new planner conversation with GitHub Copilot; it doesn't see earlier messages."]);
+    expect(s.sessions.plannerState('a', s.graphId)).toMatchObject({ sessionId: 'new', provider: 'copilot' });
+  });
+
+  it('New chat clears this session’s conversation for the graph only', async () => {
+    const s = setup([ok('s-a'), ok('s-b')]);
+    await s.planner.send('a', s.graphId, 'x');
+    await s.planner.send('b', s.graphId, 'y');
+    expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: true });
+    expect(s.sessions.chatLog('a').read(s.graphId)).toEqual([]);
+    expect(s.sessions.plannerState('a', s.graphId)).toEqual({});
+    expect(s.sessions.chatLog('b').read(s.graphId)).not.toEqual([]);
+  });
+
+  it('refuses New chat while that session’s turn runs, and reports the clear when it is done', async () => {
+    const gate = deferred<PlannerTurnResult>();
+    const s = setup([() => gate.promise]);
+    const cleared: string[][] = [];
+    s.planner.on('cleared', (sessionId: string, graphId: string) => cleared.push([sessionId, graphId]));
+    const first = s.planner.send('a', s.graphId, 'slow');
+    expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: false, error: 'The planner is still working on your previous message.' });
+    expect(s.planner.isBusyInSession('a')).toBe(true);
+    expect(s.planner.isBusyInSession('b')).toBe(false);
+    gate.resolve({ ok: true, sessionId: 's-a' });
+    await first;
+    expect(s.planner.isBusyInSession('a')).toBe(false);
+    expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: true });
+    expect(cleared).toEqual([['a', s.graphId]]);
   });
 });
 
