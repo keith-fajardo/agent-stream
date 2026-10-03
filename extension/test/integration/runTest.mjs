@@ -10,24 +10,25 @@ const workspace = mkdtempSync(join(tmpdir(), 'agent-stream-it-'));
 const dataDir = join(workspace, '.agent-stream');
 mkdirSync(join(dataDir, 'graphs'), { recursive: true });
 const at = '2026-10-02T00:00:00.000Z';
-writeFileSync(
-  join(dataDir, 'graphs', 'demo.json'),
-  JSON.stringify(
-    {
-      id: 'demo',
-      name: 'Demo',
-      goal: '',
-      instructions: '',
-      variables: [{ name: 'greeting', description: '' }],
-      nodes: [{ id: 'n1', title: 'Say hello', kind: 'command', command: 'echo {{ greeting }}', createdBy: 'user', updatedBy: 'user', updatedAt: at }],
-      edges: [],
-      nodeSeq: 1,
-      updatedAt: at,
-    },
-    null,
-    2,
-  ),
-);
+const graph = (id, name, node) => ({
+  id,
+  name,
+  goal: '',
+  instructions: '',
+  variables: [],
+  nodes: [{ ...node, createdBy: 'user', updatedBy: 'user', updatedAt: at }],
+  edges: [],
+  nodeSeq: 1,
+  updatedAt: at,
+});
+const write = (file, value) => writeFileSync(join(dataDir, 'graphs', file), JSON.stringify(value, null, 2));
+write('demo.json', {
+  ...graph('demo', 'Demo', { id: 'n1', title: 'Say hello', kind: 'command', command: 'echo {{ greeting }}', description: 'Says hello with the greeting value.' }),
+  variables: [{ name: 'greeting', description: '' }],
+});
+// A second graph for the sessions check, and a baseline where its step read `echo original`: `echo second` is then an agent change.
+write('second.json', graph('second', 'Second', { id: 'n1', title: 'Say second', kind: 'command', command: 'echo second' }));
+write('second.baseline.json', graph('second', 'Second', { id: 'n1', title: 'Say second', kind: 'command', command: 'echo original' }));
 
 await runTests({
   extensionDevelopmentPath,

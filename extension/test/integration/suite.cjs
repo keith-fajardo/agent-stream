@@ -47,7 +47,7 @@ exports.run = async function run() {
   const [wf] = vscode.workspace.workspaceFolders;
   const folder = { key: wf.uri.toString(), name: wf.name, path: wf.uri.fsPath };
   const app = api.engines.get(folder);
-  assert.deepEqual(app.listGraphs().map((g) => g.id), ['demo']);
+  assert.deepEqual(app.listGraphs().map((g) => g.id).sort(), ['demo', 'second']);
 
   // The graph tab's page runs under the CSP, connects, and loads its graph.
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', 'demo.json'), 'agentStream.graph');
@@ -60,6 +60,58 @@ exports.run = async function run() {
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', 'demo.json'));
   const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'a plain open to show the graph tab');
   await waitFor(() => reopened.isLoaded, 'the reopened tab to load its graph');
+
+  // Providers: GitHub Copilot is selectable. In CI and in this fresh profile there is no signed-in
+  // Copilot, so its status can't run, and a run is refused with the provider's own reason.
+  const config = () => vscode.workspace.getConfiguration('agentStream');
+  await config().update('provider', 'copilot', vscode.ConfigurationTarget.Global);
+  await waitFor(() => api.engines.status.provider === 'copilot' && api.engines.status.label !== 'checking', 'the Copilot status');
+  assert.equal(api.engines.status.ok, false);
+  const probe = [];
+  const probeClient = { send: (m) => probe.push(m) };
+  const detachProbe = app.connect(probeClient);
+  await app.handle(probeClient, { type: 'startRun', graphId: 'demo', reviewed: 'x' });
+  assert.equal(probe.find((m) => m.type === 'error').message, `Runs are disabled: ${api.engines.status.error}`);
+  detachProbe();
+  await config().update('provider', undefined, vscode.ConfigurationTarget.Global);
+  await waitFor(() => api.engines.status.provider === 'claude' && api.engines.status.label !== 'checking', 'the Claude status again');
+
+  // Work sessions: the tab set comes back per session, and conversations stay apart.
+  const uriOf = (id) => vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', `${id}.json`);
+  await vscode.commands.executeCommand('vscode.openWith', uriOf('second'), 'agentStream.graph', { viewColumn: vscode.ViewColumn.Two, preview: false });
+  await waitFor(() => api.panels.get(folder.key, 'second')?.isLoaded, 'the second graph tab');
+  api.sessions.captureNow();
+  const sessionB = app.createSession('Integration B');
+  app.saveSessionTabs(sessionB.id, [{ graphId: 'demo', group: 1, index: 0 }], 'demo');
+  assert.equal(await api.sessions.switchTo(folder, sessionB.id), true);
+  await waitFor(() => !api.panels.get(folder.key, 'second') && api.panels.get(folder.key, 'demo'), "session B's tabs");
+  assert.equal(await api.sessions.switchTo(folder, 'default'), true);
+  await waitFor(() => api.panels.get(folder.key, 'second') && api.panels.get(folder.key, 'demo'), "Default's tabs again");
+  const columnOf = (label) => vscode.window.tabGroups.all.find((g) => g.tabs.some((t) => t.label.startsWith(label)))?.viewColumn;
+  assert.equal(columnOf('second'), vscode.ViewColumn.Two);
+  app.sessionStore.chatLog('default').append('demo', { at: new Date().toISOString(), role: 'user', text: 'only in Default' });
+  const chats = [];
+  const chatClient = { send: (m) => chats.push(m) };
+  const detachChat = app.connect(chatClient);
+  await app.handle(chatClient, { type: 'openChat', graphId: 'demo', sessionId: sessionB.id });
+  assert.deepEqual(chats.find((m) => m.type === 'chatOpened').chat, []);
+  detachChat();
+
+  // Step descriptions reach the run preview.
+  const shown = [];
+  const previewClient = { send: (m) => shown.push(m) };
+  const detachPreview = app.connect(previewClient);
+  await app.handle(previewClient, { type: 'previewRun', graphId: 'demo' });
+  assert.equal(shown.find((m) => m.type === 'runPreview').preview.steps[0].description, 'Says hello with the greeting value.');
+  // Refine refuses a step with only a title (no planner turn runs in CI).
+  app.graphStore.apply('demo', { type: 'addNode', node: { id: 'n9', title: 'Only a title', kind: 'agent' } }, 'user');
+  await app.handle(previewClient, { type: 'refineSteps', graphId: 'demo', sessionId: 'default', nodeIds: ['n9'] });
+  assert.equal(shown.filter((m) => m.type === 'error').at(-1).message, 'Write what the step should do first.');
+  app.graphStore.apply('demo', { type: 'deleteNode', id: 'n9' }, 'user');
+  detachPreview();
+  // Agent changes against the baseline are reported, and the Graphs list counts them.
+  assert.deepEqual(app.graphStore.agentChanges('second').map((c) => [c.kind, c.change, c.id]), [['node', 'changed', 'n1']]);
+  assert.equal(app.listGraphs().find((g) => g.id === 'second').agentChanges, 1);
 
   if (!api.engines.status.ok) {
     console.warn(`Skipping the run check: ${api.engines.status.error}`);
