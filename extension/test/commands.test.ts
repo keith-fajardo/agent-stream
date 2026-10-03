@@ -40,6 +40,12 @@ function setup(folders: Folder[] = [folder('a')]) {
     saveFile: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
+    quickPick: vi.fn(),
+    quickPickMany: vi.fn(),
+    pickParentFolder: vi.fn(),
+    openInNewWindow: vi.fn(),
+    withProgress: vi.fn(),
+    infoAction: vi.fn(),
   } satisfies Record<keyof Ui, unknown>;
   const opened: GraphTarget[] = [];
   let active: GraphTarget | undefined;

@@ -109,6 +109,8 @@ export type MessageHandlerDeps = {
   setMinimap(value: boolean): void;
   /** The id of the folder's active work session: where Refine's planner turn runs. */
   activeSession(folder: Folder): string;
+  /** The tab's run dialog asked for Set Up Parallel Tickets (spec §5.3). */
+  setUpParallelTickets(folder: Folder): void;
 };
 
 /** Routes what a tab posts: engine messages to its folder's engine, the tab's own messages to the extension. */
@@ -142,6 +144,9 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
         case 'setMinimap':
           d.setMinimap(msg.value);
           return;
+        case 'setUpParallelTickets':
+          d.setUpParallelTickets(d.panel.folder);
+          return;
         case 'refineSteps':
           d.app.handle(d.client, { type: 'refineSteps', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeIds: msg.nodeIds }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
           return;
@@ -163,6 +168,8 @@ export type EditorDeps = {
   activeSession(folder: Folder): string;
   minimap(): boolean;
   setMinimap(value: boolean): void;
+  /** The tab's run dialog asked for Set Up Parallel Tickets (spec §5.3). */
+  setUpParallelTickets(folder: Folder): void;
 };
 
 function messagePage(text: string): string {
@@ -212,6 +219,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
       client: { send: (msg) => void webview.postMessage(msg) },
       runHostCommand: this.d.runHostCommand,
       activeSession: (f) => this.d.activeSession(f),
+      setUpParallelTickets: (f) => this.d.setUpParallelTickets(f),
       setMinimap: (value) => {
         this.d.setMinimap(value);
         for (const other of this.d.panels.all()) if (other !== panel) other.send({ type: 'prefs', minimap: value });

@@ -4,10 +4,19 @@ import type { Ui } from './commands';
 const filters = { 'Agent Stream graph': ['json'] };
 
 export const vscodeUi: Ui = {
-  inputBox: async (o) => vscode.window.showInputBox({ prompt: o.prompt, value: o.value, validateInput: o.validate }),
+  inputBox: async (o) => vscode.window.showInputBox({ prompt: o.prompt, value: o.value, placeHolder: o.placeHolder, validateInput: o.validate }),
   pickGraph: async (items) => (await vscode.window.showQuickPick(items, { placeHolder: 'Open a graph' }))?.target,
   pickFolder: async (folders) => (await vscode.window.showQuickPick(folders.map((folder) => ({ label: folder.name, folder })), { placeHolder: 'Which folder?' }))?.folder,
-  confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
+  confirm: async (message, action, detail) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, action)) === action,
+  quickPick: async (items, placeHolder) => (await vscode.window.showQuickPick(items, { placeHolder }))?.value,
+  quickPickMany: async (items, placeHolder) => (await vscode.window.showQuickPick(items, { placeHolder, canPickMany: true }))?.map((i) => i.value),
+  pickParentFolder: async (defaultPath) =>
+    (await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: vscode.Uri.file(defaultPath), openLabel: 'Put the worktrees here' }))?.[0]?.fsPath,
+  openInNewWindow: async (path) => {
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), { forceNewWindow: true });
+  },
+  withProgress: (title, task) => Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () => task())),
+  infoAction: async (message, action) => (await vscode.window.showInformationMessage(message, action)) === action,
   openFile: async () => {
     const [uri] = (await vscode.window.showOpenDialog({ canSelectMany: false, filters })) ?? [];
     if (!uri) return undefined;

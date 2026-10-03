@@ -180,6 +180,12 @@
         "category": "Agent Stream"
       },
       {
+        "command": "agentStream.setUpParallelTickets",
+        "title": "Set Up Parallel Tickets",
+        "category": "Agent Stream",
+        "icon": "$(git-branch)"
+      },
+      {
         "command": "agentStream.runGraph",
         "title": "Run Graph",
         "category": "Agent Stream"
@@ -266,6 +272,11 @@
           "command": "agentStream.importGraph",
           "when": "view == agentStream.graphs",
           "group": "navigation@2"
+        },
+        {
+          "command": "agentStream.setUpParallelTickets",
+          "when": "view == agentStream.graphs",
+          "group": "navigation@3"
         },
         {
           "command": "agentStream.approveAll",

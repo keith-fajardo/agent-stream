@@ -34,11 +34,18 @@ function setup() {
   const received: ServerMessage[] = [];
   const runHostCommand = vi.fn();
   const setMinimap = vi.fn();
-  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap, activeSession: () => 'work' });
-  return { app, graph, panel, posted, received, handler, runHostCommand, setMinimap };
+  const setUpParallelTickets = vi.fn();
+  const handler = createMessageHandler({ app, panel, client: { send: (m) => void received.push(m) }, runHostCommand, setMinimap, setUpParallelTickets, activeSession: () => 'work' });
+  return { app, graph, panel, posted, received, handler, runHostCommand, setMinimap, setUpParallelTickets };
 }
 
 describe('graph tab messages', () => {
+  it("runs Set Up Parallel Tickets for the tab's folder", () => {
+    const s = setup();
+    s.handler.handle({ type: 'setUpParallelTickets' });
+    expect(s.setUpParallelTickets).toHaveBeenCalledWith(s.panel.folder);
+  });
+
   it('keeps the latest draft state on the panel', () => {
     const s = setup();
     expect(s.panel.dirty).toBe(false);

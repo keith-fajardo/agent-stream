@@ -10,6 +10,7 @@ import { folderFor, workspaceFolders } from './folders';
 import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, graphTarget, graphUri, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
 import { FolderItem, GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
+import { parallelCommands, realParallelFs } from './parallelTickets';
 import { runCommands } from './runCommands';
 import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
@@ -60,6 +61,7 @@ export async function activate(context: vscode.ExtensionContext) {
         activeSession: (folder) => sessions.active(folder).id,
         minimap: () => context.globalState.get<boolean>('minimap', true),
         setMinimap: (value) => void context.globalState.update('minimap', value),
+        setUpParallelTickets: (folder) => void vscode.commands.executeCommand('agentStream.setUpParallelTickets', { folder }),
       }),
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     ),
@@ -83,6 +85,16 @@ export async function activate(context: vscode.ExtensionContext) {
     },
   });
   for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, run));
+  const parallel = parallelCommands({
+    engines: manager,
+    ui: vscodeUi,
+    git: realGit,
+    fs: realParallelFs,
+    home: homedir(),
+    folderFor: graph.folderFor,
+    open: (t) => openGraphTab(t.folder, t.graphId),
+  });
+  for (const [name, run] of Object.entries(parallel)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, run));
   context.subscriptions.push(graphsTree, vscode.workspace.onDidChangeWorkspaceFolders(() => graphsView.refresh()));
   const approvalsView = new ApprovalsView(() => manager.approvals());
   const approvalsTree = vscode.window.createTreeView('agentStream.approvals', { treeDataProvider: approvalsView });

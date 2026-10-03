@@ -5,16 +5,28 @@ import type { EngineManager, Folder } from './engines';
 
 export type GraphTarget = { folder: Folder; graphId: string };
 
+/** One quick pick item carrying its value. */
+export type PickItem<T> = { label: string; description?: string; detail?: string; value: T };
+
 /** The VS Code UI the commands use; tests pass a fake. */
 export type Ui = {
-  inputBox(o: { prompt: string; value?: string; validate(value: string): string | undefined }): Promise<string | undefined>;
+  inputBox(o: { prompt: string; value?: string; placeHolder?: string; validate(value: string): string | undefined }): Promise<string | undefined>;
   pickGraph(items: { label: string; description?: string; target: GraphTarget }[]): Promise<GraphTarget | undefined>;
   pickFolder(folders: Folder[]): Promise<Folder | undefined>;
-  confirm(message: string, action: string): Promise<boolean>;
+  /** A modal confirmation; `detail` is shown under the message. */
+  confirm(message: string, action: string, detail?: string): Promise<boolean>;
   openFile(): Promise<{ size: number; read(): Promise<string> } | undefined>;
   saveFile(defaultPath: string): Promise<{ write(content: string): Promise<void> } | undefined>;
   info(message: string): void;
   error(message: string): void;
+  quickPick<T>(items: PickItem<T>[], placeHolder: string): Promise<T | undefined>;
+  quickPickMany<T>(items: PickItem<T>[], placeHolder: string): Promise<T[] | undefined>;
+  /** A folder picked in the open dialog, starting at `defaultPath`. */
+  pickParentFolder(defaultPath: string): Promise<string | undefined>;
+  openInNewWindow(path: string): Promise<void>;
+  withProgress<T>(title: string, task: () => Promise<T>): Promise<T>;
+  /** An information message with one button: true when it was pressed. */
+  infoAction(message: string, action: string): Promise<boolean>;
 };
 
 export type CommandDeps = {
@@ -126,5 +138,5 @@ export function graphCommands(d: CommandDeps) {
     },
   };
 
-  return { commands, pickGraph };
+  return { commands, pickGraph, folderFor };
 }
