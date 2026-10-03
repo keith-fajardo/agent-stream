@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { PROVIDER_NAMES, fmtDuration, statusLabel, waitingText } from '@agent-stream/shared';
+import { actions } from '../actions';
 import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
 import { ApprovalCard } from './ApprovalCard';
 import { LogView } from './LogView';
+import { ResizeHandle } from './ResizeHandle';
 
 /** Logs of the selected step in the selected run, shown below the canvas while a step is selected. */
 export function LogsPanel() {
@@ -13,7 +15,7 @@ export function LogsPanel() {
   const run = useStore((s) => s.run);
   const approvals = useStore((s) => s.approvals);
   const graphs = useStore((s) => s.graphs);
-  const logsHidden = useStore((s) => s.logsHidden);
+  const { logsHeight, logsCollapsed } = useStore((s) => s.layout);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   const state = node && run ? run.nodes[node.id] : undefined;
   const key = run && node ? logKey(run.id, node.id) : '';
@@ -39,7 +41,7 @@ export function LogsPanel() {
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [eventCount, runId, nodeId]);
 
-  if (!graph || !node || logsHidden) return null;
+  if (!graph || !node) return null;
   const sourceRunId = run?.sourceRunId;
   const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
   const changedBy = [...new Set((run?.amendments ?? []).filter((a) => a.nodeId === node.id).map((a) => a.byNodeId))];
@@ -47,11 +49,24 @@ export function LogsPanel() {
   const ranAs = run?.snapshot.nodes.find((n) => n.id === node.id);
   const place = ranAs?.workspace ? run?.workspaces?.[ranAs.workspace] : undefined;
   const waitingFor = run?.waitingFor;
+  const title = `Logs · ${node.id} ${node.title}`;
+  if (logsCollapsed)
+    return (
+      <section className="logs-panel collapsed" aria-label="Step logs (collapsed)">
+        <header className="logs-head">
+          <span>{title}</span>
+          <button className="link" aria-label="Expand logs panel" onClick={() => actions.toggleLogs()}>
+            ▴
+          </button>
+        </header>
+      </section>
+    );
   return (
-    <section className="logs-panel" aria-label="Step logs">
+    <section className="logs-panel" aria-label="Step logs" style={logsHeight === null ? undefined : { height: logsHeight }}>
+      <ResizeHandle panel="logs" />
       <header className="logs-head">
         <span>
-          Logs · {node.id} {node.title}
+          {title}
           {state && ` · ${statusLabel(state.status)}`}
           {state?.durationMs !== undefined && ` · ${fmtDuration(state.durationMs)}`}
           {run?.provider && ` · ${PROVIDER_NAMES[run.provider]}`}
@@ -63,6 +78,9 @@ export function LogsPanel() {
           </span>
         )}
         {waitingFor && <span className="logs-waiting">{waitingText(waitingFor, graphs.find((g) => g.id === waitingFor.graphId)?.name ?? waitingFor.graphId)}</span>}
+        <button className="link" aria-label="Collapse logs panel" onClick={() => actions.toggleLogs()}>
+          ▾
+        </button>
         <button className="link" aria-label="Close logs" onClick={() => dispatch({ kind: 'selectNode' })}>
           ✕
         </button>

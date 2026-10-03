@@ -17,6 +17,8 @@ import type {
 import { changeKey } from './changeLabels';
 
 export type Tab = 'node' | 'graph' | 'changes';
+/** Size and collapsed state of the side panel and the logs panel; `logsHeight` null is the stylesheet default. */
+export type PanelLayout = { sideWidth: number; sideCollapsed: boolean; logsHeight: number | null; logsCollapsed: boolean };
 export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
 export type StartRequest = { graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string };
 /** A start the engine refused because another run is changing files in this checkout (spec §7). */
@@ -59,11 +61,11 @@ export type State = {
   tab: Tab;
   toast?: string;
   minimap: boolean;
-  logsHidden: boolean;
+  layout: PanelLayout;
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, logsHidden: false };
+export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -79,6 +81,8 @@ export type Action =
   | { kind: 'dismissToast' }
   | { kind: 'setMinimap'; value: boolean }
   | { kind: 'toggleLogs' }
+  | { kind: 'toggleSide' }
+  | { kind: 'setLayout'; layout: Partial<PanelLayout> }
   | { kind: 'openVariables'; focus?: string; addRow?: boolean }
   | { kind: 'closeVariables' }
   | { kind: 'startRequested'; start: StartRequest }
@@ -98,12 +102,12 @@ export function reduce(state: State, action: Action): State {
     case 'selectNode':
       return { ...state, selectedNodeId: action.id, tab: action.id ? 'node' : state.tab };
     case 'setTab':
-      return { ...state, tab: action.tab };
+      return { ...state, tab: action.tab, layout: { ...state.layout, sideCollapsed: false } };
     case 'selectChange': {
       // A step that still exists is selected too; a ghost (removed step) has nothing to select.
       const id = action.key.startsWith('node:') ? action.key.slice('node:'.length) : undefined;
       const exists = id !== undefined && !!state.graph?.nodes.some((n) => n.id === id);
-      return { ...state, tab: 'changes', selectedChange: action.key, ...(exists && { selectedNodeId: id }) };
+      return { ...state, tab: 'changes', layout: { ...state.layout, sideCollapsed: false }, selectedChange: action.key, ...(exists && { selectedNodeId: id }) };
     }
     case 'openChangeConfirm':
       return { ...state, changeConfirm: action.mode };
@@ -118,7 +122,11 @@ export function reduce(state: State, action: Action): State {
     case 'dismissToast':
       return { ...state, toast: undefined };
     case 'toggleLogs':
-      return { ...state, logsHidden: !state.logsHidden };
+      return { ...state, layout: { ...state.layout, logsCollapsed: !state.layout.logsCollapsed } };
+    case 'toggleSide':
+      return { ...state, layout: { ...state.layout, sideCollapsed: !state.layout.sideCollapsed } };
+    case 'setLayout':
+      return { ...state, layout: { ...state.layout, ...action.layout } };
     case 'setMinimap':
       return { ...state, minimap: action.value };
     case 'openVariables':

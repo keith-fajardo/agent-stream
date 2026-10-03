@@ -1,6 +1,7 @@
 import type { ApprovalRequest, ChangeTarget, HostCommand } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions } from './layout';
+import { persistLayout } from './panelLayout';
 import type { State, Tab } from './state';
 import { dispatch, getState } from './store';
 
@@ -73,9 +74,15 @@ export const actions = {
   },
   toggleLogs(): void {
     dispatch({ kind: 'toggleLogs' });
+    persistLayout();
+  },
+  toggleSidePanel(): void {
+    dispatch({ kind: 'toggleSide' });
+    persistLayout();
   },
   showTab(tab: Tab): void {
     dispatch({ kind: 'setTab', tab });
+    persistLayout();
   },
   host(command: HostCommand): void {
     sendHost(command);

@@ -1,13 +1,22 @@
 import type { ClientMessage, HostCommand, HostMessage, WebviewMessage } from '@agent-stream/shared';
 import { dispatch } from './store';
 
-type VsCodeApi = { postMessage(message: unknown): void };
+type VsCodeApi = { postMessage(message: unknown): void; getState?(): unknown; setState?(state: unknown): void };
 declare const acquireVsCodeApi: (() => VsCodeApi) | undefined;
 
 let api: VsCodeApi | undefined;
 function vscode(): VsCodeApi | undefined {
   if (!api && typeof acquireVsCodeApi === 'function') api = acquireVsCodeApi();
   return api;
+}
+
+/** This tab's webview state: VS Code keeps it while the tab is hidden and shown again. Empty outside VS Code (tests). */
+export function loadViewState(): unknown {
+  return vscode()?.getState?.();
+}
+
+export function saveViewState(state: unknown): void {
+  vscode()?.setState?.(state);
 }
 
 /** The graph this tab shows, written into the page by the extension. */

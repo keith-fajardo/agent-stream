@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { emptyGraph } from '@agent-stream/shared';
 
 const posted: unknown[] = [];
-(globalThis as { acquireVsCodeApi?: () => unknown }).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => posted.push(m) });
+(globalThis as { acquireVsCodeApi?: () => unknown }).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => posted.push(m), getState: () => viewState, setState: (s: unknown) => void (viewState = s) });
+let viewState: unknown;
 document.body.dataset.graphId = 'parity';
-const { connect, post, send, sendHost } = await import('../src/bridge');
+const { connect, loadViewState, post, saveViewState, send, sendHost } = await import('../src/bridge');
 const { getState } = await import('../src/store');
 const deliver = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
 
@@ -46,5 +47,11 @@ describe('bridge', () => {
     sendHost('exportGraph');
     post({ type: 'setMinimap', value: false });
     expect(posted).toEqual([{ type: 'stopRun', runId: 'r' }, { type: 'host', command: 'exportGraph' }, { type: 'setMinimap', value: false }]);
+  });
+
+  it("keeps the tab's view state in the webview state", () => {
+    expect(loadViewState()).toBeUndefined();
+    saveViewState({ layout: { sideWidth: 300 } });
+    expect(loadViewState()).toEqual({ layout: { sideWidth: 300 } });
   });
 });

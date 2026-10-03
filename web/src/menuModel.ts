@@ -81,7 +81,8 @@ export function buildMenus(s: State): Menu[] {
       id: 'view',
       label: 'View',
       items: [
-        item('Logs panel', selected, actions.toggleLogs, { checked: selected && !s.logsHidden }),
+        item(s.layout.sideCollapsed ? 'Show Side Panel' : 'Hide Side Panel', true, actions.toggleSidePanel),
+        item(s.layout.logsCollapsed ? 'Show Logs' : 'Hide Logs', selected, actions.toggleLogs),
         item('Minimap', hasGraph, actions.toggleMinimap, { checked: s.minimap }),
         SEPARATOR,
         host('Chat', 'focusChat'),

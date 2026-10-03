@@ -63,7 +63,7 @@ describe('RightPanel', () => {
     const c = document.createElement('div');
     const r = createRoot(c);
     await act(async () => r.render(createElement(RightPanel)));
-    expect([...c.querySelectorAll('.tabs button')].map((b) => b.textContent)).toEqual(['Node', 'Graph']);
+    expect([...c.querySelectorAll('.tabs button:not(.tabs-collapse)')].map((b) => b.textContent)).toEqual(['Node', 'Graph']);
     await act(async () => r.unmount());
   });
 
@@ -73,11 +73,11 @@ describe('RightPanel', () => {
     await act(async () => r.render(createElement(RightPanel)));
     const changes = [{ kind: 'node' as const, change: 'added' as const, id: 'n1', title: 'n1' }, { kind: 'node' as const, change: 'removed' as const, id: 'n2', title: 'n2' }];
     await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: graph(), changes } }));
-    expect([...c.querySelectorAll('.tabs button')].map((b) => b.textContent)).toEqual(['Node', 'Graph', 'Changes (2)']);
+    expect([...c.querySelectorAll('.tabs button:not(.tabs-collapse)')].map((b) => b.textContent)).toEqual(['Node', 'Graph', 'Changes (2)']);
     await act(async () => ([...c.querySelectorAll('.tabs button')].find((b) => b.textContent === 'Changes (2)') as HTMLButtonElement).click());
     expect(c.querySelector('.changes-panel')).not.toBeNull();
     await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', graph: graph(), changes: [] } }));
-    expect([...c.querySelectorAll('.tabs button')].map((b) => b.textContent)).toEqual(['Node', 'Graph']);
+    expect([...c.querySelectorAll('.tabs button:not(.tabs-collapse)')].map((b) => b.textContent)).toEqual(['Node', 'Graph']);
     expect(c.querySelector('.changes-panel')).toBeNull();
     await act(async () => r.unmount());
   });

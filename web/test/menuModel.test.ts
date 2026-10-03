@@ -116,11 +116,12 @@ describe('menus', () => {
 
   it('checks the View toggles', () => {
     const v = items(base({ selectedNodeId: 'n1', tab: 'graph', minimap: false }), 'view');
-    expect([v['Logs panel'].checked, v['Minimap'].checked, v['Graph'].checked]).toEqual([true, false, true]);
+    expect([v['Hide Logs'].enabled, v['Minimap'].checked, v['Graph'].checked]).toEqual([true, false, true]);
+    expect(v['Hide Side Panel'].enabled).toBe(true);
     vi.mocked(sendHost).mockClear();
     v['Chat'].run();
     expect(vi.mocked(sendHost)).toHaveBeenCalledWith('focusChat');
-    expect(items(base(), 'view')['Logs panel'].enabled).toBe(false);
+    expect(items(base(), 'view')['Hide Logs'].enabled).toBe(false);
   });
 
   it('lists variables with their values and flags the ones not set', () => {
