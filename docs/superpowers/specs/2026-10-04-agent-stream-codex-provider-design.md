@@ -24,10 +24,9 @@ A third provider, **OpenAI Codex**, runs planner turns and agent steps on the us
 - **Approvals:** a thread was started with `approvalPolicy: "untrusted"` and `sandbox: "read-only"`. Both `cat <file outside the folder>` and a file write (made as `printf hi > hello.txt`) arrived as `item/commandExecution/requestApproval` server requests **before** running. We answered `{ decision: "decline" }`, so the secret never appeared and the file was not created.
 - **Dynamic tools:** an experimental `dynamicTools` entry on `thread/start` was called through an `item/tool/call` server request, with the correct arguments. Our `{ contentItems: [{ type: "inputText", text }], success: true }` reached the model.
 - **Events:** `item/started` and `item/completed` notifications arrived for `agentMessage`, `reasoning`, `commandExecution` (with `command` and `status`) and `dynamicToolCall`, followed by `turn/completed`.
-- **Not verified:**
-  - whether reads **inside** the working folder run without asking (Task 1 of the plan checks this live, see §6);
-  - `thread/resume` keeping `dynamicTools`;
-  - Windows.
+- **Reads inside the folder (probe 2, same day):** with `approvalPolicy: "untrusted"` and `sandbox: "workspace-write"`, **every** read arrived as an approval request first. That covered `cat notes.txt` inside the folder, `cat .agent-stream/runs/r1/run.json`, and `cat <home>/.agent-stream/values/abc.json`. Each request carried `commandActions`, e.g. `[{ type: "read", command, name, path: <absolute path> }]`. The schema's action types are `read`, `listFiles`, `search` and `unknown`. Everything was declined and nothing leaked.
+- **Resume keeps dynamic tools (probe 2):** after `thread/resume` on a new connection, the model called the dynamic tool registered on `thread/start`, with the right arguments.
+- **Not verified:** Windows.
 
 ## 3. Decisions
 
@@ -111,7 +110,15 @@ Server requests become `ToolGate` decisions:
 | `item/tool/call` | the matching loop/graph tool, gated under its `gateName` (step graph tools self-approve) | `{ contentItems: [{ type: "inputText", text }], success: !isError }`; an unknown tool gets `success: false` |
 | `item/tool/requestUserInput`, `mcpServer/elicitation/request` | none | a JSON-RPC error `Agent Stream doesn't support this request.` |
 
-- **`acceptForSession` is never used**, so every action is approved on its own.
+- **Commands that only read** run without asking, like Claude's Read/Grep/Glob. `item/commandExecution/requestApproval` is allowed without asking the user when all of these hold:
+  1. `commandActions` is present and non-empty, and every action has type `read`, `listFiles` or `search`;
+  2. every action's `path` (when present) passes the gate's privacy rule;
+  3. the `command` string contains none of `;` `&` `|` `>` `<` `` ` `` `$(`.
+
+  It is logged like other auto-allowed reads (`by: 'readOnly'`). This is the same rule the other providers use for read-only tools; it is not an extra permission.
+- **Private paths are declined without asking.** When any action's `path` is a private path, the request is declined automatically with the privacy reason, whatever the action type. Private paths are the values file(s) and `.agent-stream/runs/*` or `.agent-stream/sessions/*` (except a step's upstream `output.md`, as for the other providers).
+- **Everything else asks the user:** writes, `unknown` actions, metacharacters, missing `commandActions`.
+- **`acceptForSession` is never used**, so every action that asks is approved on its own.
 - **Read-only steps:** the gate already refuses anything that isn't read-only, without asking the user, so every request is declined.
 
 ### 4.6 Steps (`runStep.ts`)
@@ -175,14 +182,12 @@ Server requests become `ToolGate` decisions:
 
 **The requirement:** a Codex step must not read Agent Stream's run records (`.agent-stream/runs/**`, `.agent-stream/sessions/**`) or the saved values file (`~/.agent-stream/values/**`) without the user approving it.
 
-**Task 1 checks it live** with the controller-run probe: one small turn in a temp folder. Codex is asked to `cat` a file inside the folder, a file under `.agent-stream/runs/…`, and a file under a fake values folder, and the probe records which ones arrive as approval requests.
+**Resolved by probe 2:** with `approvalPolicy: "untrusted"`, every read, including reads inside the folder, arrives as an approval request with parsed `commandActions` and absolute paths. So:
+- private paths are declined automatically, as in §4.5;
+- plain reads of other paths run without asking;
+- everything else asks the user.
 
-| Probe result | What the provider does |
-|---|---|
-| Every read arrives as an approval request | Nothing extra: the gate's privacy rule declines private paths. The `Bash` command is checked for those paths, plus the `commandActions` read targets when present |
-| Some reads run without asking | Each step's thread passes a sandbox configuration that denies reading those folders, if Codex supports read restrictions. If it doesn't, the provider passes `approvalPolicy: { granular: { sandbox_approval: true, rules: true, skill_approval: true, request_permissions: true, mcp_elicitations: true } }` (or whatever the probe shows asks for every command). The README states the limitation precisely |
-
-In every case, an approval request whose command or read targets name a private path is declined automatically, the same as Read/Grep/Glob for the other providers. The step log names the path.
+No sandbox read restriction is needed. Agent Stream keeps passing `approvalPolicy: "untrusted"`, so Codex never runs a command without asking us first. A Codex release that changes this is caught by the manual check in §8.
 
 ## 7. Error handling
 
