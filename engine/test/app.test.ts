@@ -55,7 +55,7 @@ function setupWithGraph(over: Partial<AppDeps> = {}) {
   const paths = tmpProject();
   const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1, gitBash: testGitBash, ...over });
   const graphId = app.graphStore.create('G').id;
-  return { app, graphId };
+  return { app, graphId, paths };
 }
 
 /** A connected client that records what it receives. */
@@ -473,8 +473,63 @@ describe('app', () => {
       await app.handle(a.client, { type: 'chat', graphId, sessionId: 'nope', text: 'x' });
       expect(a.last('error')).toEqual({ type: 'error', message: 'session "nope" not found' });
       app.saveSessionTabs('default', [{ graphId, group: 1, index: 0 }], graphId);
+      const other = app.createSession('Other');
+      app.sessionStore.chatLog(other.id).append(graphId, { at: 't', role: 'user', text: 'hi' });
+      app.sessionStore.setPlannerState(other.id, graphId, { sessionId: 's', provider: 'claude', opCursor: 1 });
       expect(app.deleteGraph(graphId)).toEqual({ ok: true });
       expect(app.sessionStore.get('default').tabs).toEqual([]);
+      expect(app.sessionStore.chatLog(other.id).read(graphId)).toEqual([]);
+      expect(app.sessionStore.plannerState(other.id, graphId)).toEqual({});
+    });
+
+    it('broadcasts a duplicated session once, with the tabs it copied', () => {
+      const { app, graphId } = setupWithGraph();
+      const second = app.createGraph('H').id;
+      const b = app.createSession('B');
+      app.saveSessionTabs(b.id, [{ graphId, group: 1, index: 0 }, { graphId: second, group: 1, index: 1 }], graphId);
+      const watcher = client(app);
+      const before = watcher.all('sessions').length;
+      const copy = app.duplicateSession(b.id);
+      if (!copy.ok) throw new Error(copy.error);
+      expect(watcher.all('sessions')).toHaveLength(before + 1);
+      expect(watcher.last('sessions').sessions.find((x) => x.id === copy.session.id)).toMatchObject({ name: 'B copy', tabCount: 2 });
+    });
+
+    it('shows an unreadable chat as empty with a warning, and leaves the file alone', async () => {
+      const { app, graphId, paths } = setupWithGraph();
+      const a = client(app);
+      // A folder where the chat file should be: reading it fails.
+      const chatPath = join(paths.sessionsDir, 'default', 'chats', `${graphId}.chat.jsonl`);
+      mkdirSync(join(chatPath, 'inside'), { recursive: true });
+      await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+      expect(a.msgs.slice(-2)).toEqual([
+        { type: 'chatOpened', graphId, sessionId: 'default', chat: [], busy: false },
+        {
+          type: 'error',
+          message: expect.stringMatching(new RegExp(`^The planner chat for ${graphId} in this session could not be read \\(.+\\); it shows as empty and the file is left untouched\\.$`)),
+        },
+      ]);
+      expect(statSync(chatPath).isDirectory()).toBe(true);
+      expect(readdirSync(chatPath)).toEqual(['inside']);
+    });
+
+    it('still reports a deleted graph when cleaning the sessions fails', () => {
+      const { app, graphId } = setupWithGraph();
+      const a = client(app);
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failure = new Error('EACCES: permission denied');
+      const removeGraph = vi.spyOn(app.sessionStore, 'removeGraph').mockImplementation(() => {
+        throw failure;
+      });
+      try {
+        expect(app.deleteGraph(graphId)).toEqual({ ok: true });
+        expect(a.all('graphDeleted')).toEqual([{ type: 'graphDeleted', graphId }]);
+        expect(a.last('graphs').graphs).toEqual([]);
+        expect(logged).toHaveBeenCalledWith('[agent-stream] could not clean sessions', failure);
+      } finally {
+        logged.mockRestore();
+        removeGraph.mockRestore();
+      }
     });
 
     it('broadcasts the session list on every change, and refuses to delete a session whose planner is busy', async () => {

@@ -208,15 +208,19 @@ describe('Planner', () => {
     const append = vi.spyOn(ChatLog.prototype, 'append').mockImplementation(() => {
       throw new Error('ENOSPC: no space left on device, write');
     });
-    await expect(s.planner.send('a', s.graphId, 'two')).resolves.toBeUndefined();
-    gate.resolve();
-    await expect(first).resolves.toBeUndefined();
-    await expect(s.planner.send('a', s.graphId, 'three')).resolves.toBeUndefined();
-    expect(s.busy).toEqual([true, false, true, false]);
-    expect(s.planner.isBusy('a', s.graphId)).toBe(false);
-    expect(logged).toHaveBeenCalled();
-    logged.mockRestore();
-    append.mockRestore();
+    try {
+      await expect(s.planner.send('a', s.graphId, 'two')).resolves.toBeUndefined();
+      gate.resolve();
+      await expect(first).resolves.toBeUndefined();
+      await expect(s.planner.send('a', s.graphId, 'three')).resolves.toBeUndefined();
+      expect(s.busy).toEqual([true, false, true, false]);
+      expect(s.planner.isBusy('a', s.graphId)).toBe(false);
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      // Restored even when an assertion fails, so later tests can still write their chat.
+      logged.mockRestore();
+      append.mockRestore();
+    }
   });
 
   it('stops the turn before the provider runs when the folder has a problem', async () => {
@@ -288,6 +292,10 @@ describe('Planner', () => {
     const first = s.planner.send('a', s.graphId, 'slow');
     await s.planner.send('a', s.graphId, 'again');
     await s.planner.send('b', s.graphId, 'other');
+    // b's turn ran while a's was still held.
+    expect(s.seen).toHaveLength(2);
+    expect(s.sessions.chatLog('b').read(s.graphId).map((e) => [e.role, e.text])).toEqual([['user', 'other']]);
+    expect(s.sessions.plannerState('b', s.graphId).sessionId).toBe('s-b');
     expect(s.sessions.chatLog('a').read(s.graphId).at(-1)).toMatchObject({ role: 'error', text: 'The planner is still working on your previous message.' });
     expect(s.planner.isBusyInGraph(s.graphId)).toBe(true);
     gate.resolve({ ok: true, sessionId: 's-a' });
@@ -302,6 +310,21 @@ describe('Planner', () => {
     expect(s.provider.seen[0].resume).toBeUndefined();
     expect(s.sessions.chatLog('a').read(s.graphId).map((e) => [e.role, e.text])).toContainEqual(['note', "Started a new planner conversation with GitHub Copilot; it doesn't see earlier messages."]);
     expect(s.sessions.plannerState('a', s.graphId)).toMatchObject({ sessionId: 'new', provider: 'copilot' });
+  });
+
+  it('reads planner state saved without a provider as Claude’s', async () => {
+    const claude = setup([ok('next')]);
+    claude.sessions.setPlannerState('a', claude.graphId, { sessionId: 'old-sess', opCursor: 0 });
+    await claude.planner.send('a', claude.graphId, 'hi');
+    expect(claude.provider.seen[0].resume).toBe('old-sess');
+    expect(claude.chat().map((e) => e.role)).not.toContain('note');
+    expect(claude.state()).toEqual({ sessionId: 'next', provider: 'claude', opCursor: 0 });
+
+    const copilot = setup([ok('new')], { id: 'copilot', name: 'GitHub Copilot' });
+    copilot.sessions.setPlannerState('a', copilot.graphId, { sessionId: 'old-sess', opCursor: 0 });
+    await copilot.planner.send('a', copilot.graphId, 'hi');
+    expect(copilot.provider.seen[0].resume).toBeUndefined();
+    expect(copilot.chat().map((e) => e.role)).toContain('note');
   });
 
   it('New chat clears this session’s conversation for the graph only', async () => {

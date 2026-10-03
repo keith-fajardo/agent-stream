@@ -155,7 +155,12 @@ export function createApp(d: AppDeps) {
     const r = graphStore.delete(id);
     if (!r.ok) return r;
     values.deleteGraph(id);
-    sessions.removeGraph(id);
+    try {
+      sessions.removeGraph(id);
+    } catch (e) {
+      // The graph is gone either way: clients still hear about it.
+      console.error('[agent-stream] could not clean sessions', e);
+    }
     broadcast({ type: 'graphDeleted', graphId: id });
     broadcastGraphs();
     return r;
@@ -292,7 +297,16 @@ export function createApp(d: AppDeps) {
         const s = sessions.load(msg.sessionId);
         if (!s.ok) return error(s.error);
         chatSubscriptions.set(client, { graphId: msg.graphId, sessionId: msg.sessionId });
-        client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat: sessions.chatLog(msg.sessionId).read(msg.graphId), busy: planner.isBusy(msg.sessionId, msg.graphId) });
+        const busy = planner.isBusy(msg.sessionId, msg.graphId);
+        let chat: ChatEntry[];
+        try {
+          chat = sessions.chatLog(msg.sessionId).read(msg.graphId);
+        } catch (e) {
+          // Spec §7: shown as empty plus a warning; the file is left for the user to fix.
+          client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat: [], busy });
+          return error(`The planner chat for ${msg.graphId} in this session could not be read (${e instanceof Error ? e.message : String(e)}); it shows as empty and the file is left untouched.`);
+        }
+        client.send({ type: 'chatOpened', graphId: msg.graphId, sessionId: msg.sessionId, chat, busy });
         return;
       }
       case 'chat': {

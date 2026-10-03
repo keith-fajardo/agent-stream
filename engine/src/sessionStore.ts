@@ -79,13 +79,19 @@ export class SessionStore extends EventEmitter {
   }
 
   create(name: string, id?: string): Session {
+    const session = this.createQuietly(name, id);
+    this.emit('changed');
+    return session;
+  }
+
+  /** `create` without the 'changed' event, for callers that finish the session first. */
+  private createQuietly(name: string, id?: string): Session {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('A session needs a name.');
     if (id !== undefined && existsSync(this.dir(id))) throw new Error(`session "${id}" already exists`);
     const at = this.clock();
     const session: Session = { id: id ?? this.uniqueId(trimmed), name: trimmed, createdAt: at, updatedAt: at, tabs: [], planner: {} };
     this.save(session);
-    this.emit('changed');
     return session;
   }
 
@@ -113,9 +119,11 @@ export class SessionStore extends EventEmitter {
     const names = new Set(this.list().map((s) => s.name));
     let name = `${r.session.name} copy`;
     for (let i = 2; names.has(name); i++) name = `${r.session.name} copy ${i}`;
-    const copy = this.create(name);
+    const copy = this.createQuietly(name);
     const session = { ...copy, tabs: r.session.tabs, ...(r.session.activeGraphId && { activeGraphId: r.session.activeGraphId }) };
     this.save(session);
+    // Announced once its tabs are in, so the list shows the copy's real tab count.
+    this.emit('changed');
     return { ok: true, session };
   }
 
