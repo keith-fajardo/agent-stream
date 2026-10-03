@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { Decision, NodeEventBody } from '@agent-stream/shared';
 import type { ApprovalBroker } from '../approvals';
 import { privatePathDenial } from '../privatePaths';
@@ -69,6 +70,19 @@ export function withDecide(base: Omit<ToolGate, 'decide' | 'isSelfApproving'> & 
   };
 }
 
+/**
+ * The tool input with its path made absolute against the step's working directory, where the agent's relative paths
+ * resolve (a search without a path searches that folder). A leading ~ is left for privatePathDenial to expand.
+ */
+function resolvedAgainst(cwd: string, toolName: string, input: unknown): unknown {
+  const key = toolName === 'Read' ? 'file_path' : toolName === 'Grep' || toolName === 'Glob' ? 'path' : undefined;
+  if (!key || typeof input !== 'object' || input === null) return input;
+  const given = (input as Record<string, unknown>)[key];
+  const p = key === 'path' && (given === undefined || given === null || given === '') ? cwd : given;
+  if (typeof p !== 'string' || p === '' || /^~(?=$|[\\/])/.test(p)) return input;
+  return { ...input, [key]: resolve(cwd, p) };
+}
+
 /** "Ask for everything" for one agent step (spec §7.4): privacy first, read-only tools pass, the rest waits for the user. */
 export function createStepGate(o: StepGateOptions): ToolGate {
   async function ask(toolName: string, input: unknown, sdkSignal?: AbortSignal): Promise<Decision> {
@@ -109,7 +123,7 @@ export function createStepGate(o: StepGateOptions): ToolGate {
   return withDecide({
     privacy: (toolName, input) =>
       privatePathDenial(o.projectDir, toolName, input, o.privateFiles) ??
-      (o.runsRoot && o.runsRoot !== o.projectDir ? privatePathDenial(o.runsRoot, toolName, input) : null),
+      (o.runsRoot && o.runsRoot !== o.projectDir ? privatePathDenial(o.runsRoot, toolName, resolvedAgainst(o.projectDir, toolName, input)) : null),
     isReadOnly: (toolName) => READ_ONLY_TOOLS.has(toolName),
     isSelfApproving: (toolName) => o.selfApproving?.has(toolName) ?? false,
     async approve(toolName, input, signal) {

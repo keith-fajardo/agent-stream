@@ -176,6 +176,8 @@ export class Runner extends EventEmitter {
       } else waitFor = { holder: got.holder, otherWindow: got.otherWindow };
     }
 
+    // One copy, shared by the run and its record, so the two can't drift.
+    const workspaces = structuredClone(input.workspaces ?? {});
     const meta: RunMeta = {
       id: runId,
       graphId: graph.id,
@@ -186,7 +188,7 @@ export class Runner extends EventEmitter {
       ...(input.provider && { provider: input.provider }),
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
-      ...(input.workspaces && Object.keys(input.workspaces).length > 0 && { workspaces: structuredClone(input.workspaces) }),
+      ...(Object.keys(workspaces).length > 0 && { workspaces }),
     };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
@@ -215,7 +217,7 @@ export class Runner extends EventEmitter {
       resolveDone,
       leaseRoot,
       holdsLease,
-      workspaces: input.workspaces ?? {},
+      workspaces,
     };
     this.runs.set(meta.id, run);
     if (waitFor) this.waitForLease(run, waitFor.otherWindow);

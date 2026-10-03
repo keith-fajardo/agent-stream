@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ApprovalBroker } from '../src/approvals';
 import { createPlannerGate, createStepGate, withDecide } from '../src/providers/toolGate';
@@ -71,6 +71,21 @@ describe('step gate', () => {
     expect(gate.privacy('Read', { file_path: join(runDir, 'nodes', 'n1', 'events.jsonl') })).toMatch(/Run records contain variable values/);
     expect(gate.privacy('Read', { file_path: join(runDir, 'nodes', 'n1', 'output.md') })).toBeNull();
     expect(gate.privacy('Read', { file_path: join(workspace, 'models', 'orders.sql') })).toBeNull();
+  });
+
+  it("refuses a step in a workspace that reaches the folder's run records by a relative path", () => {
+    const workspace = resolve('/', 'home', 'me', '.agent-stream', 'worktrees', '0123456789abcdef', '20261003-000000-0001', 'wh_a');
+    // Deeper than the worktree, so the relative path's `..` steps don't happen to line up from the project folder too.
+    const project = resolve('/', 'home', 'me', 'code', 'clients', 'acme', 'data', 'warehouse', 'proj');
+    const gate = createStepGate({ broker: new ApprovalBroker(() => 't'), runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: workspace, runsRoot: project, privateFiles: [VALUES], signal: new AbortController().signal, emit: vi.fn() });
+    const runDir = join(project, '.agent-stream', 'runs', '20261003-000000-0001');
+    const fromWorkspace = relative(workspace, runDir);
+    expect(gate.privacy('Grep', { pattern: 'x', path: fromWorkspace })).toMatch(/Run records contain variable values/);
+    expect(gate.privacy('Read', { file_path: join(fromWorkspace, 'run.json') })).toMatch(/Run records contain variable values/);
+    expect(gate.privacy('Read', { file_path: join(fromWorkspace, 'nodes', 'n1', 'events.jsonl') })).toMatch(/Run records contain variable values/);
+    expect(gate.privacy('Read', { file_path: join(fromWorkspace, 'nodes', 'n1', 'output.md') })).toBeNull();
+    expect(gate.privacy('Read', { file_path: join('models', 'orders.sql') })).toBeNull();
+    expect(gate.privacy('Grep', { pattern: 'x' })).toBeNull();
   });
 });
 
