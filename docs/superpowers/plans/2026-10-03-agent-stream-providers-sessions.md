@@ -54,7 +54,7 @@
 - `.agent-stream/.gitignore` lists `runs/` and `sessions/`. Graph files carry no planner state after Task 6. The export format is unchanged.
 - Tests never touch the real home folder. They use `mkdtemp` folders, as `tmpValuesFile()`/`tmpProject()` already do.
 - The repo is PUBLIC, so commit no personal paths, emails or machine details.
-- Run every command from the repo root (`/Users/keithfajardo/Desktop/local/personal/agent-stream`). Work on branch `feat/providers-sessions`.
+- Run every command from the repo root. Work on branch `feat/providers-sessions`.
 - Commits end with the implementer's own `Co-Authored-By` line, taken from its system reminder.
 
 ## Review Focus
