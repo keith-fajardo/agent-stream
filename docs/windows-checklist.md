@@ -3,7 +3,7 @@
 Run on a Windows machine with Claude Code installed and signed in, and Git for Windows installed. Install the `.vsix` with **Extensions: Install from VSIX…**, then open a folder.
 
 1. The Agent Stream sidebar and the status bar show your signed-in Claude plan.
-2. Run **Agent Stream: Select Provider** and choose GitHub Copilot. The status bar shows `Copilot (preview)` or `Copilot not available`, Run is refused with the Copilot message, and Chat is disabled with it. Switch back to Claude; the status bar shows your plan again.
+2. Run **Agent Stream: Select Provider** and choose GitHub Copilot. Without a signed-in Copilot, the status bar shows `Agent Stream: Copilot not available` and Run is refused with that message. With one, it shows `Copilot`, and its tooltip lists the models. Switch back to Claude; the status bar shows your plan again.
 3. Create a second session from the Sessions view with one graph open in a split, switch back and forth: the right tabs and splits come back each time.
 4. Open the Agent Stream Chat view: it follows the active graph tab; New chat asks first, then clears that conversation only.
 5. Import a graph exported on a Mac (sidebar › Import). Its variables show as "not set" in the Variables menu; set them.
@@ -47,5 +47,21 @@ Run on a Windows machine with Claude Code installed and signed in, and Git for W
     - **Remove** removes it, so it's gone from `git worktree list`.
     - Edit a file in the other variant, then Remove it. You're asked first.
 22. **Clean up.** Remove the two ticket worktrees with `git worktree remove <path>` and delete their branches with `git branch -D`.
+
+**GitHub Copilot.** Use a VS Code signed in to GitHub Copilot, and a Git repository you can change. Select GitHub Copilot with **Agent Stream: Select Provider**.
+
+23. **Consent.** The status bar tooltip says `Copilot will ask for permission the first time a run or chat uses it.` When you start the run in step 24, VS Code asks whether Agent Stream may use Copilot. Choose Allow.
+24. **Two-step graph.** Make a graph with an agent step "Add a line `hello` to notes.txt" (Can edit files), followed by an agent step "Run `git status` with Bash and report what it says". Run it.
+    - The run dialog shows `Copilot requests per step: up to 25`.
+    - The first step asks for approval before its Edit or Write. Approve it, and `notes.txt` changes.
+    - The second step asks before its Bash call. Approve it. Its log shows the tool call, the result ending with `exit code 0`, and the model's summary.
+    - Each step's log ends with `Copilot requests: <n> of 25`.
+25. **Deny.** Re-run from the first step and deny its edit. Its log shows `Denied by the user.`, and `notes.txt` is unchanged.
+26. **Stop.** Ask an agent step to run `sleep 600` with Bash, approve it, then press Stop. The step is cancelled, and Task Manager shows no `bash.exe` or `sleep.exe` left from it.
+27. **Planner chat.** In the chat, ask the planner to add a step; it appears on the canvas.
+    - Reload the window (**Developer: Reload Window**) and ask a follow-up about that step. The planner answers with the earlier conversation in mind.
+    - Press **New chat**. The next message starts fresh.
+28. **Request cap.** Set `agentStream.copilot.maxRequestsPerStep` to 1 and run a step that needs to read a file. It stops with `Stopped after 1 Copilot requests (agentStream.copilot.maxRequestsPerStep). Raise the setting to let steps run longer.` Reset the setting afterwards.
+29. **Effort.** The run dialog's Model line reads `Effort: not supported`, whatever `agentStream.effort` is set to.
 
 Report anything that differs, with the step number and a screenshot.

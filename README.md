@@ -2,14 +2,14 @@
 
 Agent Stream is an independent project. It is not made, endorsed or supported by Anthropic or GitHub.
 
-A VS Code extension where you and an AI planner co-create a workflow as a graph, then run it step by step on your own AI subscription. Agent Stream is **provider-agnostic**: agent steps and the planner run on the provider you choose. Today that is **Claude** (your Claude subscription through Claude Code), with **GitHub Copilot** available as a preview. Every file edit, shell command or other non-read-only action an agent step attempts waits for your approval, whichever provider runs it, and every step keeps its own logs.
+A VS Code extension where you and an AI planner co-create a workflow as a graph, then run it step by step on your own AI subscription. Agent Stream is **provider-agnostic**: agent steps and the planner run on the provider you choose. That is **Claude** (your Claude subscription through Claude Code) or **GitHub Copilot** (your Copilot plan through VS Code's Language Model API). Every file edit, shell command or other non-read-only action an agent step attempts waits for your approval, whichever provider runs it, and every step keeps its own logs.
 
 ## Requirements
 
 - VS Code **1.106** or newer, on macOS or Windows. Linux works the same way as macOS.
 - One provider:
   - **Claude:** Claude Code installed and signed in with your Claude account (run `claude`, then `/login`). Check with `claude auth status`.
-  - **GitHub Copilot (preview):** the GitHub Copilot extension installed and signed in. Agent Stream detects your Copilot models. Running steps with Copilot comes in a later version.
+  - **GitHub Copilot:** the GitHub Copilot extension installed and signed in to a Copilot plan. The first run or chat on Copilot asks you to allow Agent Stream to use it.
 - Windows only: Git for Windows, which provides Git Bash for command steps.
 
 ## Install
@@ -23,13 +23,13 @@ Get `agent-stream-<version>.vsix` (or build it: `npm install && npm run package`
   - **Sessions:** New Session, click to switch, right-click for Rename, Duplicate, Delete.
   - **Approvals:** Approve, Deny, Approve all.
 - **Chat view:** the **Agent Stream Chat** view on the right, next to VS Code's own Chat. It shows the planner conversation for the graph tab you're on, in the current session. Describe a goal; the planner reads your repo (read-only) and draws the plan. **New chat** starts over; the session button switches session.
-- **Model and effort:** the chat header's **Model** menu picks the model for this conversation (**Default**, or one the provider lists), and **Effort** its effort level when that model offers levels (for **Default**: the levels of the model in the settings, else of Claude Code's default model). A saved effort always shows, so it can be cleared. The choice is kept with the conversation in the session (New chat keeps it) and applies from the next message. **Default** uses the `agentStream.model` / `agentStream.effort` settings, or Claude Code's own default when they are empty. Runs use those settings, read once when the run starts: the run dialog and the run's tooltip show `Model: … · Effort: …`. Set them with **Agent Stream: Select Model**; the provider's status bar tooltip shows them. A model or effort is never written into a graph or an export. An effort level the chosen model doesn't offer is left out.
+- **Model and effort:** the chat header's **Model** menu picks the model for this conversation (**Default**, or one the provider lists), and **Effort** its effort level when that model offers levels (for **Default**: the levels of the model in the settings, else of Claude Code's default model). A saved effort always shows, so it can be cleared. The choice is kept with the conversation in the session (New chat keeps it) and applies from the next message. **Default** uses the `agentStream.model` / `agentStream.effort` settings, or the provider's own default when they are empty (Claude Code's default; Auto on Copilot). Runs use those settings, read once when the run starts: the run dialog and the run's tooltip show `Model: … · Effort: …`. Set them with **Agent Stream: Select Model**; the provider's status bar tooltip shows them. A model or effort is never written into a graph or an export. An effort level the chosen model doesn't offer is left out.
 - **Graph tab:** the canvas, the logs of the selected step underneath, and Node · Graph on the right (plus a Changes tab while agent changes wait for review). The menu bar has File, Edit, Run, Variables and View, with View › Chat opening the chat view.
 - **Work sessions:**
   - A session is a named set of open graph tabs plus its own planner conversations.
   - Switching a session closes the current graph tabs and brings back the other session's tabs, splits and chats.
   - Sessions are personal: they stay in `.agent-stream/sessions/`, which git ignores.
-- **Status bar:** the provider your steps run on (for example `Claude Max` or `Copilot (preview)`) and the current session (`Default`). Click either one to change it.
+- **Status bar:** the provider your steps run on (for example `Claude Max` or `Copilot`) and the current session (`Default`). Click either one to change it.
 - **Agent steps** run a separate AI agent with the step's prompt, the goal, the instructions and the outputs of earlier steps. **Command steps** run an exact shell command in the project folder: your login shell on macOS, Git Bash on Windows.
 - **Step descriptions:** each step has a plain-language description for people. It shows on the canvas card, and agents get it as context: a step sees its own description as "In short", and later steps see earlier steps' descriptions next to their results. The planner writes one for every step it adds or changes, and you can write or edit it in the Node panel.
 - **Refine with planner:** write a step in plain words, then press **Refine with planner** (Node panel, or **Edit › Refine selected step** / **Refine steps you changed**). The planner reads your repository and writes the precise prompt or command, plus a one-line description, for you to review.
@@ -128,12 +128,14 @@ Recommended workflow:
 
 ## Settings
 
-- `agentStream.provider` — `claude` (default) or `copilot` (preview).
+- `agentStream.provider` — `claude` (default) or `copilot`.
 - `agentStream.claudePath` — Claude provider only. Claude Code's full path if it isn't found automatically.
 - `agentStream.gitBashPath` — Windows: Git Bash's full path if it isn't found automatically.
-- `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): Claude Code's default.
+- `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): the provider's default (Claude Code's default; Auto on Copilot).
 - `agentStream.effort` — the effort level for the same: `low`, `medium`, `high`, `xhigh` or `max`. Empty (default): the model's own level.
 - `agentStream.maxParallel` — how many steps of a run may run at once (default 3). Steps that can change files still take turns within each workspace.
+- `agentStream.copilot.maxRequestsPerStep` — GitHub Copilot: the most model requests one agent step may make (default 25, 1–200). A step that reaches it stops with a message naming this setting.
+- `agentStream.copilot.maxRequestsPerTurn` — GitHub Copilot: the most model requests one planner chat message may make (default 10, 1–100).
 
 ## Providers
 
@@ -143,9 +145,22 @@ Choose the provider with **Agent Stream: Select Provider** (or click the provide
 
 Agent Stream runs your installed, signed-in Claude Code through the Claude Agent SDK. It never reads or stores your credentials. It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_USE_*` from every agent's environment, checks `claude auth status`, and stops any session that reports an API key instead of your subscription. It refuses to run in a project whose `.claude/settings.json` would route Claude elsewhere.
 
-### GitHub Copilot (preview)
+### GitHub Copilot
 
-Agent Stream finds your Copilot models through VS Code's Language Model API and shows them in the status bar tooltip. In this version Copilot can't run steps or the planner yet: runs and chat explain that and point you back to Claude. Agent Stream sends no requests to Copilot, so VS Code doesn't ask you to allow it yet.
+Agent Stream runs agent steps and the planner on your Copilot plan through VS Code's Language Model API. It doesn't use Copilot's own agent tools: Copilot works through Agent Stream's tools (Read, Grep, Glob, Edit, Write and Bash). So the rules are the same as with Claude:
+- every file edit and shell command waits for your approval;
+- read-only steps get only Read, Grep and Glob;
+- the variable values file and run records stay private.
+
+How Copilot behaves:
+- **Models:** the Model menus list the Copilot models that can call tools, with **Auto** first. **Default** means Auto. A model that is no longer available falls back to Auto, and the step's log says so. Copilot has no effort levels, so the Effort menu hides.
+- **Permission:** the first run or chat on Copilot shows VS Code's dialog asking whether Agent Stream may use Copilot. If you decline, the step fails and says how to allow it later (**Accounts › Manage Language Model Access**).
+- **Request cap:**
+  - Each agent step may make up to `agentStream.copilot.maxRequestsPerStep` model requests (default 25), and each planner message up to `agentStream.copilot.maxRequestsPerTurn` (default 10).
+  - The run dialog shows `Copilot requests per step: up to <n>`, and each step's log ends with `Copilot requests: <n> of <cap>`.
+  - Whether these requests count against your plan's premium requests depends on your Copilot plan. Agent Stream doesn't track it.
+- **Long conversations:** when a conversation nears the model's input limit, older turns are summarised in one extra request, which counts toward the cap. If that isn't possible, they are dropped with a note.
+- **Planner chat:** the conversation is kept in your session (`.agent-stream/sessions/<id>/transcripts/`), so it continues after a VS Code reload. **New chat** deletes it.
 
 ## Files it writes
 
@@ -155,7 +170,7 @@ Agent Stream finds your Copilot models through VS Code's Language Model API and 
   graphs/<id>.ops.jsonl       who changed what, and when
   graphs/<id>.baseline.json   your version of the graph while agent changes wait for review
   runs/<run-id>/              run snapshot, per-step events and outputs (git-ignored)
-  sessions/<id>/              your work sessions: open tabs and planner chats (git-ignored)
+  sessions/<id>/              your work sessions: open tabs, planner chats and Copilot planner transcripts (git-ignored)
 ```
 
 Older `.claude-stream` folders and values are moved to the new names automatically the first time a folder is opened. Older planner chats move into a session called Default the first time a folder is opened.
