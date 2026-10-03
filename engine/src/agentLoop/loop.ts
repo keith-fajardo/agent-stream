@@ -129,8 +129,9 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
       if (!round) return { ok: true, text: textOf(content), requests, messages };
       for (const call of calls) {
         const r = await runCall(call);
-        o.signal.throwIfAborted();
+        // A tool that returned did its work, even if Stop landed meanwhile: its real result is kept.
         round.results.push(r.isError ? { type: 'toolResult', callId: call.callId, text: r.text, isError: true } : { type: 'toolResult', callId: call.callId, text: r.text });
+        o.signal.throwIfAborted();
         o.onToolResult(call.callId, r.text, r.isError === true);
       }
       closeRound();

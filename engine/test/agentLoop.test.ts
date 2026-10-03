@@ -175,8 +175,11 @@ describe('runAgentLoop', () => {
     const { result, log } = loop({ signal: ac.signal, tools: [slow], replies: [[toolCallPart('c1', 'Slow', {})]] });
     await started.promise;
     ac.abort();
-    expect(await result).toMatchObject({ ok: false, cancelled: true, error: 'cancelled' });
+    const r = await result;
+    expect(r).toMatchObject({ ok: false, cancelled: true, error: 'cancelled' });
     expect(log).toEqual([['call', 'c1', 'Slow', {}]]);
+    // The tool's run threw because of the abort, so it has no result of its own.
+    expect(r.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'toolResult', callId: 'c1', text: 'Cancelled.', isError: true }] });
   });
 
   it("returns a ChatModelError's message as the error", async () => {
@@ -196,7 +199,7 @@ describe('runAgentLoop', () => {
     }
   });
 
-  it('answers every call of a round stopped mid-way with Cancelled., and runs no later call', async () => {
+  it('keeps the real result of a tool that returned after Stop, and answers the calls that never ran with Cancelled.', async () => {
     const ac = new AbortController();
     const started = deferred<void>();
     const slow: LoopTool = {
@@ -204,7 +207,8 @@ describe('runAgentLoop', () => {
       gateName: 'Slow',
       run: async (_input, signal) => {
         started.resolve();
-        return untilAborted(signal);
+        await untilAborted(signal).catch(() => {});
+        return { text: 'Wrote half of it.' };
       },
     };
     const second = vi.fn(async () => ({ text: 'ran' }));
@@ -224,7 +228,7 @@ describe('runAgentLoop', () => {
     expect(r.messages.at(-1)).toEqual({
       role: 'user',
       content: [
-        { type: 'toolResult', callId: 'c1', text: 'Cancelled.', isError: true },
+        { type: 'toolResult', callId: 'c1', text: 'Wrote half of it.' },
         { type: 'toolResult', callId: 'c2', text: 'Cancelled.', isError: true },
       ],
     });
