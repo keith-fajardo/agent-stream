@@ -98,7 +98,7 @@ export type PlannerEvent = { type: 'text'; text: string } | { type: 'tool'; name
 export type PlannerTurn = {
   graph: Graph; prompt: string; systemAppend: string; cwd: string;
   tools: GraphTool[];            // today's graph tools, defined once, neutrally
-  resume?: string;               // only when graph.plannerProvider === this provider
+  resume?: string;               // only when the stored planner state's provider === this provider (§5)
   gate: ToolGate;                // read-only + privacy for the planner's file tools
   signal: AbortSignal;
   onEvent(e: PlannerEvent): void;
@@ -190,12 +190,14 @@ It lives in the extension because it needs `vscode.lm`. The engine stays free of
 
 ## 5. Data and protocol
 
-- **Graph.** It gains an optional `plannerProvider?: ProviderId`, and a file without it reads as
-  `'claude'`.
-  - The planner passes `resume` only when `graph.plannerProvider === provider.id`.
-  - When the IDs differ and a session exists, it starts fresh and appends a chat note: "Started a new
-    planner conversation with <name>; it doesn't see earlier messages."
-  - After a turn it saves `plannerSessionId` and `plannerProvider` together.
+- **Planner state carries its provider.** *Amended by `2026-10-03-agent-stream-sessions-chat-design.md`
+  §8:* planner state now lives per work session, in `session.json` as
+  `planner[graphId] = { sessionId, provider, opCursor }`, not on `Graph`. State without a provider reads
+  as `'claude'`.
+  - The planner passes `resume` only when the stored `provider === provider.id`.
+  - When the IDs differ and a provider session exists, it starts fresh and appends a chat note: "Started
+    a new planner conversation with <name>; it doesn't see earlier messages."
+  - After a turn it saves the provider session ID and `provider` together.
 - **`RunMeta`.** It gains `provider?: ProviderId`, written at start. The run picker and the step logs
   header show the provider name. Re-run reuse rules don't change.
 - **Export.** Unchanged. Exports never include planner state, so they stay provider-neutral.
@@ -244,7 +246,7 @@ It lives in the extension because it needs `vscode.lm`. The engine stays free of
     - the preamble and the op cursor;
     - `resume` only for the same provider;
     - the fresh-start note on a switch;
-    - `plannerProvider` saved.
+    - the provider saved with the planner state (per session; see the sessions spec).
   - `app.test.ts`:
     - runs and chat refused with `status.error` when `!ok`;
     - `setProvider` swaps for new runs only, while an active run keeps its provider;
