@@ -180,6 +180,7 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
       scriptUri: asset('index.js'),
       styleUri: asset('index.css'),
       nonce: randomBytes(16).toString('hex'),
+      view: 'graph',
       graphId,
       minimap: this.d.minimap(),
     });

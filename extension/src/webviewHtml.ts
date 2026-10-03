@@ -1,4 +1,4 @@
-export type WebviewPage = { cspSource: string; scriptUri: string; styleUri: string; nonce: string; graphId: string; minimap: boolean };
+export type WebviewPage = { cspSource: string; scriptUri: string; styleUri: string; nonce: string; view: 'graph' | 'chat'; graphId?: string; minimap: boolean };
 
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -25,7 +25,7 @@ export function webviewHtml(p: WebviewPage): string {
     `<link rel="stylesheet" href="${escapeHtml(p.styleUri)}" />`,
     '<title>Agent Stream</title>',
     '</head>',
-    `<body data-graph-id="${escapeHtml(p.graphId)}" data-minimap="${p.minimap}">`,
+    `<body data-view="${p.view}"${p.graphId !== undefined ? ` data-graph-id="${escapeHtml(p.graphId)}"` : ''} data-minimap="${p.minimap}">`,
     '<div id="root"></div>',
     `<script type="module" nonce="${p.nonce}" src="${escapeHtml(p.scriptUri)}"></script>`,
     '</body>',

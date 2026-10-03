@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import { PROVIDER_IDS, providerLabel, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
+import { ChatViewController, ChatViewProvider, type ChatSource } from './chatView';
 import { graphCommands } from './commands';
 import { EngineManager, isChecking, type EngineEvents, type Folder } from './engines';
 import { folderFor, workspaceFolders } from './folders';
@@ -122,6 +123,12 @@ export async function activate(context: vscode.ExtensionContext) {
   const sessionStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
   sessionStatus.command = 'agentStream.switchSession';
   context.subscriptions.push(sessionStatus);
+  const tabSource = (tab: vscode.Tab): ChatSource | undefined => {
+    if (!(tab.input instanceof vscode.TabInputCustom) || tab.input.viewType !== GRAPH_VIEW_TYPE) return undefined;
+    const folder = folderFor(tab.input.uri);
+    const graphId = folder && graphTarget(folder.path, tab.input.uri.fsPath);
+    return folder && graphId ? { folder, graphId } : undefined;
+  };
   const graphTabs = (): GraphTabInfo[] => {
     const out: GraphTabInfo[] = [];
     for (const group of vscode.window.tabGroups.all)
@@ -133,6 +140,31 @@ export async function activate(context: vscode.ExtensionContext) {
       });
     return out;
   };
+  const graphSources = (): ChatSource[] => {
+    const out: ChatSource[] = [];
+    for (const group of vscode.window.tabGroups.all)
+      for (const tab of group.tabs) {
+        const source = tabSource(tab);
+        if (source) out.push(source);
+      }
+    return out;
+  };
+  const activeGraphSource = (): ChatSource | undefined => {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    return tab && tabSource(tab);
+  };
+  const chat: ChatViewController = new ChatViewController({
+    app: (f) => manager.get(f),
+    sessions: { active: (f) => sessions.active(f) },
+    confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
+    switchSession: (folder) => void vscode.commands.executeCommand('agentStream.switchSession', { folder }),
+    error: (message) => void vscode.window.showErrorMessage(message),
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('agentStream.chat', new ChatViewProvider(context.extensionUri, chat), { webviewOptions: { retainContextWhenHidden: true } }),
+    { dispose: () => chat.dispose() },
+    vscode.commands.registerCommand('agentStream.focusChat', () => vscode.commands.executeCommand('agentStream.chat.focus')),
+  );
   const sessionsView = new SessionsView({
     folders: workspaceFolders,
     sessions: (f) => manager.get(f).listSessions(),
@@ -174,12 +206,25 @@ export async function activate(context: vscode.ExtensionContext) {
     changed: () => {
       sessionsView.refresh();
       showSession();
+      chat.refresh(graphSources());
     },
   });
   events.sessions = () => {
     sessionsView.refresh();
     showSession();
+    chat.refresh(graphSources());
   };
+  const baseGraphs = events.graphs;
+  events.graphs = (folder, graphs) => {
+    baseGraphs(folder, graphs);
+    chat.refresh(graphSources());
+  };
+  const baseDeleted = events.graphDeleted;
+  events.graphDeleted = (folder, graphId) => {
+    baseDeleted(folder, graphId);
+    chat.refresh(graphSources());
+  };
+  chat.activate(activeGraphSource(), graphSources());
   showSession();
 
   type SessionArg = { folder?: Folder; sessionId?: string } | undefined;
@@ -259,10 +304,12 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.tabGroups.onDidChangeTabs(() => {
       sessions.scheduleCapture();
       showSession();
+      chat.activate(activeGraphSource(), graphSources());
     }),
     vscode.window.tabGroups.onDidChangeTabGroups(() => {
       sessions.scheduleCapture();
       showSession();
+      chat.activate(activeGraphSource(), graphSources());
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       sessionsView.refresh();

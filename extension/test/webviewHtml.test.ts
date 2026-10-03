@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { webviewHtml } from '../src/webviewHtml';
 
 const page = (graphId = 'dbt-parity') =>
-  webviewHtml({ cspSource: 'vscode-resource:', scriptUri: 'https://x/assets/index.js', styleUri: 'https://x/assets/index.css', nonce: 'abc123', graphId, minimap: false });
+  webviewHtml({ cspSource: 'vscode-resource:', scriptUri: 'https://x/assets/index.js', styleUri: 'https://x/assets/index.css', nonce: 'abc123', graphId, view: 'graph', minimap: false });
 
 describe('webviewHtml', () => {
   it('allows only our own scripts and styles: no remote content, no eval', () => {
@@ -18,7 +18,14 @@ describe('webviewHtml', () => {
   });
 
   it('tells the page which graph it shows and the minimap preference', () => {
-    expect(page()).toContain('<body data-graph-id="dbt-parity" data-minimap="false">');
+    expect(page()).toContain('<body data-view="graph" data-graph-id="dbt-parity" data-minimap="false">');
+  });
+
+  it('writes the chat view without a graph id', () => {
+    const html = webviewHtml({ cspSource: 'vscode-resource:', scriptUri: 'https://x/assets/index.js', styleUri: 'https://x/assets/index.css', nonce: 'abc123', view: 'chat', minimap: false });
+    expect(html).toContain('<body data-view="chat" data-minimap="false">');
+    expect(html).not.toContain('data-graph-id');
+    expect(/content="([^"]+)"/.exec(html)![1]).toBe(/content="([^"]+)"/.exec(page())![1]);
   });
 
   it('escapes attribute values', () => {
