@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as vscode from 'vscode';
 import { ChatModelError, type ChatMessage, type ChatPart } from '@agent-stream/engine';
-import { COPILOT_PERMISSION, JUSTIFICATION, vscodeChatModel } from '../src/providers/copilotModel';
+import { COPILOT_PERMISSION, isExtensionBlockedModel, JUSTIFICATION, TOOL_RESULTS_FOLLOW_UP, vscodeChatModel } from '../src/providers/copilotModel';
 import { fakeLmModel } from './helpers';
 
 const live = () => new AbortController().signal;
@@ -26,10 +26,28 @@ describe('vscodeChatModel', () => {
     expect(request.messages).toEqual([
       vscode.LanguageModelChatMessage.User([new vscode.LanguageModelTextPart('Do it.')]),
       vscode.LanguageModelChatMessage.Assistant([new vscode.LanguageModelTextPart('Reading.'), new vscode.LanguageModelToolCallPart('c1', 'Read', { file_path: 'a.txt' })]),
-      vscode.LanguageModelChatMessage.User([new vscode.LanguageModelToolResultPart('c1', [new vscode.LanguageModelTextPart('     1\thello')])]),
+      vscode.LanguageModelChatMessage.User([new vscode.LanguageModelToolResultPart('c1', [new vscode.LanguageModelTextPart('     1\thello')]), new vscode.LanguageModelTextPart(TOOL_RESULTS_FOLLOW_UP)]),
     ]);
     expect(request.options).toEqual({ tools, justification: JUSTIFICATION });
     expect(JUSTIFICATION).toBe('Agent Stream runs your workflow steps on Copilot.');
+  });
+
+  it('adds the follow-up text only to a user message that has tool results and no text', async () => {
+    expect(TOOL_RESULTS_FOLLOW_UP).toBe('Continue with the task using these tool results.');
+    const fake = fakeLmModel({ id: 'auto' });
+    const messages: ChatMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Hi.' }] },
+      { role: 'user', content: [{ type: 'toolResult', callId: 'a', text: 'A' }, { type: 'toolResult', callId: 'b', text: 'B' }] },
+      { role: 'user', content: [{ type: 'text', text: 'Note.' }, { type: 'toolResult', callId: 'c', text: 'C' }] },
+    ];
+    await collect(vscodeChatModel(fake.model).send(messages, [], live()));
+    const part = (t: string) => new vscode.LanguageModelTextPart(t);
+    const result = (id: string, t: string) => new vscode.LanguageModelToolResultPart(id, [part(t)]);
+    expect(fake.requests[0].messages).toEqual([
+      vscode.LanguageModelChatMessage.User([part('Hi.')]),
+      vscode.LanguageModelChatMessage.User([result('a', 'A'), result('b', 'B'), part(TOOL_RESULTS_FOLLOW_UP)]),
+      vscode.LanguageModelChatMessage.User([part('Note.'), result('c', 'C')]),
+    ]);
   });
 
   it('yields text and tool-call parts and ignores every other part', async () => {
@@ -62,6 +80,19 @@ describe('vscodeChatModel', () => {
     const sent = collect(vscodeChatModel(fake.model).send([], [], live()));
     await expect(sent).rejects.toBeInstanceOf(ChatModelError);
     await expect(sent).rejects.toMatchObject({ code, message });
+  });
+
+  it('maps the core-only refusal to a clear message and recognises it', async () => {
+    const message = "The Copilot model gpt-5.6-luna can't be used by extensions. Pick Auto or another model.";
+    for (const error of [new Error('Model gpt-5.6-luna is only available to VS Code core.'), vscode.LanguageModelError.NotFound('Model gpt-5.6-luna is only available to VS Code core.')]) {
+      const fake = fakeLmModel({ id: 'gpt-5.6-luna', replies: [error] });
+      const sent = collect(vscodeChatModel(fake.model).send([], [], live()));
+      await expect(sent).rejects.toMatchObject({ code: 'other', message });
+      await sent.catch((e) => expect(isExtensionBlockedModel(e)).toBe(true));
+    }
+    expect(isExtensionBlockedModel(new Error('Model x is only available to VS Code core.'))).toBe(true);
+    expect(isExtensionBlockedModel(new Error('socket hang up'))).toBe(false);
+    expect(isExtensionBlockedModel(new ChatModelError('other', 'x'))).toBe(false);
   });
 
   it('spells the permission message as the spec does', () => {

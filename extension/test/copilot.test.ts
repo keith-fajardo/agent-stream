@@ -91,6 +91,50 @@ describe('Copilot models', () => {
   });
 });
 
+describe('Copilot models that extensions cannot use', () => {
+  const coreOnly = () => new Error('Model gpt-5.6-luna is only available to VS Code core.');
+
+  it('fails the run clearly, then drops the model from the list and falls back to Auto', async () => {
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    const luna = fakeLmModel({ id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', replies: [coreOnly()] });
+    const p = provider({ lm: models(auto.model, luna.model) });
+    expect((await p.listModels!()).map((m) => m.value)).toEqual(['auto', 'gpt-5.6-luna']);
+    const first = step({ model: 'gpt-5.6-luna' });
+    const out = await p.runStep(first.ctx, allowAll);
+    expect(out).toMatchObject({ ok: false, error: "The Copilot model gpt-5.6-luna can't be used by extensions. Pick Auto or another model." });
+    expect(p.knownModels!()!.map((m) => m.value)).toEqual(['auto']);
+    expect((await p.listModels!()).map((m) => m.value)).toEqual(['auto']);
+    const second = step({ model: 'gpt-5.6-luna' });
+    await p.runStep(second.ctx, allowAll);
+    expect(luna.sendRequest).toHaveBeenCalledTimes(1);
+    expect(auto.sendRequest).toHaveBeenCalledTimes(1);
+    expect(second.events).toContainEqual({ type: 'text', text: 'The Copilot model gpt-5.6-luna is no longer available; using Auto.' });
+  });
+
+  it('does the same for a planner turn', async () => {
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    const luna = fakeLmModel({ id: 'gpt-5.6-luna', replies: [coreOnly()] });
+    const p = provider({ lm: models(auto.model, luna.model) });
+    await p.listModels!();
+    const store = new Map<string, ChatMessage[]>();
+    const turn = (model: string) =>
+      ({
+        prompt: 'hi',
+        cwd: '/tmp',
+        model,
+        systemAppend: 's',
+        tools: [],
+        gate: allowAll,
+        signal: new AbortController().signal,
+        onEvent: () => {},
+        transcript: { load: (id: string) => store.get(id), save: (id: string, m: ChatMessage[]) => void store.set(id, m) },
+      }) as unknown as PlannerTurn;
+    const r = await p.planTurn!(turn('gpt-5.6-luna'));
+    expect(r).toMatchObject({ ok: true, error: "The Copilot model gpt-5.6-luna can't be used by extensions. Pick Auto or another model." });
+    expect(p.knownModels!()!.map((m) => m.value)).toEqual(['auto']);
+  });
+});
+
 describe('Copilot status', () => {
   const lm = () => models(fakeLmModel({ id: 'auto', name: 'Auto' }).model, fakeLmModel({ id: 'gpt-4o-mini', name: 'GPT-4o mini' }).model);
 

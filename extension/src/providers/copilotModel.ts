@@ -18,11 +18,26 @@ export function copilotErrorMessage(code: ChatModelErrorCode, detail: string, mo
   }
 }
 
+export const TOOL_RESULTS_FOLLOW_UP = 'Continue with the task using these tool results.';
+
+const CORE_ONLY = /only available to VS Code core/i;
+/** A model VS Code lists but won't let extensions use (e.g. core-only models). */
+export class ExtensionBlockedModelError extends ChatModelError {
+  constructor(modelId: string) {
+    super('other', `The Copilot model ${modelId} can't be used by extensions. Pick Auto or another model.`);
+  }
+}
+/** True for the refusal of a core-only model: our mapped error, or VS Code's raw message. */
+export function isExtensionBlockedModel(e: unknown): boolean {
+  return e instanceof ExtensionBlockedModelError || (!(e instanceof ChatModelError) && e instanceof Error && CORE_ONLY.test(e.message));
+}
+
 const CODES: Record<string, ChatModelErrorCode> = { NoPermissions: 'permission', Blocked: 'blocked', NotFound: 'notFound' };
 
 /** A vscode.LanguageModelError by its code; anything else is `other` (spec §5.1). */
 export function toChatModelError(e: unknown, modelId: string): ChatModelError {
   if (e instanceof ChatModelError) return e;
+  if (isExtensionBlockedModel(e)) return new ExtensionBlockedModelError(modelId);
   const code = e instanceof vscode.LanguageModelError ? (CODES[e.code] ?? 'other') : 'other';
   const detail = (e instanceof Error && e.message) || String(e);
   return new ChatModelError(code, copilotErrorMessage(code, detail, modelId));
@@ -37,9 +52,12 @@ export function toLanguageModelMessage(m: ChatMessage): vscode.LanguageModelChat
       m.content.map((p) => (p.type === 'text' ? new vscode.LanguageModelTextPart(p.text) : new vscode.LanguageModelToolCallPart(p.callId, p.name, asObject(p.input)))),
     );
   }
-  return vscode.LanguageModelChatMessage.User(
-    m.content.map((c) => (c.type === 'text' ? new vscode.LanguageModelTextPart(c.text) : new vscode.LanguageModelToolResultPart(c.callId, [new vscode.LanguageModelTextPart(c.text)]))),
+  const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart)[] = m.content.map((c) =>
+    c.type === 'text' ? new vscode.LanguageModelTextPart(c.text) : new vscode.LanguageModelToolResultPart(c.callId, [new vscode.LanguageModelTextPart(c.text)]),
   );
+  // Auto refuses a request whose last message has no text ("needs a prompt"); a wire-level nudge, never in the history.
+  if (m.content.some((c) => c.type === 'toolResult') && !m.content.some((c) => c.type === 'text')) parts.push(new vscode.LanguageModelTextPart(TOOL_RESULTS_FOLLOW_UP));
+  return vscode.LanguageModelChatMessage.User(parts);
 }
 
 /** z.toJSONSchema adds a `$schema` key; the Language Model API takes a bare schema, so it is dropped. */

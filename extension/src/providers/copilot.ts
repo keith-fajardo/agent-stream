@@ -12,7 +12,7 @@ import {
   type RunShell,
 } from '@agent-stream/engine';
 import { isWriteCapable, type ModelChoice, type NodeUsage, type ProviderStatus } from '@agent-stream/shared';
-import { COPILOT_PERMISSION, vscodeChatModel } from './copilotModel';
+import { COPILOT_PERMISSION, ExtensionBlockedModelError, vscodeChatModel } from './copilotModel';
 
 export const COPILOT_UNAVAILABLE = "GitHub Copilot isn't available. Install the GitHub Copilot extension and sign in, or switch to Claude with Agent Stream: Select Provider.";
 export const COPILOT_CONSENT_LATER = 'Copilot will ask for permission the first time a run or chat uses it.';
@@ -78,6 +78,8 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
   let pending: Promise<ModelChoice[]> | undefined;
   let failed = false;
   let retried = false;
+  /** Models VS Code lists but refused us (core-only), for this session. */
+  const blocked = new Set<string>();
 
   const unavailable = (why?: string): ProviderStatus => ({
     provider: 'copilot',
@@ -89,12 +91,31 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
   /** The usable models now ([] without the API); throws what VS Code throws. Never a model request. */
   async function select(): Promise<vscode.LanguageModelChat[]> {
     if (!lm?.selectChatModels) return [];
-    const models = usableModels(await lm.selectChatModels({ vendor: 'copilot' }));
+    const models = usableModels(await lm.selectChatModels({ vendor: 'copilot' })).filter((m) => !blocked.has(m.id));
     if (models.length) {
       known = models.map(choiceOf);
       failed = false;
     }
     return models;
+  }
+
+  /** The model behind the engine's ChatModel; a core-only refusal blocks it, and the failure still surfaces. */
+  function chatModel(m: vscode.LanguageModelChat) {
+    const inner = vscodeChatModel(m);
+    return {
+      ...inner,
+      async *send(...args: Parameters<typeof inner.send>) {
+        try {
+          yield* inner.send(...args);
+        } catch (e) {
+          if (e instanceof ExtensionBlockedModelError) {
+            blocked.add(m.id);
+            if (known) known = known.filter((c) => c.value !== m.id);
+          }
+          throw e;
+        }
+      },
+    };
   }
 
   /** The model a step or turn runs on, with a note when the chosen one is gone (ruling R20). */
@@ -161,7 +182,7 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       if (picked.note) ctx.emit({ type: 'text', text: picked.note });
       const cap = d.limits().maxRequestsPerStep;
       const r = await runAgentLoop({
-        model: vscodeChatModel(picked.model),
+        model: chatModel(picked.model),
         system: stepPreamble(ctx.cwd),
         messages: [userText(ctx.prompt)],
         tools: [
@@ -194,7 +215,7 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       const cap = d.limits().maxRequestsPerTurn;
       const graphToolNames = new Set(turn.tools.map((t) => t.name));
       const r = await runAgentLoop({
-        model: vscodeChatModel(picked.model),
+        model: chatModel(picked.model),
         system: turn.systemAppend,
         messages: [...history, userText(turn.prompt)],
         tools: [...builtinTools({ cwd: turn.cwd, runShell: d.runShell, readOnly: true }), ...toLoopTools(turn.tools, '')],
