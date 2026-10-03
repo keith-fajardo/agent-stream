@@ -173,6 +173,16 @@ describe('app', () => {
     expect(a.of('chatEntry')).toEqual([]);
   });
 
+  it("refuses to split a step when the provider can't run", async () => {
+    const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+    await app.handle(a.c, { type: 'splitStep', graphId: g.id, sessionId: 'default', nodeId: 'n1' });
+    expect(a.of('error').map((m) => m.message)).toEqual(['Chat is disabled: Not signed in.']);
+    expect(a.of('chatEntry')).toEqual([]);
+  });
+
   it('checks the steps before the provider when refining (spec §6.2)', async () => {
     const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
     const a = client();
