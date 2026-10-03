@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyOp, emptyGraph, type Graph, type Op } from '@agent-stream/shared';
-import { layoutPositions } from '../src/layout';
+import { layoutPositions, NODE_GAP, NODE_HEIGHT, NODE_WIDTH } from '../src/layout';
 
 function graphOf(ops: Op[]): Graph {
   let g = emptyGraph('g', 'G', 't');
@@ -23,5 +23,27 @@ describe('layoutPositions', () => {
   it('only places nodes without a position when asked', () => {
     const g = graphOf([agent('a'), { type: 'addNode', node: { title: 'b', kind: 'agent', prompt: 'p', position: { x: 500, y: 500 } } }]);
     expect([...layoutPositions(g, true).keys()]).toEqual(['n1']);
+  });
+
+  // One source fanning out to three siblings, which dagre stacks in one column.
+  const fan = () => graphOf([agent('a'), agent('b'), agent('c'), agent('d'), ...['n2', 'n3', 'n4'].map((to): Op => ({ type: 'connect', from: 'n1', to }))]);
+  const rowGaps = (p: Map<string, { x: number; y: number }>, height: (id: string) => number) => {
+    const ids = ['n2', 'n3', 'n4'].sort((a, b) => p.get(a)!.y - p.get(b)!.y);
+    return ids.slice(1).map((id, i) => p.get(id)!.y - (p.get(ids[i])!.y + height(ids[i])));
+  };
+
+  it('leaves a clear gap between stacked steps of the estimated height', () => {
+    expect(NODE_HEIGHT).toBeGreaterThanOrEqual(140);
+    for (const gap of rowGaps(layoutPositions(fan(), false), () => NODE_HEIGHT)) expect(gap).toBeGreaterThanOrEqual(NODE_GAP);
+  });
+
+  it('spaces steps by their measured size when it is known', () => {
+    const sizes = new Map(['n2', 'n3', 'n4'].map((id) => [id, { width: NODE_WIDTH, height: 260 }]));
+    for (const gap of rowGaps(layoutPositions(fan(), false, sizes), () => 260)) expect(gap).toBeGreaterThanOrEqual(NODE_GAP);
+  });
+
+  it('leaves a clear gap between columns', () => {
+    const p = layoutPositions(fan(), false);
+    expect(p.get('n2')!.x - (p.get('n1')!.x + NODE_WIDTH)).toBeGreaterThanOrEqual(100);
   });
 });
