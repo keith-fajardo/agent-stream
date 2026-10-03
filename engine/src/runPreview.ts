@@ -192,6 +192,8 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
         reused: [...reused].sort(),
         fromNodeId: input.fromNodeId ?? null,
         sourceRunId: input.source?.id ?? null,
+        // Workspaces start from HEAD: a commit since review would run other code. Graphs without them keep their signature.
+        ...(workspaceSteps.length > 0 && { head: (input.checkout?.git && input.checkout.head) || null }),
       }),
     )
     .digest('hex');

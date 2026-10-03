@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { emptyGraph, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
-import { createApp, type App, type AppDeps } from '../src/app';
+import { CHANGED_SINCE_REVIEW, createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import type { GitExec } from '../src/git';
 import { createClaudeProvider } from '../src/providers/claude';
@@ -1222,6 +1222,29 @@ describe('the checkout and the write lease', () => {
     expect(app.runStore.list(g.id)).toEqual([]);
     expect(ran).toHaveLength(3);
     expect(ran[2]).toBe(ran[0].replace('add', 'remove'));
+  });
+
+  it('refuses a start with workspaces when HEAD moved since review, and still starts a graph without them', async () => {
+    let head = SHA;
+    const ran: string[] = [];
+    const { app } = gitApp({
+      git: (root) => (args, cwd) => {
+        ran.push(args.join(' '));
+        return repoGit({ root, branch: 'main', head, answers: { 'worktree add --detach *': {} } }).exec(args, cwd);
+      },
+    });
+    const c = client(app);
+    const ab = graphWith(app, 'AB', { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } });
+    const plain = graphWith(app, 'Plain', writer);
+    const reviewedAb = (await reviewedBy(app, c, ab.id)).signature;
+    const reviewedPlain = (await reviewedBy(app, c, plain.id)).signature;
+    head = 'f'.repeat(40);
+    await app.handle(c.client, { type: 'startRun', graphId: ab.id, reviewed: reviewedAb });
+    expect(c.last('error').message).toBe(CHANGED_SINCE_REVIEW);
+    expect(ran.some((a) => a.startsWith('worktree add'))).toBe(false);
+    expect(app.runStore.list(ab.id)).toEqual([]);
+    await app.handle(c.client, { type: 'startRun', graphId: plain.id, reviewed: reviewedPlain });
+    await vi.waitFor(() => expect(c.all('run').at(-1)?.run).toMatchObject({ graphId: plain.id, status: 'succeeded' }));
   });
 
   it('refuses a start the lease blocks before creating any worktree', async () => {

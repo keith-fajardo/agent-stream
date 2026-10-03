@@ -193,6 +193,17 @@ describe('previewRun notes and workspaces', () => {
     expect(previewRun({ graph: g, values: {}, env: env(), checkout: repo() }).preview.problems).toEqual([]);
   });
 
+  it("signs the checkout's HEAD when steps use workspaces, and only then", () => {
+    const sig = (g: Graph, checkout?: CheckoutInfo) => previewRun({ graph: g, values: {}, env: env(), ...(checkout && { checkout }) }).preview.signature;
+    const other = 'f'.repeat(40);
+    const ws = graphOf([inWs('A', 'wh_a')]);
+    expect(sig(ws, repo())).toBe(sig(ws, repo()));
+    expect(sig(ws, repo({ head: other }))).not.toBe(sig(ws, repo()));
+    const plain = graphOf([agent('A', 'a')]);
+    expect(sig(plain, repo({ head: other }))).toBe(sig(plain, repo()));
+    expect(sig(plain, repo())).toBe(sig(plain));
+  });
+
   it('carries the checkout for the Checkout line', () => {
     expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env(), checkout: repo() }).preview.checkout).toEqual(repo());
     expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env() }).preview).not.toHaveProperty('checkout');
