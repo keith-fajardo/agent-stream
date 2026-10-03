@@ -78,7 +78,15 @@ export class RunStore {
       .reverse()
       .map((id) => this.get(id))
       .filter((m): m is RunMeta => !!m && m.graphId === graphId)
-      .map(({ id, graphId: g, status, startedAt, endedAt, provider }) => ({ id, graphId: g, status, startedAt, endedAt, ...(provider && { provider }) }));
+      .map(({ id, graphId: g, status, startedAt, endedAt, provider, amendments }) => ({
+        id,
+        graphId: g,
+        status,
+        startedAt,
+        endedAt,
+        ...(provider && { provider }),
+        ...(amendments?.length && { amendments: amendments.length }),
+      }));
   }
 
   appendEvent(runId: string, nodeId: string, event: NodeEvent): void {

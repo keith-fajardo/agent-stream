@@ -109,7 +109,7 @@ describe('step graph tools', () => {
     await s.until('n3', 'running');
     expect(s.order()).toEqual(['n1', added.id, 'n2', 'n3']);
     expect(s.contexts.get(added.id)!.node.command).toBe('npm ci');
-    expect(s.runner.get(s.runId)!.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: 'n1 wants to add step "Install deps" after n1, before n2' }]);
+    expect(s.runner.get(s.runId)!.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', nodeId: added.id, summary: 'n1 wants to add step "Install deps" after n1, before n2' }]);
     s.finish('n3');
     const done = await s.done;
     expect(done.status).toBe('succeeded');
@@ -130,7 +130,7 @@ describe('step graph tools', () => {
     ]);
     const run = s.runner.get(s.runId)!;
     expect(run.rendered!.nodes.n3).toBe('echo new');
-    expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: "n1 wants to change n3's command" }]);
+    expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', nodeId: 'n3', summary: "n1 wants to change n3's command" }]);
     s.finish('n1');
     await s.until('n3', 'running');
     expect(s.contexts.get('n3')!.node.command).toBe('echo new');

@@ -21,11 +21,16 @@ export function TopBar() {
       <span className="spacer" />
       {runs.length > 0 && (
         <select aria-label="Run" value={run?.id ?? ''} onChange={(e) => send({ type: 'selectRun', runId: e.target.value })}>
-          {runs.map((r) => (
-            <option key={r.id} value={r.id}>
-              {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}`}
-            </option>
-          ))}
+          {runs.map((r) => {
+            // The selected run's own record is live and lists each change; other runs give the count alone.
+            const selected = run?.id === r.id ? run : undefined;
+            const n = (selected ? selected.amendments?.length : r.amendments) ?? 0;
+            return (
+              <option key={r.id} value={r.id} title={selected?.amendments?.map((a) => a.summary).join('\n') || undefined}>
+                {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}${n > 0 ? ` · ${n} change${n === 1 ? '' : 's'} by agents` : ''}`}
+              </option>
+            );
+          })}
         </select>
       )}
       {graph &&

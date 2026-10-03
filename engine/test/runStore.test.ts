@@ -36,6 +36,16 @@ describe('RunStore', () => {
     expect(plain).not.toHaveProperty('provider');
   });
 
+  it('lists how many changes agents made to a run, and nothing for runs without any', () => {
+    const store = new RunStore(tmpProject());
+    const amendment = (nodeId: string) => ({ at: 't', byNodeId: 'n1', nodeId, summary: `n1 wants to change ${nodeId}'s prompt` });
+    store.create({ ...meta('20261002-100000-aaaa'), amendments: [amendment('n2'), amendment('n3')] });
+    store.create({ ...meta('20261002-110000-bbbb'), amendments: [] });
+    const [none, two] = store.list('g');
+    expect(two.amendments).toBe(2);
+    expect(none).not.toHaveProperty('amendments');
+  });
+
   it('stores events and outputs per node', () => {
     const store = new RunStore(tmpProject());
     const a = '20261002-100000-aaaa';

@@ -172,7 +172,7 @@ export class Runner extends EventEmitter {
       run.order = topoOrder(next);
     }
     meta.rendered = { ...meta.rendered!, nodes: { ...meta.rendered!.nodes, [change.node.id]: change.text } };
-    meta.amendments = [...(meta.amendments ?? []), { at: this.clock(), byNodeId, summary }];
+    meta.amendments = [...(meta.amendments ?? []), { at: this.clock(), byNodeId, nodeId: change.node.id, summary }];
     this.persist(meta);
     this.safeEmit('run', meta);
     this.schedule(run);

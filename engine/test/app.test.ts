@@ -876,7 +876,7 @@ describe('app', () => {
       const run = c.of('run').at(-1)!.run;
       expect(run.rendered!.nodes.n2).toBe('Deploy to dev');
       expect(prompts.n2).toBe('Deploy to dev');
-      expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: "n1 wants to change n2's prompt" }]);
+      expect(run.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', nodeId: 'n2', summary: "n1 wants to change n2's prompt" }]);
       expect(app.graphStore.get(g.id).nodes.find((n) => n.id === 'n2')!.prompt).toBe('Deploy to {{ target }}');
     });
 

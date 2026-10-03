@@ -95,6 +95,18 @@ describe('LogsPanel', () => {
     expect(send).toHaveBeenCalledWith({ type: 'decide', approvalId: 'a1', decision: 'approve' });
   });
 
+  it('says which step changed the selected step during the run, and nothing for an unchanged step', async () => {
+    const amendments = [
+      { at: 't1', byNodeId: 'n1', nodeId: 'n2', summary: "n1 wants to change n2's prompt" },
+      { at: 't2', byNodeId: 'n1', nodeId: 'n3', summary: 'n1 wants to add step "Install" after n1, before n2' },
+    ];
+    await act(async () => server({ type: 'run', run: { ...run, amendments } }));
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    expect(container.querySelector('.logs-head')?.textContent).toContain('· changed during the run by n1');
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n1' }));
+    expect(container.querySelector('.logs-head')?.textContent).not.toContain('changed during the run');
+  });
+
   it('closes when ✕ is clicked', async () => {
     await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
     const close = container.querySelector('button[aria-label="Close logs"]') as HTMLButtonElement;

@@ -124,7 +124,7 @@ These tools approve themselves. The Claude adapter's PreToolUse hook passes `mcp
 3. Amend the running run with `runner.amend(runId, …)`:
    - **Add.** The node joins the run snapshot as `queued`, with its rendered text and its edges, and starts when its `after` steps succeed.
    - **Change.** The not-yet-started node's snapshot and rendered text are replaced.
-   - **Record.** `RunMeta` gains `amendments?: { at: string; byNodeId: string; summary: string }[]`. They are shown in the run's logs header and in the run picker tooltip.
+   - **Record.** `RunMeta` gains `amendments?: { at: string; byNodeId: string; nodeId: string; summary: string }[]` (`nodeId` is the step added or changed). They are shown in the run's logs header and in the run picker tooltip.
 4. Return `"Applied: <summary>"` to the agent.
 
 A **denial** returns `Denied by the user[: note]`. A cancellation because the run stopped returns `The run was stopped.`

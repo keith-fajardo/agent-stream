@@ -97,4 +97,34 @@ describe('TopBar run picker', () => {
     expect(options[1]).not.toContain('Claude');
     await act(async () => r.unmount());
   });
+
+  it("counts agent changes to each run, listing the selected run's changes in its tooltip", async () => {
+    const amendments = [
+      { at: 't1', byNodeId: 'n1', nodeId: 'n2', summary: "n1 wants to change n2's prompt" },
+      { at: 't2', byNodeId: 'n1', nodeId: 'n4', summary: 'n1 wants to add step "Install" after n1, before n2' },
+    ];
+    dispatch({
+      kind: 'server',
+      msg: {
+        type: 'graphOpened',
+        changes: [],
+        graph: graph(),
+        runs: [
+          { id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', amendments: 2 },
+          { id: 'r2', graphId: 'g', status: 'succeeded', startedAt: 't', amendments: 1 },
+          { id: 'r3', graphId: 'g', status: 'failed', startedAt: 't' },
+        ],
+        run: { id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', snapshot: graph(), nodes: {}, amendments },
+        variableValues: {},
+      },
+    });
+    const c = document.createElement('div');
+    const r = createRoot(c);
+    await act(async () => r.render(createElement(TopBar)));
+    const options = [...c.querySelectorAll<HTMLOptionElement>('select[aria-label="Run"] option')];
+    expect(options.map((o) => o.textContent)).toEqual(['Run r1 · Succeeded · 2 changes by agents', 'Run r2 · Succeeded · 1 change by agents', 'Run r3 · Failed']);
+    expect(options[0].title).toBe(`n1 wants to change n2's prompt\nn1 wants to add step "Install" after n1, before n2`);
+    expect(options[1].title).toBe('');
+    await act(async () => r.unmount());
+  });
 });

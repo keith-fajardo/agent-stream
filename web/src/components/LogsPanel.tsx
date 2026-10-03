@@ -41,6 +41,7 @@ export function LogsPanel() {
   if (!graph || !node || logsHidden) return null;
   const sourceRunId = run?.sourceRunId;
   const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
+  const changedBy = [...new Set((run?.amendments ?? []).filter((a) => a.nodeId === node.id).map((a) => a.byNodeId))];
   return (
     <section className="logs-panel" aria-label="Step logs">
       <header className="logs-head">
@@ -49,6 +50,7 @@ export function LogsPanel() {
           {state && ` · ${statusLabel(state.status)}`}
           {state?.durationMs !== undefined && ` · ${fmtDuration(state.durationMs)}`}
           {run?.provider && ` · ${PROVIDER_NAMES[run.provider]}`}
+          {changedBy.length > 0 && ` · changed during the run by ${changedBy.join(', ')}`}
         </span>
         <button className="link" aria-label="Close logs" onClick={() => dispatch({ kind: 'selectNode' })}>
           ✕

@@ -159,10 +159,11 @@ export type RunMeta = {
   amendments?: RunAmendment[];
 };
 
-/** One approved change a step agent made to a run in progress. */
-export type RunAmendment = { at: string; byNodeId: string; summary: string };
+/** One approved change a step agent made to a run in progress: `byNodeId` asked, `nodeId` is the step added or changed. */
+export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summary: string };
 
-export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId };
+/** `amendments`: how many changes step agents made to the run, when there were any. */
+export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number };
 
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
