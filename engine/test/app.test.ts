@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type AuthInfo, type ServerMessage } from '@agent-stream/shared';
+import { emptyGraph, type ProviderStatus, type ServerMessage } from '@agent-stream/shared';
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
@@ -13,16 +13,16 @@ const instant: NodeExecutor = async (ctx) => {
   ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
   return { ok: true, output: `out-${ctx.node.id}` };
 };
-const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max', email: 'me@example.com' };
+const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' };
 
-function setup(auth: AuthInfo = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined) {
+function setup(status: ProviderStatus = signedIn, command: NodeExecutor = instant, env?: (name: string) => string | undefined) {
   const paths = tmpProject();
   const valuesFile = tmpValuesFile();
   const app = createApp({
     projectDir: paths.root,
     valuesFile,
     claudePath: 'claude',
-    auth,
+    status,
     maxParallel: 2,
     gitBash: testGitBash,
     env,
@@ -54,7 +54,7 @@ describe('app', () => {
     app.graphStore.create('First');
     expect(client().msgs[0]).toEqual({
       type: 'hello',
-      auth: signedIn,
+      status: signedIn,
       project: expect.any(String),
       graphs: [{ id: 'first', name: 'First', updatedAt: expect.any(String) }],
       approvals: [],
@@ -126,7 +126,7 @@ describe('app', () => {
   });
 
   it('disables runs and chat when not signed in to a subscription', async () => {
-    const { app, client } = setup({ ok: false, error: 'Not signed in.' });
+    const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
     const a = client();
     const g = app.graphStore.create('G');
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
@@ -168,7 +168,7 @@ describe('app', () => {
       snapshot: emptyGraph('g', 'G', 't'),
       nodes: { n1: { status: 'running' } },
     });
-    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
+    const app = createApp({ projectDir: paths.root, valuesFile: tmpValuesFile(), claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant } });
     expect(app.runStore.get('20261001-120000-abcd')).toMatchObject({ status: 'interrupted', nodes: { n1: { status: 'interrupted' } } });
   });
 
@@ -193,7 +193,7 @@ describe('app', () => {
       projectDir: paths.root,
       valuesFile,
       claudePath: 'claude',
-      auth: signedIn,
+      status: signedIn,
       maxParallel: 1,
       gitBash: testGitBash,
       queryFn: ({ options }) => {
@@ -370,7 +370,7 @@ describe('app', () => {
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
       claudePath: 'claude',
-      auth: signedIn,
+      status: signedIn,
       maxParallel: 1,
       gitBash: testGitBash,
       queryFn: () =>
@@ -396,7 +396,7 @@ describe('app', () => {
       projectDir: paths.root,
       valuesFile: tmpValuesFile(),
       claudePath: 'claude',
-      auth: signedIn,
+      status: signedIn,
       maxParallel: 1,
       platform: 'win32',
       gitBash: { ok: false, error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.' },
@@ -414,7 +414,7 @@ describe('app', () => {
 
   describe('for the extension', () => {
     it('changes sign-in state and the Claude Code path at runtime', async () => {
-      const { app, client } = setup({ ok: false, error: 'Not signed in.' });
+      const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
       const a = client();
       const g = app.graphStore.create('G');
       app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
@@ -422,7 +422,7 @@ describe('app', () => {
       await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
       expect(a.of('error').at(-1)?.message).toBe('Runs are disabled: Not signed in.');
       app.setAuth(signedIn, '/new/claude');
-      expect(a.of('auth')).toEqual([{ type: 'auth', auth: signedIn }]);
+      expect(a.of('auth')).toEqual([{ type: 'auth', status: signedIn }]);
       await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: sig });
       await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
     });
@@ -440,7 +440,7 @@ describe('app', () => {
     describe('migrating the old names', () => {
       const mk = (extra: Partial<Parameters<typeof createApp>[0]> = {}) => {
         const root = mkdtempSync(join(tmpdir(), 'agent-stream-mig-'));
-        const base = { projectDir: root, valuesFile: tmpValuesFile(), claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} };
+        const base = { projectDir: root, valuesFile: tmpValuesFile(), claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} };
         return { root, make: () => createApp({ ...base, ...extra }) };
       };
 
@@ -493,7 +493,7 @@ describe('app', () => {
       const paths = tmpProject();
       const valuesFile = tmpValuesFile();
       writeFileSync(valuesFile, '{');
-      const app = createApp({ projectDir: paths.root, valuesFile, claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} });
+      const app = createApp({ projectDir: paths.root, valuesFile, claudePath: 'claude', status: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} });
       expect(app.startupWarnings()).toEqual([expect.stringMatching(/^The variable values file \(.+\) could not be read/)]);
     });
   });

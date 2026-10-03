@@ -9,7 +9,7 @@ import {
   type App,
   type Found,
 } from '@agent-stream/engine';
-import type { ApprovalRequest, AuthInfo, GraphListItem, ServerMessage } from '@agent-stream/shared';
+import type { ApprovalRequest, GraphListItem, ProviderStatus, ServerMessage } from '@agent-stream/shared';
 import type { Settings } from './settings';
 
 /** A workspace folder: `key` is its URI string, `path` its file-system path. */
@@ -21,7 +21,7 @@ export type EngineEvents = {
   approvals(): void;
   confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string): void;
   graphDeleted(folder: Folder, graphId: string): void;
-  auth(auth: AuthInfo): void;
+  auth(status: ProviderStatus): void;
   warning(message: string): void;
 };
 
@@ -31,28 +31,28 @@ export type EngineManagerDeps = {
   env: NodeJS.ProcessEnv;
   home: string;
   events: EngineEvents;
-  checkAuth?: (claudePath: string) => Promise<AuthInfo>;
+  checkAuth?: (claudePath: string) => Promise<ProviderStatus>;
   findClaude?: typeof realFindClaude;
   findGitBash?: typeof realFindGitBash;
   createApp?: typeof realCreateApp;
 };
 
-export const CHECKING: AuthInfo = { ok: false, error: 'Checking your Claude sign-in…' };
+export const CHECKING: ProviderStatus = { provider: 'claude', ok: false, label: 'checking', error: 'Checking your Claude sign-in…' };
 
 type Entry = { folder: Folder; app: App; detach: () => void };
 
 /** One engine per workspace folder (spec §3.2), all sharing one sign-in check. */
 export class EngineManager {
   private engines = new Map<string, Entry>();
-  auth: AuthInfo = CHECKING;
+  status: ProviderStatus = CHECKING;
   private claudePath: string | undefined;
   private checkSeq = 0;
-  private latest: Promise<AuthInfo> | undefined;
+  private latest: Promise<ProviderStatus> | undefined;
 
   constructor(private d: EngineManagerDeps) {}
 
   /** Finds Claude Code and runs `claude auth status`; every engine gets the result (and the path, ruling R6). */
-  async checkSignIn(): Promise<AuthInfo> {
+  async checkSignIn(): Promise<ProviderStatus> {
     const seq = ++this.checkSeq;
     const run = this.runCheck(seq);
     this.latest = run;
@@ -60,30 +60,30 @@ export class EngineManager {
   }
 
   /** A check that a newer one overtook is dropped: it returns the newer result and changes nothing. */
-  private async runCheck(seq: number): Promise<AuthInfo> {
+  private async runCheck(seq: number): Promise<ProviderStatus> {
     const settings = this.d.settings();
     const found = (this.d.findClaude ?? realFindClaude)({ platform: this.d.platform, env: this.d.env, home: this.d.home, setting: settings.claudePath });
-    let auth: AuthInfo;
+    let status: ProviderStatus;
     let claudePath: string | undefined;
     if (found.ok) {
       claudePath = found.path;
-      auth = await (this.d.checkAuth ?? realCheckAuth)(found.path);
+      status = await (this.d.checkAuth ?? realCheckAuth)(found.path);
     } else {
-      auth = { ok: false, error: found.error };
+      status = { provider: 'claude', ok: false, label: 'not signed in', error: found.error };
     }
-    if (seq !== this.checkSeq) return this.latest ?? auth;
+    if (seq !== this.checkSeq) return this.latest ?? status;
     this.claudePath = claudePath;
-    this.auth = auth;
-    for (const e of this.engines.values()) e.app.setAuth(this.folderAuth(e.folder), this.claudePath);
-    this.d.events.auth(this.auth);
-    return this.auth;
+    this.status = status;
+    for (const e of this.engines.values()) e.app.setAuth(this.folderStatus(e.folder), this.claudePath);
+    this.d.events.auth(this.status);
+    return this.status;
   }
 
   /** A project setting that reroutes Claude away from the subscription disables that folder only. */
-  folderAuth(folder: Folder): AuthInfo {
-    if (!this.auth.ok) return this.auth;
+  folderStatus(folder: Folder): ProviderStatus {
+    if (!this.status.ok) return this.status;
     const problem = projectSettingsProblem(folder.path);
-    return problem ? { ...this.auth, ok: false, error: problem } : this.auth;
+    return problem ? { ...this.status, ok: false, error: problem } : this.status;
   }
 
   get(folder: Folder): App {
@@ -94,7 +94,7 @@ export class EngineManager {
     const app = (this.d.createApp ?? realCreateApp)({
       projectDir: folder.path,
       claudePath: this.claudePath ?? 'claude',
-      auth: this.folderAuth(folder),
+      status: this.folderStatus(folder),
       maxParallel: settings.maxParallel,
       platform: this.d.platform,
       gitBash,

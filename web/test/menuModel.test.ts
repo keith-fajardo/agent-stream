@@ -13,7 +13,7 @@ const graph: Graph = { ...emptyGraph('g', 'G', 't'), nodes: [step('n1')] };
 const server = (msg: ServerMessage) => ({ kind: 'server' as const, msg });
 const base = (extra: Partial<State> = {}): State => ({
   ...[
-    server({ type: 'hello', auth: { ok: true }, project: '/p', graphs: [], approvals: [] }),
+    server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] }),
     server({ type: 'graphOpened', graph, chat: [], chatBusy: false, runs: [], variableValues: {} }),
   ].reduce(reduce, initialState),
   ...extra,
@@ -56,7 +56,7 @@ describe('menus', () => {
     expect([idle['Run…'].enabled, idle['Stop'].enabled, idle['Re-run from selected step…'].enabled]).toEqual([true, false, false]);
     const running = items(base({ run: run('running') }), 'run');
     expect([running['Run…'].enabled, running['Stop'].enabled]).toEqual([false, true]);
-    expect(items(base({ auth: { ok: false, error: 'x' } }), 'run')['Run…'].enabled).toBe(false);
+    expect(items(base({ status: { provider: 'claude', ok: false, label: 'not signed in', error: 'x' } }), 'run')['Run…'].enabled).toBe(false);
     const rerun = items(base({ selectedNodeId: 'n1', runs: [{ id: 'r1', graphId: 'g', status: 'failed', startedAt: 't' }] }), 'run');
     expect(rerun['Re-run from selected step…'].enabled).toBe(true);
   });

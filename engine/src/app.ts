@@ -2,7 +2,7 @@ import type { renameSync } from 'node:fs';
 import {
   validateRunnable,
   type ApprovalRequest,
-  type AuthInfo,
+  type ProviderStatus,
   type ChatEntry,
   type ClientMessage,
   type Graph,
@@ -48,7 +48,7 @@ export type AppDeps = {
   /** For tests: replaces fs.renameSync in the migrations. */
   rename?: typeof renameSync;
   claudePath: string;
-  auth: AuthInfo;
+  status: ProviderStatus;
   maxParallel: number;
   executors?: Executors;
   queryFn?: QueryFn;
@@ -62,7 +62,7 @@ export type AppDeps = {
 export type App = ReturnType<typeof createApp>;
 
 export function createApp(d: AppDeps) {
-  let auth = d.auth;
+  let status = d.status;
   let claudePath = d.claudePath;
   const clock = d.clock ?? systemClock;
   const paths = projectPaths(d.projectDir);
@@ -184,10 +184,10 @@ export function createApp(d: AppDeps) {
   }
 
   /** Sign-in changed (Retry in the sidebar): update every check and tell the tabs. */
-  function setAuth(next: AuthInfo, nextClaudePath?: string): void {
-    auth = next;
+  function setAuth(next: ProviderStatus, nextClaudePath?: string): void {
+    status = next;
     if (nextClaudePath) claudePath = nextClaudePath;
-    broadcast({ type: 'auth', auth });
+    broadcast({ type: 'auth', status });
   }
 
   /** VS Code is closing: stop every run (ruling R4). */
@@ -202,7 +202,7 @@ export function createApp(d: AppDeps) {
 
   function connect(client: Client): () => void {
     clients.add(client);
-    client.send({ type: 'hello', auth, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
+    client.send({ type: 'hello', status, project: d.projectDir, graphs: listGraphs(), approvals: broker.pending() });
     return () => {
       clients.delete(client);
     };
@@ -228,7 +228,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'chat': {
-        if (!auth.ok) return error(`Chat is disabled: ${auth.error}`);
+        if (!status.ok) return error(`Chat is disabled: ${status.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
@@ -243,7 +243,7 @@ export function createApp(d: AppDeps) {
         return;
       }
       case 'startRun': {
-        if (!auth.ok) return error(`Runs are disabled: ${auth.error}`);
+        if (!status.ok) return error(`Runs are disabled: ${status.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         const p = preview(r.graph, msg.fromNodeId, msg.sourceRunId);

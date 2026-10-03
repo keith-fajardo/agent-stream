@@ -137,6 +137,8 @@ export type RunMeta = {
   snapshot: Graph;
   nodes: Record<string, NodeRunState>;
   rendered?: RenderedRun;
+  /** Which provider ran this run's agent steps (absent for runs made before providers). */
+  provider?: ProviderId;
 };
 
 export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string };
@@ -172,13 +174,30 @@ export type ApprovalRequest = {
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'error';
 export type ChatEntry = { at: string; role: ChatRole; text: string };
 
-export type AuthInfo = { ok: boolean; method?: string; plan?: string; email?: string; error?: string };
+export type ProviderId = 'claude' | 'copilot';
+export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
+/** Display names, for places that only have a ProviderId (run records). */
+export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: 'Claude', copilot: 'GitHub Copilot' };
+
+export type ProviderStatus = {
+  provider: ProviderId;
+  /** Runs and planner chat are allowed. */
+  ok: boolean;
+  /** Status-bar text: "Claude Max", "not signed in", "Copilot (preview)", "Copilot not available". */
+  label: string;
+  /** Tooltip detail: the account, or the models VS Code reports. */
+  detail?: string;
+  /** Why runs and chat are refused, shown verbatim. */
+  error?: string;
+  /** Available but not runnable yet (the Copilot scaffold). */
+  preview?: boolean;
+};
 
 export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string } };
 
 export type ServerMessage =
-  | { type: 'auth'; auth: AuthInfo }
-  | { type: 'hello'; auth: AuthInfo; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
+  | { type: 'auth'; status: ProviderStatus }
+  | { type: 'hello'; status: ProviderStatus; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
   | { type: 'graphDeleted'; graphId: string }
   | { type: 'graphOpened'; graph: Graph; chat: ChatEntry[]; chatBusy: boolean; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string> }

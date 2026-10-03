@@ -33,7 +33,7 @@ const button = (label: string) => [...container.querySelectorAll('button')].find
 
 beforeEach(async () => {
   vi.mocked(send).mockClear();
-  dispatch({ kind: 'server', msg: { type: 'hello', auth: { ok: true }, project: '/p', graphs: [], approvals: [] } });
+  dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
   dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: emptyGraph('g', 'G', 't'), chat: [], chatBusy: false, runs: [], variableValues: {} } });
   container = document.createElement('div');
   root = createRoot(container);

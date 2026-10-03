@@ -9,7 +9,7 @@ describe('checkAuth', () => {
 
   it('accepts a claude.ai subscription login', async () => {
     const s = { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'me@example.com', subscriptionType: 'max' };
-    expect(await checkAuth('claude', status(s))).toEqual({ ok: true, method: 'claude.ai', plan: 'max', email: 'me@example.com' });
+    expect(await checkAuth('claude', status(s))).toEqual({ provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' });
   });
 
   it.each([
@@ -20,6 +20,16 @@ describe('checkAuth', () => {
     const r = await checkAuth('claude', status(s));
     expect(r.ok).toBe(false);
     expect(r.error).toContain(message);
+  });
+
+  it('labels a missing plan as a subscription', async () => {
+    const run = async () => JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'a@b.c' });
+    expect(await checkAuth('claude', run)).toEqual({ provider: 'claude', ok: true, label: 'Claude subscription', detail: 'a@b.c' });
+  });
+
+  it('keeps the account detail on a wrong-method failure', async () => {
+    const r = await checkAuth('claude', status({ loggedIn: true, authMethod: 'api_key', email: 'a@b.c' }));
+    expect(r).toMatchObject({ provider: 'claude', ok: false, label: 'not signed in', detail: 'a@b.c' });
   });
 
   it('reports unreadable output and failures to run', async () => {

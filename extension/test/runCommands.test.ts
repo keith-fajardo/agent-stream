@@ -23,10 +23,10 @@ function setup() {
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),
     events: { graphs() {}, approvals() {}, confirmRun() {}, graphDeleted() {}, auth() {}, warning() {} },
-    checkAuth: async () => ({ ok: true }),
+    checkAuth: async () => ({ provider: 'claude' as const, ok: true, label: 'Claude Max' }),
     findClaude: () => ({ ok: true, path: '/bin/claude' }),
     // Signed in from the start (no checkSignIn in these tests), with steps that wait to be stopped.
-    createApp: (deps) => createApp({ ...deps, auth: { ok: true }, executors: { agent: held, command: held }, queryFn: async function* () {} }),
+    createApp: (deps) => createApp({ ...deps, status: { provider: 'claude', ok: true, label: 'Claude Max' }, executors: { agent: held, command: held }, queryFn: async function* () {} }),
   });
   const app = manager.get(f);
   const g = app.createGraph('G');

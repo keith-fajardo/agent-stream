@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { authLabel, type AuthInfo, type HostCommand } from '@agent-stream/shared';
+import { providerLabel, type HostCommand, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { graphCommands } from './commands';
 import { CHECKING, EngineManager, type EngineEvents, type Folder } from './engines';
@@ -19,8 +19,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.command = 'agentStream.signInDetails';
   context.subscriptions.push(status);
-  const showAuth = (auth: AuthInfo) => {
-    const t = statusBarText(auth);
+  const showAuth = (providerStatus: ProviderStatus) => {
+    const t = statusBarText(providerStatus);
     status.text = t.text;
     status.tooltip = t.tooltip;
     status.show();
@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   const manager = new EngineManager({ settings: readSettings, platform: process.platform, env: process.env, home: homedir(), events });
   engines = manager;
-  showAuth(manager.auth);
+  showAuth(manager.status);
 
   const panels = new GraphPanels();
   const runHostCommand = (command: HostCommand, panel: GraphPanel) =>
@@ -57,12 +57,12 @@ export async function activate(context: vscode.ExtensionContext) {
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     ),
   );
-  const graphsView = new GraphsView({ folders: workspaceFolders, graphs: (f) => manager.get(f).listGraphs(), auth: () => manager.auth });
+  const graphsView = new GraphsView({ folders: workspaceFolders, graphs: (f) => manager.get(f).listGraphs(), status: () => manager.status });
   const graphsTree = vscode.window.createTreeView('agentStream.graphs', { treeDataProvider: graphsView });
   events.graphs = () => graphsView.refresh();
-  events.auth = (auth) => {
-    showAuth(auth);
-    graphsTree.message = auth.ok || auth === CHECKING ? undefined : auth.error;
+  events.auth = (next) => {
+    showAuth(next);
+    graphsTree.message = next.ok || next === CHECKING ? undefined : next.error;
     graphsView.refresh();
   };
   const graph = graphCommands({
@@ -117,12 +117,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agentStream.retrySignIn', () => manager.checkSignIn()),
     vscode.commands.registerCommand('agentStream.signInDetails', async () => {
-      const auth = manager.auth;
-      if (auth.ok) {
-        void vscode.window.showInformationMessage(`Agent Stream runs on ${authLabel(auth)}.`);
+      const current = manager.status;
+      if (current.ok) {
+        void vscode.window.showInformationMessage(`Agent Stream runs on ${providerLabel(current)}.`);
         return;
       }
-      if ((await vscode.window.showWarningMessage(auth.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkSignIn();
+      if ((await vscode.window.showWarningMessage(current.error ?? 'Not signed in.', 'Retry')) === 'Retry') await manager.checkSignIn();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
       for (const f of e.removed) manager.remove(f.uri.toString());

@@ -13,8 +13,8 @@ describe('bridge', () => {
   it('says ready, opens its own graph after hello, and reports when the graph has loaded', () => {
     connect();
     expect(posted).toEqual([{ type: 'ready' }]);
-    deliver({ type: 'hello', auth: { ok: true }, project: '/p', graphs: [], approvals: [] });
-    expect(getState().auth).toEqual({ ok: true });
+    deliver({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
+    expect(getState().status).toEqual({ provider: 'claude', ok: true, label: 'Claude Max' });
     expect(posted.at(-1)).toEqual({ type: 'openGraph', graphId: 'parity' });
     deliver({ type: 'graphOpened', graph: emptyGraph('parity', 'Parity', 't'), chat: [], chatBusy: false, runs: [], variableValues: {} });
     expect(getState().graph?.id).toBe('parity');

@@ -22,8 +22,8 @@ const apply = (...actions: Action[]): State => actions.reduce(reduce, initialSta
 
 describe('client state', () => {
   it('tracks the connection and account', () => {
-    const s = apply(server({ type: 'hello', auth: { ok: true, plan: 'max' }, project: '/p', graphs: [{ id: 'a', name: 'A' }], approvals: [] }));
-    expect(s).toMatchObject({ connected: true, auth: { ok: true }, project: '/p', graphs: [{ id: 'a', name: 'A' }] });
+    const s = apply(server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [{ id: 'a', name: 'A' }], approvals: [] }));
+    expect(s).toMatchObject({ connected: true, status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [{ id: 'a', name: 'A' }] });
     expect(reduce(s, { kind: 'disconnected' }).connected).toBe(false);
   });
 
@@ -128,8 +128,8 @@ describe('client state', () => {
   });
 
   it('follows sign-in changes', () => {
-    const s = apply(server({ type: 'hello', auth: { ok: false, error: 'x' }, project: '/p', graphs: [], approvals: [] }));
-    expect(reduce(s, server({ type: 'auth', auth: { ok: true, plan: 'max' } })).auth).toEqual({ ok: true, plan: 'max' });
+    const s = apply(server({ type: 'hello', status: { provider: 'claude', ok: false, label: 'not signed in', error: 'x' }, project: '/p', graphs: [], approvals: [] }));
+    expect(reduce(s, server({ type: 'auth', status: { provider: 'claude', ok: true, label: 'Claude Max' } })).status).toEqual({ provider: 'claude', ok: true, label: 'Claude Max' });
   });
 
   it('handles the extension’s own messages', () => {

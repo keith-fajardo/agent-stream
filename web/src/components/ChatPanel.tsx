@@ -6,7 +6,7 @@ export function ChatPanel() {
   const chat = useStore((s) => s.chat);
   const busy = useStore((s) => s.chatBusy);
   const graph = useStore((s) => s.graph);
-  const auth = useStore((s) => s.auth);
+  const status = useStore((s) => s.status);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
   // Block body on purpose: Chrome 154+ returns a Promise from scrollIntoView(), and an
@@ -14,7 +14,7 @@ export function ChatPanel() {
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
   }, [chat.length, busy]);
-  const canType = !!graph && !!auth?.ok;
+  const canType = !!graph && !!status?.ok;
   const submit = () => {
     const t = text.trim();
     if (!t || !graph || !canType || busy) return;
@@ -39,7 +39,7 @@ export function ChatPanel() {
         <textarea
           value={text}
           disabled={!canType}
-          placeholder={canType ? 'Ask the planner… (Enter to send, Shift+Enter for a new line)' : 'Chat is unavailable until you sign in to Claude.'}
+          placeholder={canType ? 'Ask the planner… (Enter to send, Shift+Enter for a new line)' : status?.error ?? 'Chat is unavailable.'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {

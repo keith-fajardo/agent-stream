@@ -26,7 +26,7 @@ function variableItems(s: State): MenuEntry[] {
 export function buildMenus(s: State): Menu[] {
   const hasGraph = !!s.graph;
   const running = s.run?.status === 'running';
-  const signedIn = !!s.auth?.ok;
+  const signedIn = !!s.status?.ok;
   const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
   const pending = graphApprovals(s).length;
   const tab = (label: string, t: Tab) => item(label, hasGraph, () => actions.showTab(t), { checked: s.tab === t });

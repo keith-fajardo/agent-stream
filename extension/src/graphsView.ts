@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { relativeTime, statusLabel, type AuthInfo, type GraphListItem } from '@agent-stream/shared';
+import { relativeTime, statusLabel, type GraphListItem, type ProviderStatus } from '@agent-stream/shared';
 import { CHECKING, type Folder } from './engines';
 
 export class FolderItem extends vscode.TreeItem {
@@ -43,7 +43,7 @@ export class RetryItem extends vscode.TreeItem {
   }
 }
 
-export type GraphsSource = { folders(): Folder[]; graphs(folder: Folder): GraphListItem[]; auth(): AuthInfo; now?: () => number };
+export type GraphsSource = { folders(): Folder[]; graphs(folder: Folder): GraphListItem[]; status(): ProviderStatus; now?: () => number };
 
 /** The sidebar's Graphs section (spec §4.1). The engine already sorts graphs newest first, unreadable last. */
 export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -64,8 +64,8 @@ export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
     const now = this.source.now?.() ?? Date.now();
     if (parent instanceof FolderItem) return this.source.graphs(parent.folder).map((g) => new GraphItem(parent.folder, g, now));
     if (parent) return [];
-    const auth = this.source.auth();
-    const top: vscode.TreeItem[] = auth.ok || auth === CHECKING ? [] : [new RetryItem()];
+    const status = this.source.status();
+    const top: vscode.TreeItem[] = status.ok || status === CHECKING ? [] : [new RetryItem()];
     const folders = this.source.folders();
     if (folders.length === 1) return [...top, ...this.source.graphs(folders[0]).map((g) => new GraphItem(folders[0], g, now))];
     return [...top, ...folders.map((f) => new FolderItem(f))];

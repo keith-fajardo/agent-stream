@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { MenuBar } from './MenuBar';
 
 export function TopBar() {
-  const auth = useStore((s) => s.auth);
+  const status = useStore((s) => s.status);
   const graph = useStore((s) => s.graph);
   const runs = useStore((s) => s.runs);
   const run = useStore((s) => s.run);
@@ -34,7 +34,7 @@ export function TopBar() {
             ■ Stop
           </button>
         ) : (
-          <button className="primary" disabled={!auth?.ok} onClick={actions.run}>
+          <button className="primary" disabled={!status?.ok} onClick={actions.run}>
             ▶ Run
           </button>
         ))}

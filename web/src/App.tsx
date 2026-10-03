@@ -9,11 +9,11 @@ import { VariablesDialog } from './components/VariablesDialog';
 import { useStore } from './store';
 
 export function App() {
-  const auth = useStore((s) => s.auth);
+  const status = useStore((s) => s.status);
   return (
     <div className="app">
       <TopBar />
-      {auth && !auth.ok && <div className="banner">{auth.error} Fix this, then use Retry in the Agent Stream sidebar.</div>}
+      {status && !status.ok && <div className="banner">{status.error} Fix this, then use Retry in the Agent Stream sidebar.</div>}
       <main className="main">
         <div className="workspace">
           <ReactFlowProvider>

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AuthInfo, GraphListItem } from '@agent-stream/shared';
+import type { GraphListItem, ProviderStatus } from '@agent-stream/shared';
 import { CHECKING, type Folder } from '../src/engines';
 import { FolderItem, GraphItem, GraphsView, RetryItem } from '../src/graphsView';
 
 const a: Folder = { key: 'file:///a', name: 'a', path: '/a' };
 const b: Folder = { key: 'file:///b', name: 'b', path: '/b' };
 const now = Date.parse('2026-10-02T12:00:00Z');
-const view = (folders: Folder[], graphs: Record<string, GraphListItem[]>, auth: AuthInfo = { ok: true }) =>
-  new GraphsView({ folders: () => folders, graphs: (f) => graphs[f.key] ?? [], auth: () => auth, now: () => now });
+const view = (folders: Folder[], graphs: Record<string, GraphListItem[]>, status: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' }) =>
+  new GraphsView({ folders: () => folders, graphs: (f) => graphs[f.key] ?? [], status: () => status, now: () => now });
 
 describe('GraphsView', () => {
   it("lists one folder's graphs directly, with their last run", () => {
@@ -37,7 +37,7 @@ describe('GraphsView', () => {
   });
 
   it('offers Retry when the sign-in check failed, but not while it runs', () => {
-    expect(view([a], {}, { ok: false, error: 'Not signed in.' }).getChildren()[0]).toBeInstanceOf(RetryItem);
+    expect(view([a], {}, { provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' }).getChildren()[0]).toBeInstanceOf(RetryItem);
     expect(view([a], {}, CHECKING).getChildren()).toEqual([]);
   });
 

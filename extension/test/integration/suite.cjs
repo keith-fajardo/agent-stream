@@ -61,8 +61,8 @@ exports.run = async function run() {
   const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'a plain open to show the graph tab');
   await waitFor(() => reopened.isLoaded, 'the reopened tab to load its graph');
 
-  if (!api.engines.auth.ok) {
-    console.warn(`Skipping the run check: ${api.engines.auth.error}`);
+  if (!api.engines.status.ok) {
+    console.warn(`Skipping the run check: ${api.engines.status.error}`);
     return;
   }
 

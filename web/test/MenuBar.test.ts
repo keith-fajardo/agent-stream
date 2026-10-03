@@ -17,7 +17,7 @@ const title = (label: string) => [...container.querySelectorAll('.menu > button'
 const openItems = () => [...container.querySelectorAll('.menu-items button')].map((b) => b.textContent?.replace('✓', '').trim());
 
 beforeEach(async () => {
-  dispatch({ kind: 'server', msg: { type: 'hello', auth: { ok: true }, project: '/p', graphs: [], approvals: [] } });
+  dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
   dispatch({ kind: 'server', msg: { type: 'graphOpened', graph: emptyGraph('g', 'G', 't'), chat: [], chatBusy: false, runs: [], variableValues: {} } });
   container = document.createElement('div');
   document.body.appendChild(container);

@@ -18,7 +18,7 @@ function fakeView() {
 function setup() {
   const f = folder('a');
   const done = async () => ({ ok: true, output: '' });
-  const app = createApp({ projectDir: f.path, claudePath: 'claude', auth: { ok: true }, maxParallel: 1, executors: { agent: done, command: done }, queryFn: async function* () {}, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json') });
+  const app = createApp({ projectDir: f.path, claudePath: 'claude', status: { provider: 'claude', ok: true, label: 'Claude Max' }, maxParallel: 1, executors: { agent: done, command: done }, queryFn: async function* () {}, valuesFile: join(mkdtempSync(join(tmpdir(), 'cs-home-')), 'values.json') });
   const graph = app.createGraph('G');
   const { posted, view } = fakeView();
   const panel = new GraphPanel(f, graph.id, view);

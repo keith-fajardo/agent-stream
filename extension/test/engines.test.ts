@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, valuesFileFor, type App, type AppDeps, type Found } from '@agent-stream/engine';
-import type { AuthInfo, ServerMessage } from '@agent-stream/shared';
+import type { ProviderStatus, ServerMessage } from '@agent-stream/shared';
 import { CHECKING, EngineManager, type EngineEvents, type Folder } from '../src/engines';
 
-const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max' };
+const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
   return { key: `file://${path}`, name, path };
@@ -15,7 +15,7 @@ const folder = (name: string): Folder => {
 function setup(o: { found?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cs-home-'));
   const events: EngineEvents = { graphs: vi.fn(), approvals: vi.fn(), confirmRun: vi.fn(), graphDeleted: vi.fn(), auth: vi.fn(), warning: vi.fn() };
-  let auth: AuthInfo = signedIn;
+  let auth: ProviderStatus = signedIn;
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
   const manager = new EngineManager({
@@ -32,13 +32,13 @@ function setup(o: { found?: boolean } = {}) {
       return app;
     },
   });
-  return { manager, events, checkAuth, apps, home, setAuth: (a: AuthInfo) => (auth = a) };
+  return { manager, events, checkAuth, apps, home, setAuth: (a: ProviderStatus) => (auth = a) };
 }
 
 describe('EngineManager', () => {
   it('starts as "checking" and checks sign-in with the Claude Code it finds', async () => {
     const { manager, events, checkAuth } = setup();
-    expect(manager.auth).toBe(CHECKING);
+    expect(manager.status).toBe(CHECKING);
     expect(await manager.checkSignIn()).toEqual(signedIn);
     expect(checkAuth).toHaveBeenCalledWith('/bin/claude');
     expect(events.auth).toHaveBeenCalledWith(signedIn);
@@ -46,7 +46,7 @@ describe('EngineManager', () => {
 
   it('reports a missing Claude Code without running anything', async () => {
     const { manager, checkAuth } = setup({ found: false });
-    expect(await manager.checkSignIn()).toEqual({ ok: false, error: 'no claude' });
+    expect(await manager.checkSignIn()).toEqual({ provider: 'claude', ok: false, label: 'not signed in', error: 'no claude' });
     expect(checkAuth).not.toHaveBeenCalled();
   });
 
@@ -67,19 +67,19 @@ describe('EngineManager', () => {
     const bad = folder('bad');
     mkdirSync(join(bad.path, '.claude'));
     writeFileSync(join(bad.path, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_API_KEY: 'x' } }));
-    expect(manager.folderAuth(bad)).toMatchObject({ ok: false, error: expect.stringContaining('ANTHROPIC_API_KEY') });
-    expect(manager.folderAuth(folder('good')).ok).toBe(true);
+    expect(manager.folderStatus(bad)).toMatchObject({ ok: false, error: expect.stringContaining('ANTHROPIC_API_KEY') });
+    expect(manager.folderStatus(folder('good')).ok).toBe(true);
   });
 
   it('passes a new sign-in state to engines that already exist', async () => {
     const { manager, setAuth } = setup();
-    setAuth({ ok: false, error: 'Not signed in.' });
+    setAuth({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
     await manager.checkSignIn();
     const msgs: ServerMessage[] = [];
     manager.get(folder('a')).connect({ send: (m) => void msgs.push(m) });
     setAuth(signedIn);
     await manager.checkSignIn();
-    expect(msgs.at(-1)).toEqual({ type: 'auth', auth: signedIn });
+    expect(msgs.at(-1)).toEqual({ type: 'auth', status: signedIn });
   });
 
   it('keeps approvals apart per folder even when graph ids match', async () => {
@@ -145,15 +145,15 @@ describe('EngineManager', () => {
 
   it('drops a stale sign-in check that finishes after a newer one', async () => {
     const { manager, events, checkAuth } = setup();
-    let release!: (a: AuthInfo) => void;
-    checkAuth.mockImplementationOnce(() => new Promise<AuthInfo>((r) => (release = r)));
+    let release!: (a: ProviderStatus) => void;
+    checkAuth.mockImplementationOnce(() => new Promise<ProviderStatus>((r) => (release = r)));
     const a = manager.checkSignIn();
     const b = manager.checkSignIn();
     expect(await b).toEqual(signedIn);
-    release({ ok: false, error: 'old' });
+    release({ provider: 'claude', ok: false, label: 'not signed in', error: 'old' });
     expect(await a).toEqual(signedIn);
-    expect(manager.auth).toEqual(signedIn);
+    expect(manager.status).toEqual(signedIn);
     expect(events.auth).toHaveBeenCalledTimes(1);
-    expect(events.auth).not.toHaveBeenCalledWith({ ok: false, error: 'old' });
+    expect(events.auth).not.toHaveBeenCalledWith({ provider: 'claude', ok: false, label: 'not signed in', error: 'old' });
   });
 });

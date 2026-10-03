@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authLabel, fmtDuration, statusLabel } from '../src/format';
+import { fmtDuration, providerLabel, statusLabel } from '../src/format';
 import { parseGraph, parseWebviewMessage } from '../src/schemas';
 
 const node = (id: string) => ({ id, title: id, kind: 'agent' });
@@ -64,9 +64,14 @@ describe('parseWebviewMessage', () => {
 });
 
 describe('format', () => {
-  it('labels the signed-in account', () => {
-    expect(authLabel({ ok: true, plan: 'max', email: 'me@example.com' })).toBe('Claude Max · me@example.com');
-    expect(authLabel({ ok: false, error: 'Not signed in.' })).toBe('⚠ Not signed in.');
+  it('labels a provider that can run', () => {
+    expect(providerLabel({ provider: 'claude', ok: true, label: 'Claude Max', detail: 'me@example.com' })).toBe('Claude Max · me@example.com');
+    expect(providerLabel({ provider: 'claude', ok: true, label: 'Claude Pro' })).toBe('Claude Pro');
+  });
+
+  it('gives the reason when a provider cannot run', () => {
+    expect(providerLabel({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in to Claude Code.' })).toBe('⚠ Not signed in to Claude Code.');
+    expect(providerLabel({ provider: 'copilot', ok: false, label: 'Copilot not available' })).toBe('⚠ Copilot not available');
   });
 
   it('formats durations', () => {

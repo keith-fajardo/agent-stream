@@ -1,9 +1,8 @@
-import type { ApprovalRequest, AuthInfo, NodeStatus, RunStatus } from './types';
+import type { ApprovalRequest, ProviderStatus, NodeStatus, RunStatus } from './types';
 
-export function authLabel(auth: AuthInfo): string {
-  if (!auth.ok) return `⚠ ${auth.error ?? 'Not signed in.'}`;
-  const plan = auth.plan ? auth.plan.charAt(0).toUpperCase() + auth.plan.slice(1) : 'subscription';
-  return `Claude ${plan}${auth.email ? ` · ${auth.email}` : ''}`;
+export function providerLabel(status: ProviderStatus): string {
+  if (!status.ok) return `⚠ ${status.error ?? status.label}`;
+  return status.detail ? `${status.label} · ${status.detail}` : status.label;
 }
 
 export function fmtDuration(ms: number): string {

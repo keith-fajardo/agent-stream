@@ -1,11 +1,11 @@
 import type {
   ApprovalRequest,
-  AuthInfo,
   ChatEntry,
   Graph,
   GraphListItem,
   HostMessage,
   NodeEvent,
+  ProviderStatus,
   RunMeta,
   RunPreview,
   RunSummary,
@@ -16,7 +16,7 @@ export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string };
 
 export type State = {
   connected: boolean;
-  auth?: AuthInfo;
+  status?: ProviderStatus;
   project?: string;
   graphs: GraphListItem[];
   graph?: Graph;
@@ -94,9 +94,9 @@ function reduceServer(state: State, msg: HostMessage): State {
   const current = state.graph?.id;
   switch (msg.type) {
     case 'hello':
-      return { ...state, connected: true, auth: msg.auth, project: msg.project, graphs: msg.graphs, approvals: msg.approvals };
+      return { ...state, connected: true, status: msg.status, project: msg.project, graphs: msg.graphs, approvals: msg.approvals };
     case 'auth':
-      return { ...state, auth: msg.auth };
+      return { ...state, status: msg.status };
     case 'graphs':
       return { ...state, graphs: msg.graphs };
     case 'graphDeleted':

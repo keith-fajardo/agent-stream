@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AuthInfo } from '@agent-stream/shared';
+import type { ProviderStatus } from '@agent-stream/shared';
 
 /** Variables that make Claude Code use an API key or send requests (and the login token) to another host. */
 const REMOVED_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
@@ -72,21 +72,23 @@ const execStatus: ExecFn = (file, args) =>
     });
   });
 
-export async function checkAuth(claudePath: string, run: ExecFn = execStatus): Promise<AuthInfo> {
+export async function checkAuth(claudePath: string, run: ExecFn = execStatus): Promise<ProviderStatus> {
+  const fail = (error: string, detail?: string): ProviderStatus =>
+    detail ? { provider: 'claude', ok: false, label: 'not signed in', detail, error } : { provider: 'claude', ok: false, label: 'not signed in', error };
   let raw: string;
   try {
     raw = await run(claudePath, ['auth', 'status']);
   } catch (e) {
-    return { ok: false, error: `Could not run "claude auth status": ${(e as Error).message}` };
+    return fail(`Could not run "claude auth status": ${(e as Error).message}`);
   }
   let status: Record<string, unknown>;
   try {
     status = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    return { ok: false, error: 'Got unexpected output from "claude auth status".' };
+    return fail('Got unexpected output from "claude auth status".');
   }
   if (status.loggedIn !== true) {
-    return { ok: false, error: 'Not signed in to Claude Code. Run `claude`, then /login with your Claude account.' };
+    return fail('Not signed in to Claude Code. Run `claude`, then /login with your Claude account.');
   }
   const info = {
     method: typeof status.authMethod === 'string' ? status.authMethod : undefined,
@@ -94,14 +96,11 @@ export async function checkAuth(claudePath: string, run: ExecFn = execStatus): P
     email: typeof status.email === 'string' ? status.email : undefined,
   };
   if (typeof status.apiProvider === 'string' && status.apiProvider !== 'firstParty') {
-    return { ok: false, ...info, error: `Claude Code is configured for "${status.apiProvider}", not your Claude subscription.` };
+    return fail(`Claude Code is configured for "${status.apiProvider}", not your Claude subscription.`, info.email);
   }
   if (info.method !== 'claude.ai') {
-    return {
-      ok: false,
-      ...info,
-      error: `Signed in with "${info.method ?? 'unknown'}", which is not a Claude subscription. Sign in with /login using your Claude account.`,
-    };
+    return fail(`Signed in with "${info.method ?? 'unknown'}", which is not a Claude subscription. Sign in with /login using your Claude account.`, info.email);
   }
-  return { ok: true, ...info };
+  const plan = info.plan ? info.plan.charAt(0).toUpperCase() + info.plan.slice(1) : 'subscription';
+  return info.email ? { provider: 'claude', ok: true, label: `Claude ${plan}`, detail: info.email } : { provider: 'claude', ok: true, label: `Claude ${plan}` };
 }

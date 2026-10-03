@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '@agent-stream/engine';
-import { MAX_IMPORT_CHARS, type AuthInfo } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, type ProviderStatus } from '@agent-stream/shared';
 import { graphCommands, type GraphTarget, type Ui } from '../src/commands';
 import { EngineManager, type Folder } from '../src/engines';
 
 type NodeOutcome = { ok: true; output: string };
-const signedIn: AuthInfo = { ok: true, method: 'claude.ai', plan: 'max' };
+const signedIn: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' };
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
   return { key: `file://${path}`, name, path };
@@ -27,7 +27,7 @@ function setup(folders: Folder[] = [folder('a')]) {
     checkAuth: async () => signedIn,
     findClaude: () => ({ ok: true, path: '/bin/claude' }),
     // Signed in from the start (no checkSignIn in these tests), with steps that wait for the test.
-    createApp: (deps) => createApp({ ...deps, auth: signedIn, executors: { agent: held, command: held }, queryFn: async function* () {} }),
+    createApp: (deps) => createApp({ ...deps, status: signedIn, executors: { agent: held, command: held }, queryFn: async function* () {} }),
   });
   const ui = {
     inputBox: vi.fn(),
