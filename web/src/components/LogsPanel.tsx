@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { PROVIDER_NAMES, fmtDuration, statusLabel } from '@agent-stream/shared';
+import { PROVIDER_NAMES, fmtDuration, statusLabel, waitingText } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { logKey } from '../state';
 import { dispatch, useStore } from '../store';
@@ -12,6 +12,7 @@ export function LogsPanel() {
   const selectedId = useStore((s) => s.selectedNodeId);
   const run = useStore((s) => s.run);
   const approvals = useStore((s) => s.approvals);
+  const graphs = useStore((s) => s.graphs);
   const logsHidden = useStore((s) => s.logsHidden);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   const state = node && run ? run.nodes[node.id] : undefined;
@@ -42,6 +43,10 @@ export function LogsPanel() {
   const sourceRunId = run?.sourceRunId;
   const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
   const changedBy = [...new Set((run?.amendments ?? []).filter((a) => a.nodeId === node.id).map((a) => a.byNodeId))];
+  // The step as it ran: its workspace and that run's worktree (spec §7).
+  const ranAs = run?.snapshot.nodes.find((n) => n.id === node.id);
+  const place = ranAs?.workspace ? run?.workspaces?.[ranAs.workspace] : undefined;
+  const waitingFor = run?.waitingFor;
   return (
     <section className="logs-panel" aria-label="Step logs">
       <header className="logs-head">
@@ -52,6 +57,12 @@ export function LogsPanel() {
           {run?.provider && ` · ${PROVIDER_NAMES[run.provider]}`}
           {changedBy.length > 0 && ` · changed during the run by ${changedBy.join(', ')}`}
         </span>
+        {ranAs?.workspace && place && (
+          <span className="logs-workspace">
+            workspace {ranAs.workspace} · {place.path}
+          </span>
+        )}
+        {waitingFor && <span className="logs-waiting">{waitingText(waitingFor, graphs.find((g) => g.id === waitingFor.graphId)?.name ?? waitingFor.graphId)}</span>}
         <button className="link" aria-label="Close logs" onClick={() => dispatch({ kind: 'selectNode' })}>
           ✕
         </button>

@@ -113,4 +113,18 @@ describe('LogsPanel', () => {
     await act(async () => close.click());
     expect(container.innerHTML).toBe('');
   });
+  it('shows the workspace a step ran in, from the run record', async () => {
+    const inWorkspace = { ...graph.nodes[1], workspace: 'wh_small' };
+    await act(async () => server({ type: 'run', run: { ...run, snapshot: { ...run.snapshot, nodes: [inWorkspace] }, workspaces: { wh_small: { path: '/wt/wh_small', head: 'a1b2c3d4' } } } }));
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    expect(container.querySelector('.logs-head .logs-workspace')?.textContent).toBe('workspace wh_small · /wt/wh_small');
+    await act(async () => server({ type: 'run', run }));
+    expect(container.querySelector('.logs-workspace')).toBeNull();
+  });
+
+  it('says what a waiting run waits for', async () => {
+    await act(async () => server({ type: 'run', run: { ...run, status: 'running', waitingFor: { runId: '20261003-090000-aaaa', graphId: 'billing', folder: '/p' } } }));
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    expect(container.querySelector('.logs-head .logs-waiting')?.textContent).toBe('Waiting for run 20261003-090000-aaaa ("billing") to finish changing files');
+  });
 });

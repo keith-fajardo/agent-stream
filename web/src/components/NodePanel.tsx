@@ -5,12 +5,14 @@ import { changedSentence, changeKey } from '../changeLabels';
 import { post, send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
-type Draft = { title: string; description: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; prompt: string; command: string; timeoutSec: string };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
   description: n.description ?? '',
   kind: n.kind,
+  access: n.access === 'read' ? 'read' : 'write',
+  workspace: n.workspace ?? '',
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
@@ -23,6 +25,7 @@ export function NodePanel() {
   const changes = useStore((s) => s.changes);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   if (!graph || !node) return <p className="muted pad">Select a step on the canvas, or double-click empty canvas to add one.</p>;
+  const workspaces = [...new Set(graph.nodes.flatMap((n) => (n.workspace ? [n.workspace] : [])))].sort();
   const changed = changes.find((c) => c.kind === 'node' && c.change === 'changed' && c.id === node.id);
   return (
     <div className="node-panel">
@@ -38,13 +41,13 @@ export function NodePanel() {
           </span>
         </div>
       )}
-      <NodeEditor key={node.id} graphId={graph.id} node={node} />
+      <NodeEditor key={node.id} graphId={graph.id} node={node} workspaces={workspaces} />
     </div>
   );
 }
 
 /** Edits a local draft; if someone else changes the node meanwhile, the user decides. */
-function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
+function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: GraphNode; workspaces: string[] }) {
   const run = useStore((s) => s.run);
   const runs = useStore((s) => s.runs);
   const status = useStore((s) => s.status);
@@ -76,6 +79,8 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
     if (draft.title !== base.draft.title) patch.title = draft.title;
     if (draft.description !== base.draft.description) patch.description = draft.description;
     if (draft.kind !== base.draft.kind) patch.kind = draft.kind;
+    if (draft.access !== base.draft.access && draft.kind === 'agent') patch.access = draft.access;
+    if (draft.workspace !== base.draft.workspace) patch.workspace = draft.workspace.trim();
     if (draft.prompt !== base.draft.prompt) patch.prompt = draft.prompt;
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
@@ -117,6 +122,29 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
           <option value="agent">Agent: an AI agent run</option>
           <option value="command">Command: an exact shell command</option>
         </select>
+      </div>
+      {draft.kind === 'agent' ? (
+        <div className="field">
+          <label htmlFor="node-access">Access</label>
+          <select id="node-access" value={draft.access} onChange={(e) => setDraft({ ...draft, access: e.target.value as Draft['access'] })}>
+            <option value="write">Can edit files</option>
+            <option value="read">Read-only</option>
+          </select>
+        </div>
+      ) : (
+        <div className="field">
+          <label>Access</label>
+          <p className="static-note">Command steps can change files</p>
+        </div>
+      )}
+      <div className="field">
+        <label htmlFor="node-workspace">Workspace</label>
+        <input id="node-workspace" list="workspace-names" value={draft.workspace} placeholder="This checkout" onChange={(e) => setDraft({ ...draft, workspace: e.target.value })} />
+        <datalist id="workspace-names">
+          {workspaces.map((w) => (
+            <option key={w} value={w} />
+          ))}
+        </datalist>
       </div>
       {draft.kind === 'agent' ? (
         <div className="field">

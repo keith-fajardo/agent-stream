@@ -172,3 +172,13 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .checkout-chip { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .checkout-line { color: var(--muted); }
 .run-note { color: var(--info); }
+.static-note { margin: 0; color: var(--muted); }
+.read-badge { padding: 0 4px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
+.ws-badge { padding: 0 4px; border: 1px solid var(--ws); border-radius: 8px; color: var(--ws); }
+.ws-color-0 { --ws: var(--vscode-charts-blue, #1d5fa8); }
+.ws-color-1 { --ws: var(--vscode-charts-green, #2e7d32); }
+.ws-color-2 { --ws: var(--vscode-charts-orange, #b26a00); }
+.ws-color-3 { --ws: var(--vscode-charts-purple, #8957e5); }
+.ws-color-4 { --ws: var(--vscode-charts-red, #b42318); }
+.ws-color-5 { --ws: var(--vscode-charts-yellow, #8a6d00); }
+.logs-workspace, .logs-waiting { margin-left: 8px; color: var(--muted); }

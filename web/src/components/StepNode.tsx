@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { fmtDuration, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
 import { badgeText } from '../changeLabels';
+import { workspaceColor } from '../workspaceColor';
 
 export type StepData = {
   node: GraphNode;
@@ -37,6 +38,12 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
       )}
       <div className="step-meta">
         <span>{node.id}</span>
+        {node.access === 'read' && <span className="read-badge">read-only</span>}
+        {node.workspace && (
+          <span className={`ws-badge ws-color-${workspaceColor(node.workspace)}`} title={`Runs in workspace ${node.workspace}`}>
+            ⎇ {node.workspace}
+          </span>
+        )}
         {change ? (
           <span className="change-badge" title={changeTitle(change, changeFields)}>
             {badgeText(change, changeBy)}

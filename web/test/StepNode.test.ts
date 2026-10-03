@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { GraphNode, NodeRunState } from '@agent-stream/shared';
 import type { StepData } from '../src/components/StepNode';
 import { StepNode, type StepFlowNode } from '../src/components/StepNode';
+import { WORKSPACE_COLORS, workspaceColor } from '../src/workspaceColor';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -117,5 +118,43 @@ describe('StepNode', () => {
       expect(badge(a.container)).toBeNull();
       await a.done();
     });
+  });
+});
+
+describe('StepNode access and workspace badges', () => {
+  it('shows a read-only badge on read-only steps only', async () => {
+    const reader = await renderCardEl({ ...node, kind: 'agent', command: undefined, prompt: 'p', access: 'read' });
+    expect(reader.container.querySelector('.read-badge')?.textContent).toBe('read-only');
+    await reader.done();
+    const plain = await renderCardEl(node);
+    expect(plain.container.querySelector('.read-badge')).toBeNull();
+    await plain.done();
+  });
+
+  it('shows the workspace as a ⎇ badge, in one colour for every step that shares it', async () => {
+    const a = await renderCardEl({ ...node, workspace: 'wh_small' });
+    const b = await renderCardEl({ ...node, id: 'n3', workspace: 'wh_small' });
+    const badge = a.container.querySelector('.ws-badge')!;
+    expect(badge.textContent).toBe('⎇ wh_small');
+    expect(badge.className).toBe(`ws-badge ws-color-${workspaceColor('wh_small')}`);
+    expect(b.container.querySelector('.ws-badge')!.className).toBe(badge.className);
+    await a.done();
+    await b.done();
+    const none = await renderCardEl(node);
+    expect(none.container.querySelector('.ws-badge')).toBeNull();
+    await none.done();
+  });
+});
+
+describe('workspaceColor', () => {
+  it('picks one of the chart colours by a hash of the name, the same every time', () => {
+    expect(WORKSPACE_COLORS).toBe(6);
+    expect(workspaceColor('a')).toBe(97 % 6);
+    expect(workspaceColor('a')).toBe(1);
+    for (const name of ['a', 'wh_small', 'wh_large', 'variant-6']) {
+      expect(workspaceColor(name)).toBeGreaterThanOrEqual(0);
+      expect(workspaceColor(name)).toBeLessThan(WORKSPACE_COLORS);
+    }
+    expect(new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(workspaceColor)).size).toBeGreaterThan(1);
   });
 });

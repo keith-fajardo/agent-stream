@@ -168,3 +168,56 @@ describe('NodePanel agent-change banner', () => {
     await act(async () => root.unmount());
   });
 });
+
+describe('NodePanel access and workspace', () => {
+  const change = (el: HTMLInputElement | HTMLSelectElement, value: string) => {
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  };
+  async function render(g: Graph, id = 'n1') {
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: g, runs: [], variableValues: {} } });
+    dispatch({ kind: 'selectNode', id });
+    vi.mocked(send).mockClear();
+    const el = document.createElement('div');
+    const root = createRoot(el);
+    await act(async () => root.render(createElement(NodePanel)));
+    const save = () => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Save') as HTMLButtonElement;
+    return { el, root, save };
+  }
+
+  it('puts the Access select after Kind and the Workspace field after it, and saves Read-only in the draft', async () => {
+    const { el, root, save } = await render(graph);
+    expect([...el.querySelectorAll('.field label')].map((l) => l.textContent).slice(0, 5)).toEqual(['Title', 'Description', 'Kind', 'Access', 'Workspace']);
+    const access = el.querySelector('select#node-access') as HTMLSelectElement;
+    expect([...access.options].map((o) => o.textContent)).toEqual(['Can edit files', 'Read-only']);
+    expect(access.value).toBe('write');
+    await act(async () => change(access, 'read'));
+    expect(save().disabled).toBe(false);
+    await act(async () => save().click());
+    expect(send).toHaveBeenCalledWith({ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { access: 'read' } } });
+    await act(async () => root.unmount());
+  });
+
+  it('says command steps can change files instead of offering the select', async () => {
+    const commandGraph: Graph = { ...graph, nodes: [{ id: 'n1', title: 'Build', kind: 'command', command: 'make', createdBy: 'user', updatedBy: 'user', updatedAt: 't' }] };
+    const { el, root } = await render(commandGraph);
+    expect(el.querySelector('select#node-access')).toBeNull();
+    expect(el.querySelector('.static-note')?.textContent).toBe('Command steps can change files');
+    await act(async () => root.unmount());
+  });
+
+  it("edits the workspace in the draft, suggests the graph's workspace names, and clears it with an empty value", async () => {
+    const g: Graph = { ...graph, nodes: [{ ...step, workspace: 'wh_small' }, { ...step, id: 'n2', workspace: 'wh_large' }, { ...step, id: 'n3' }] };
+    const { el, root, save } = await render(g);
+    const field = el.querySelector('input#node-workspace') as HTMLInputElement;
+    expect(field.value).toBe('wh_small');
+    expect(field.placeholder).toBe('This checkout');
+    expect(field.getAttribute('list')).toBe('workspace-names');
+    expect([...el.querySelectorAll('datalist#workspace-names option')].map((o) => (o as HTMLOptionElement).value)).toEqual(['wh_large', 'wh_small']);
+    await act(async () => change(field, ''));
+    await act(async () => save().click());
+    expect(send).toHaveBeenCalledWith({ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { workspace: '' } } });
+    await act(async () => root.unmount());
+  });
+});
