@@ -11,3 +11,4 @@ export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found }
 export { envLookup } from './runPreview';
 export type { NodeOutcome } from './executors';
 export { GIT_MISSING, inspectCheckout, NOT_A_REPO, realGit, realOrResolved, type GitExec, type GitResult } from './git';
+export { createWriteLeases, leaseKey, type LeaseResult, type WriteLeases } from './writeLease';

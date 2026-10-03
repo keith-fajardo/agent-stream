@@ -7,6 +7,7 @@ import type { Found } from '../src/platform';
 import { ensureDataDirs, projectPaths, type ProjectPaths } from '../src/paths';
 import type { GitExec, GitResult, WorktreeEntry } from '../src/git';
 import type { AgentProvider } from '../src/providers/types';
+import { createWriteLeases, type WriteLeases } from '../src/writeLease';
 
 /** A found Git Bash, so command steps aren't refused on Windows (ignored elsewhere). */
 export const testGitBash: Found = { ok: true, path: 'C:\\Program Files\\Git\\bin\\bash.exe' };
@@ -87,3 +88,8 @@ export function repoAnswers(o: RepoOptions): Record<string, GitAnswer> {
 }
 
 export const repoGit = (o: RepoOptions) => fakeGit(repoAnswers(o));
+
+/** Leases with their lock files in a fresh temp folder: no test writes to ~/.agent-stream/locks. */
+export function testLeases(o: { pid?: number } = {}): WriteLeases {
+  return createWriteLeases({ locksDir: mkdtempSync(join(tmpdir(), 'agent-stream-locks-')), isAlive: () => true, ...o });
+}
