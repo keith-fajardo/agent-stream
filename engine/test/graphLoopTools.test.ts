@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { toLoopTools } from '../src/agentLoop/graphLoopTools';
 import { GraphStore } from '../src/graphStore';
 import { defineTool, graphTools, reply } from '../src/plannerTools';
+import { STEP_GRAPH_TOOL_PREFIX } from '../src/providers/toolGate';
 import { RunStore } from '../src/runStore';
 import { fixedClock, outsideGit, tmpProject } from './helpers';
 
@@ -11,7 +12,9 @@ const signal = new AbortController().signal;
 describe('toLoopTools', () => {
   it('turns a graph tool into a loop tool, named for the gate with the prefix', async () => {
     const addStep = defineTool('add_step', 'Add a step to this run.', { title: z.string() }, async (a) => reply(`added ${a.title}`));
-    const [t] = toLoopTools([addStep], 'mcp__run_graph__');
+    // Claude's run_graph MCP server, the step gate and Copilot all name a step's graph tools with this one prefix.
+    expect(STEP_GRAPH_TOOL_PREFIX).toBe('mcp__run_graph__');
+    const [t] = toLoopTools([addStep], STEP_GRAPH_TOOL_PREFIX);
     expect(t.spec).toEqual({ name: 'add_step', description: 'Add a step to this run.', inputSchema: z.toJSONSchema(z.object({ title: z.string() })) });
     expect(t.gateName).toBe('mcp__run_graph__add_step');
     expect(await t.run({ title: 'Lint' }, signal)).toEqual({ text: 'added Lint' });

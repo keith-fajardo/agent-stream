@@ -4,7 +4,7 @@ export { CHANGED_SINCE_REVIEW } from './app';
 export { isGraphId } from './paths';
 export { checkAuth, projectSettingsProblem, sanitizedEnv } from './providers/claude/auth';
 export { createClaudeProvider } from './providers/claude';
-export { createPlannerGate, createStepGate, type ToolGate } from './providers/toolGate';
+export { createPlannerGate, createStepGate, STEP_GRAPH_TOOL_PREFIX, type ToolGate } from './providers/toolGate';
 export type { AgentProvider, GraphTool, PlannerEvent, PlannerTurn, PlannerTurnResult, TranscriptStore } from './providers/types';
 export { legacyValuesFileFor, valuesFileFor } from './variableValues';
 export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found } from './platform';

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import {
   createApp as realCreateApp,
   createClaudeProvider,
+  createRunShell,
   createWriteLeases,
   findClaude as realFindClaude,
   findGitBash as realFindGitBash,
@@ -85,7 +86,7 @@ export class EngineManager {
             findClaude: () => (d.findClaude ?? realFindClaude)({ platform: d.platform, env: d.env, home: d.home, setting: d.settings().claudePath }),
             checkAuth: d.checkAuth,
           }),
-        copilot: () => createCopilotProvider(),
+        copilot: () => createCopilotProvider({ runShell: createRunShell({ platform: d.platform, env: d.env }), limits: () => ({ maxRequestsPerStep: 25, maxRequestsPerTurn: 10 }) }),
         ...d.providers,
       };
       p = build[id]();

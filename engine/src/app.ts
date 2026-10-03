@@ -40,7 +40,7 @@ import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
 import { refineRequest } from './refine';
 import { GIT_BASH_MISSING, type Found } from './platform';
-import { createStepGate } from './providers/toolGate';
+import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { needsCheckoutLease, Runner } from './runner';
@@ -184,7 +184,7 @@ export function createApp(d: AppDeps) {
           signal: ctx.signal,
           emit: ctx.emit,
           readOnly,
-          selfApproving: new Set(graphTools.map((t) => `mcp__run_graph__${t.name}`)),
+          selfApproving: new Set(graphTools.map((t) => STEP_GRAPH_TOOL_PREFIX + t.name)),
         }),
       );
     };

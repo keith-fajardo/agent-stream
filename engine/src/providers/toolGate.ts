@@ -4,6 +4,11 @@ import type { ApprovalBroker } from '../approvals';
 import { privatePathDenial } from '../privatePaths';
 
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep']);
+/**
+ * How the gate names a step's graph tools: Claude serves them from its `run_graph` MCP server (so the SDK calls them
+ * `mcp__run_graph__<name>`), and the agent loop names them to match, so one self-approving set fits every provider.
+ */
+export const STEP_GRAPH_TOOL_PREFIX = 'mcp__run_graph__';
 /** Approvals wait for the user indefinitely; a day is the practical upper bound. */
 export const APPROVAL_HOOK_TIMEOUT_SEC = 24 * 60 * 60;
 

@@ -1,13 +1,13 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { EffortLevel, ModelChoice, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../../executors';
-import { READ_ONLY_TOOLS, type ToolGate } from '../toolGate';
+import { READ_ONLY_TOOLS, STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import { modelOptions } from './models';
 import { blocksOf, graphServer, toolResultText, type QueryFn } from './sdk';
 import { toSdkGate } from './sdkGate';
 
-/** The in-process MCP server that serves a step's graph tools: they are `mcp__run_graph__<name>`. */
+/** The in-process MCP server that serves a step's graph tools: they are `mcp__run_graph__<name>` (STEP_GRAPH_TOOL_PREFIX). */
 export const RUN_GRAPH = 'run_graph';
 
 /** What the Claude provider shares with its steps and planner turns. */
@@ -115,7 +115,7 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
     if (ctx.graphTools?.length) {
       // The step's own graph tools: each asks the user with the exact change (the gate lets them through).
       options.mcpServers = { [RUN_GRAPH]: graphServer(RUN_GRAPH, ctx.graphTools) };
-      options.allowedTools = [...options.allowedTools!, `mcp__${RUN_GRAPH}__*`];
+      options.allowedTools = [...options.allowedTools!, `${STEP_GRAPH_TOOL_PREFIX}*`];
     }
     try {
       let sawInit = false;

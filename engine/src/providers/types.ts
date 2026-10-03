@@ -47,4 +47,11 @@ export interface AgentProvider {
   listModels?(o?: { retry?: boolean }): Promise<ModelChoice[]>;
   /** The models already listed, without waiting or starting anything; undefined until a list succeeded. */
   knownModels?(): ModelChoice[] | undefined;
+  /** The most model requests one agent step may make, when the provider caps them (Copilot); the run dialog shows it. */
+  stepRequestCap?(): number;
+  /**
+   * The model a step would run on for this choice (undefined: Default), when the provider substitutes its default for a
+   * model it no longer lists (Copilot); undefined when it runs the choice as given or can't tell without waiting.
+   */
+  modelInUse?(model: string | undefined): ModelChoice | undefined;
 }

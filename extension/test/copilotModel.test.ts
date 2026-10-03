@@ -93,6 +93,14 @@ describe('vscodeChatModel', () => {
     expect(fake.requests[0].token?.isCancellationRequested).toBe(true);
   });
 
+  it('sends nothing when the signal has already aborted', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const fake = fakeLmModel({ id: 'auto' });
+    await expect(collect(vscodeChatModel(fake.model).send([], [], ac.signal))).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fake.sendRequest).not.toHaveBeenCalled();
+  });
+
   it('drops the $schema key z.toJSONSchema adds, without touching the caller\'s schema', async () => {
     const fake = fakeLmModel({ id: 'auto' });
     const inputSchema = { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', properties: { a: { type: 'string' } } };

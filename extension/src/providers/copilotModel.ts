@@ -54,10 +54,11 @@ export function vscodeChatModel(model: vscode.LanguageModelChat): ChatModel {
     id: model.id,
     maxInputTokens: model.maxInputTokens,
     async *send(messages: ChatMessage[], tools: ToolSpec[], signal: AbortSignal): AsyncGenerator<ChatPart> {
+      // A step already stopped sends nothing: no request, so no consent prompt and no quota used.
+      signal.throwIfAborted();
       const cancellation = new vscode.CancellationTokenSource();
       const onAbort = () => cancellation.cancel();
       signal.addEventListener('abort', onAbort, { once: true });
-      if (signal.aborted) onAbort();
       try {
         let stream: AsyncIterable<unknown>;
         try {
