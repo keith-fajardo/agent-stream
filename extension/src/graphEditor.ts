@@ -4,6 +4,7 @@ import { isGraphId, type App, type Client } from '@agent-stream/engine';
 import { parseWebviewMessage, type HostCommand, type HostMessage } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 import { folderUri } from './folders';
+import { openExternalUrl } from './ui';
 import { escapeHtml, webviewHtml } from './webviewHtml';
 
 export const GRAPH_VIEW_TYPE = 'agentStream.graph';
@@ -143,6 +144,9 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
           return;
         case 'setMinimap':
           d.setMinimap(msg.value);
+          return;
+        case 'openExternal':
+          openExternalUrl(msg.url);
           return;
         case 'setUpParallelTickets':
           d.setUpParallelTickets(d.panel.folder);

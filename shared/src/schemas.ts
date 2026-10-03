@@ -143,6 +143,7 @@ const webviewHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('draftState'), dirty: z.boolean() }),
   z.object({ type: z.literal('refineSteps'), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('setUpParallelTickets') }),
+  z.object({ type: z.literal('openExternal'), url: z.string().max(4096) }),
 ]);
 
 /** Validates what a graph tab posts: an engine message, or one of the tab's own messages for the extension. */

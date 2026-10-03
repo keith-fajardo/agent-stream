@@ -255,4 +255,18 @@ describe('ChatApp', () => {
     expect((el.querySelector('select[aria-label="Model"]') as HTMLSelectElement).value).toBe('claude-sonnet-5');
     expect(options(el, 'Effort')).toEqual(['Default', 'low', 'high']);
   });
+  it('renders assistant replies as Markdown and keeps user messages plain', async () => {
+    const el = await render();
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({
+        kind: 'server',
+        msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [{ at: 't', role: 'user', text: '**mine**' }, { at: 't', role: 'assistant', text: '**plan**' }], busy: false },
+      });
+    });
+    expect(el.querySelector('.msg.assistant strong')?.textContent).toBe('plan');
+    expect(el.querySelector('.msg.user strong')).toBeNull();
+    expect(el.querySelector('.msg.user')?.textContent).toBe('**mine**');
+  });
 });

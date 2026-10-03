@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Markdown } from '../markdown';
 import { fmtDuration, type NodeEvent } from '@agent-stream/shared';
 
 export const LOG_STREAM_CAP = 200_000;
@@ -37,7 +38,7 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
           {e.prompt && (
             <details>
               <summary>Prompt sent to the agent</summary>
-              <pre>{e.prompt}</pre>
+              <Markdown text={e.prompt} />
             </details>
           )}
         </div>
@@ -46,7 +47,9 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
       return (
         <div className="ev text">
           {time}
-          <div className="body">{e.text}</div>
+          <div className="body">
+            <Markdown text={e.text} />
+          </div>
         </div>
       );
     case 'tool_call':

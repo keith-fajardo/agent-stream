@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { send } from '../bridge';
+import { Markdown } from '../markdown';
 import { useStore } from '../store';
 
 export function ChatPanel() {
@@ -50,7 +51,7 @@ export function ChatPanel() {
         )}
         {chat.map((e, i) => (
           <div key={i} className={`msg ${e.role}`}>
-            {e.role === 'tool' ? <code>{e.text}</code> : e.text}
+            {e.role === 'tool' ? <code>{e.text}</code> : e.role === 'assistant' ? <Markdown text={e.text} /> : e.text}
           </div>
         ))}
         {busy && <div className="msg busy">Planner is working…</div>}

@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { App, Client } from '@agent-stream/engine';
 import { parseWebviewMessage, type HostMessage } from '@agent-stream/shared';
 import type { Folder } from './engines';
+import { openExternalUrl } from './ui';
 import { webviewHtml } from './webviewHtml';
 
 export type ChatSource = { folder: Folder; graphId: string };
@@ -55,6 +56,7 @@ export class ChatViewController {
     if (!parsed.ok) return this.post({ type: 'error', message: `Agent Stream ignored a malformed message: ${parsed.error}` });
     const msg = parsed.msg;
     if (msg.type === 'ready') return this.ready();
+    if (msg.type === 'openExternal') return openExternalUrl(msg.url);
     const t = this.target;
     if (msg.type === 'chatCommand') {
       if (!t) return;

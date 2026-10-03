@@ -30,3 +30,9 @@ export const vscodeUi: Ui = {
   info: (message) => void vscode.window.showInformationMessage(message),
   error: (message) => void vscode.window.showErrorMessage(message),
 };
+
+/** Opens a link from rendered Markdown in the browser: only http(s) (the webview is not trusted with other schemes). */
+export function openExternalUrl(url: string): void {
+  if (!/^https?:\/\//.test(url)) return;
+  void vscode.env.openExternal(vscode.Uri.parse(url));
+}

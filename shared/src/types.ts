@@ -371,7 +371,8 @@ export type WebviewHostMessage =
   | { type: 'chatCommand'; command: 'switchSession' | 'newChat' }
   | { type: 'draftState'; dirty: boolean }
   | { type: 'refineSteps'; nodeIds: string[] }
-  | { type: 'setUpParallelTickets' };
+  | { type: 'setUpParallelTickets' }
+  | { type: 'openExternal'; url: string };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 

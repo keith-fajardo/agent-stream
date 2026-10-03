@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { createApp, createClaudeProvider } from '@agent-stream/engine';
 import type { HostMessage, ServerMessage } from '@agent-stream/shared';
 import type { Folder } from '../src/engines';
@@ -40,6 +41,15 @@ function setup() {
 }
 
 describe('graph tab messages', () => {
+  it('opens https links in the browser and ignores other schemes', () => {
+    const s = setup();
+    vi.mocked(vscode.env.openExternal).mockClear();
+    s.handler.handle({ type: 'openExternal', url: 'https://example.com/a' });
+    expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'vscode://x/y', ' https://example.com']) s.handler.handle({ type: 'openExternal', url });
+    expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
+  });
+
   it("runs Set Up Parallel Tickets for the tab's folder", () => {
     const s = setup();
     s.handler.handle({ type: 'setUpParallelTickets' });

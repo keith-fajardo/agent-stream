@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { createApp } from '@agent-stream/engine';
 import type { HostMessage } from '@agent-stream/shared';
 import { ChatViewController } from '../src/chatView';
@@ -116,5 +117,15 @@ describe('ChatViewController', () => {
     s.chat.handle({ type: 'chat', graphId: s.g2, sessionId: 'default', text: 'hi' });
     expect(s.handle).not.toHaveBeenCalled();
     expect(s.posted.at(-1)).toEqual({ type: 'error', message: 'This chat is no longer open.' });
+  });
+
+  it('opens https links in the browser and ignores other schemes', () => {
+    const s = setup();
+    vi.mocked(vscode.env.openExternal).mockClear();
+    s.chat.handle({ type: 'openExternal', url: 'http://example.com' });
+    expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd']) s.chat.handle({ type: 'openExternal', url });
+    expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
+    expect(s.posted.filter((m) => m.type === 'error')).toEqual([]);
   });
 });

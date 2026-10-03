@@ -51,6 +51,7 @@ export enum StatusBarAlignment {
 }
 
 export const window = { showInformationMessage: vi.fn(), showWarningMessage: vi.fn(), showErrorMessage: vi.fn() };
+export const env = { openExternal: vi.fn(async (_uri: unknown) => true) };
 export const commands = { executeCommand: vi.fn() };
 export const workspace = { getConfiguration: vi.fn(() => ({ get: <T>(_key: string, fallback: T) => fallback })) };
 export const lm = { selectChatModels: vi.fn() };
