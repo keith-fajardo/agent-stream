@@ -1,4 +1,4 @@
-import { PROVIDER_NAMES, statusLabel } from '@agent-stream/shared';
+import { PROVIDER_NAMES, checkoutChip, checkoutTooltip, ranIn, statusLabel, waitingText } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { useStore } from '../store';
@@ -9,13 +9,22 @@ export function TopBar() {
   const graph = useStore((s) => s.graph);
   const runs = useStore((s) => s.runs);
   const run = useStore((s) => s.run);
+  const graphs = useStore((s) => s.graphs);
+  const checkout = useStore((s) => s.checkout);
   const running = run?.status === 'running';
+  const graphName = (id: string) => graphs.find((g) => g.id === id)?.name ?? id;
   return (
     <header className="topbar">
       <MenuBar />
       {graph && (
         <span className="graph-name" title={graph.id}>
           {graph.name}
+        </span>
+      )}
+      {checkout && (
+        // Where this graph works (spec §7): its branch and worktree, refreshed on every checkout message.
+        <span className="checkout-chip" title={checkoutTooltip(checkout.info)}>
+          {checkoutChip(checkout.info)}
         </span>
       )}
       <span className="spacer" />
@@ -25,9 +34,12 @@ export function TopBar() {
             // The selected run's own record is live and lists each change; other runs give the count alone.
             const selected = run?.id === r.id ? run : undefined;
             const n = (selected ? selected.amendments?.length : r.amendments) ?? 0;
+            const waiting = selected ? selected.waitingFor : r.waitingFor;
+            const ran = selected?.checkout ?? r.checkout;
+            const title = [selected?.amendments?.map((a) => a.summary).join('\n'), ran && ranIn(ran)].filter(Boolean).join('\n') || undefined;
             return (
-              <option key={r.id} value={r.id} title={selected?.amendments?.map((a) => a.summary).join('\n') || undefined}>
-                {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}${n > 0 ? ` · ${n} change${n === 1 ? '' : 's'} by agents` : ''}`}
+              <option key={r.id} value={r.id} title={title}>
+                {`Run ${r.id} · ${statusLabel(r.status)}${r.provider ? ` · ${PROVIDER_NAMES[r.provider]}` : ''}${n > 0 ? ` · ${n} change${n === 1 ? '' : 's'} by agents` : ''}${waiting ? ` · ${waitingText(waiting, graphName(waiting.graphId))}` : ''}`}
               </option>
             );
           })}

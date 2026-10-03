@@ -1,5 +1,6 @@
+import { checkoutChip } from '@agent-stream/shared';
 import { useEffect } from 'react';
-import { send } from '../bridge';
+import { post, send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
 let requestCounter = 0;
@@ -20,6 +21,7 @@ export function RunConfirmDialog() {
   const graph = useStore((s) => s.graph);
   const preview = useStore((s) => s.preview);
   const variableValues = useStore((s) => s.variableValues);
+  const blocked = useStore((s) => s.blocked);
 
   useEffect(() => {
     if (confirm && graph) {
@@ -29,11 +31,46 @@ export function RunConfirmDialog() {
     }
   }, [confirm, graph, variableValues]);
 
+  if (blocked && graph) {
+    // Another run is changing files in this checkout (spec §7): separate tickets, or wait for it.
+    const dismiss = () => dispatch({ kind: 'closeBlocked' });
+    const runAfter = () => {
+      if (blocked.start) send({ type: 'startRun', ...blocked.start, sequential: true });
+      dismiss();
+    };
+    return (
+      <div className="modal-backdrop" onClick={dismiss}>
+        <div className="modal" role="dialog" aria-label="Run blocked" onClick={(e) => e.stopPropagation()}>
+          <h2>Can't start yet</h2>
+          <p>{blocked.message}</p>
+          <div className="modal-actions">
+            <button onClick={dismiss}>Cancel</button>
+            {blocked.canSetUpTickets && (
+              <button
+                onClick={() => {
+                  post({ type: 'setUpParallelTickets' });
+                  dismiss();
+                }}
+              >
+                Set Up Parallel Tickets
+              </button>
+            )}
+            <button className="primary" disabled={!blocked.start} onClick={runAfter}>
+              Run after it finishes
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!confirm || !graph) return null;
   const close = () => dispatch({ kind: 'closeConfirm' });
   const start = () => {
     if (!preview) return;
-    send({ type: 'startRun', graphId: graph.id, reviewed: preview.signature, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId });
+    const request = { graphId: graph.id, reviewed: preview.signature, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId };
+    send({ type: 'startRun', ...request });
+    dispatch({ kind: 'startRequested', start: request });
     close();
   };
   const executing = preview?.steps.filter((s) => !s.reused) ?? [];
@@ -59,6 +96,16 @@ export function RunConfirmDialog() {
                 </ul>
               </div>
             )}
+            {preview.checkout && (
+              <p className="checkout-line">
+                Checkout: {checkoutChip(preview.checkout)} · {preview.checkout.root}
+              </p>
+            )}
+            {preview.notes?.map((n) => (
+              <p key={n} className="run-note">
+                ℹ {n}
+              </p>
+            ))}
             {preview.warnings.map((w) => (
               <p key={w} className="approval-warning">
                 ⚠ {w}

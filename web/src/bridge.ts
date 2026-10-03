@@ -40,5 +40,9 @@ export function connect(): void {
     if (msg.type === 'hello') send({ type: 'openGraph', graphId: bootGraphId() });
     if (msg.type === 'graphOpened') post({ type: 'opened', graphId: msg.graph.id });
   });
+  // The checkout can change while the tab is hidden (a branch switch in a terminal): ask again when it shows (spec §7).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') send({ type: 'inspectCheckout' });
+  });
   post({ type: 'ready' });
 }

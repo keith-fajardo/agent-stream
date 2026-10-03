@@ -2,10 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type RunPreview } from '@agent-stream/shared';
+import { emptyGraph, type RunPreview, type ServerMessage } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
-const { send } = await import('../src/bridge');
+const { post, send } = await import('../src/bridge');
 const { dispatch, getState } = await import('../src/store');
 const { RunConfirmDialog } = await import('../src/components/RunConfirmDialog');
 
@@ -33,6 +33,8 @@ const button = (label: string) => [...container.querySelectorAll('button')].find
 
 beforeEach(async () => {
   vi.mocked(send).mockClear();
+  vi.mocked(post).mockClear();
+  dispatch({ kind: 'closeBlocked' });
   dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
   dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: emptyGraph('g', 'G', 't'), runs: [], variableValues: {} } });
   container = document.createElement('div');
@@ -129,5 +131,71 @@ describe('RunConfirmDialog', () => {
     await act(async () => dispatch({ kind: 'server', msg: { type: 'variableValues', graphId: 'g', values: { model: 'x' } } }));
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: stale } }));
     expect(container.textContent).toContain('Checking the run…');
+  });
+});
+
+describe('RunConfirmDialog and the checkout', () => {
+  const MESSAGE = '"G" can\'t start: run 20261003-090000-aaaa of "Billing" is already changing files in this checkout (/work/app). Separate tickets need separate worktrees.';
+  const blocked = (canSetUpTickets: boolean): ServerMessage => ({
+    type: 'runBlocked',
+    graphId: 'g',
+    message: MESSAGE,
+    holder: { runId: '20261003-090000-aaaa', graphId: 'billing', folder: '/work/app', pid: 1, startedAt: 't' },
+    otherWindow: false,
+    checkout: canSetUpTickets ? { git: true, root: '/work/app', linkedWorktree: false, dirty: false, worktrees: [] } : { git: false, root: '/work/app', reason: 'Not a Git repository' },
+    canSetUpTickets,
+  });
+  const actionLabels = () => [...container.querySelectorAll('.modal-actions button')].map((b) => b.textContent);
+  async function startThenBlock(canSetUpTickets: boolean, sig = 'sig-1', request = { fromNodeId: 'n2', sourceRunId: 'r1' }) {
+    await act(async () => dispatch({ kind: 'openConfirm', request }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ ...request, signature: sig }), requestId: lastRequestId() } }));
+    await act(async () => button('Start run').click());
+    await act(async () => dispatch({ kind: 'server', msg: blocked(canSetUpTickets) }));
+  }
+
+  it('shows the Checkout line and the notes, which never block Start', async () => {
+    const checkout = { git: true as const, root: '/work/app', linkedWorktree: false, branch: 'main', head: 'a1b2c3d4e5', dirty: false, worktrees: [] };
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () =>
+      dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ checkout, notes: ['n1 and n2 can both change files in the same workspace; they will run one at a time.'] }), requestId: lastRequestId() } }),
+    );
+    expect(container.querySelector('.checkout-line')?.textContent).toBe('Checkout: ⎇ main · /work/app');
+    expect(container.querySelector('.run-note')?.textContent).toBe('ℹ n1 and n2 can both change files in the same workspace; they will run one at a time.');
+    expect(button('Start run').disabled).toBe(false);
+  });
+
+  it('offers Set Up Parallel Tickets, Run after it finishes and Cancel when the run is blocked', async () => {
+    await startThenBlock(true);
+    expect(container.querySelector('[aria-label="Run blocked"]')?.textContent).toContain(MESSAGE);
+    expect(actionLabels()).toEqual(['Cancel', 'Set Up Parallel Tickets', 'Run after it finishes']);
+  });
+
+  it('re-sends the reviewed start with sequential when Run after it finishes is chosen', async () => {
+    await startThenBlock(true);
+    await act(async () => button('Run after it finishes').click());
+    expect(send).toHaveBeenLastCalledWith({ type: 'startRun', graphId: 'g', reviewed: 'sig-1', fromNodeId: 'n2', sourceRunId: 'r1', sequential: true });
+    expect(getState().blocked).toBeUndefined();
+    expect(container.querySelector('[aria-label="Run blocked"]')).toBeNull();
+  });
+
+  it('re-sends the signature of the preview just reviewed, never an earlier start', async () => {
+    await startThenBlock(true, 'sig-old', { fromNodeId: 'n1', sourceRunId: 'r0' });
+    await act(async () => button('Cancel').click());
+    await startThenBlock(true, 'sig-new', { fromNodeId: 'n2', sourceRunId: 'r1' });
+    await act(async () => button('Run after it finishes').click());
+    expect(send).toHaveBeenLastCalledWith({ type: 'startRun', graphId: 'g', reviewed: 'sig-new', fromNodeId: 'n2', sourceRunId: 'r1', sequential: true });
+  });
+
+  it('asks the extension to set up parallel tickets, and offers it only in Git checkouts', async () => {
+    await startThenBlock(true);
+    await act(async () => button('Set Up Parallel Tickets').click());
+    expect(post).toHaveBeenCalledWith({ type: 'setUpParallelTickets' });
+    expect(getState().blocked).toBeUndefined();
+    await startThenBlock(false);
+    expect(actionLabels()).toEqual(['Cancel', 'Run after it finishes']);
+    vi.mocked(send).mockClear();
+    await act(async () => button('Cancel').click());
+    expect(getState().blocked).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 });

@@ -168,3 +168,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .agent-prompts summary { cursor: pointer; }
 .variables-used { border-collapse: collapse; margin: 8px 0; }
 .variables-used td, .variables-used th { padding: 2px 8px 2px 0; text-align: left; }
+
+.checkout-chip { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.checkout-line { color: var(--muted); }
+.run-note { color: var(--info); }

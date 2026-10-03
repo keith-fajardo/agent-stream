@@ -21,6 +21,18 @@ describe('bridge', () => {
     expect(posted.at(-1)).toEqual({ type: 'opened', graphId: 'parity' });
   });
 
+  it('asks for the checkout again whenever the tab becomes visible', () => {
+    posted.length = 0;
+    const visibility = (state: string) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    visibility('visible');
+    expect(posted).toEqual([{ type: 'inspectCheckout' }]);
+    visibility('hidden');
+    expect(posted).toEqual([{ type: 'inspectCheckout' }]);
+  });
+
   it('ignores messages that are not from the extension', () => {
     const before = getState();
     deliver('junk');
