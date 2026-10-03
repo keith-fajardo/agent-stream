@@ -1,0 +1,28 @@
+<!-- Agent Stream Marketplace icon source. extension/media/icon.png is this file rendered at 256×256 (transparent background). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#312E81"/>
+      <stop offset="0.6" stop-color="#4338CA"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <clipPath id="tile"><rect width="256" height="256" rx="56"/></clipPath>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <g clip-path="url(#tile)" fill="#FFFFFF">
+    <path d="M0 176 C 56 150, 110 204, 168 182 S 236 150, 256 160 V 256 H 0 Z" fill-opacity="0.10"/>
+    <path d="M0 208 C 60 186, 120 234, 180 214 S 240 190, 256 198 V 256 H 0 Z" fill-opacity="0.10"/>
+  </g>
+  <g fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round">
+    <path d="M92 120 C 128 120, 124 76, 160 76"/>
+    <path d="M92 120 C 128 120, 124 164, 160 164" stroke-opacity="0.75"/>
+  </g>
+  <g fill="#FFFFFF">
+    <rect x="44" y="96" width="48" height="48" rx="14"/>
+    <rect x="160" y="52" width="48" height="48" rx="14"/>
+    <rect x="160" y="140" width="48" height="48" rx="14"/>
+  </g>
+  <circle cx="68" cy="120" r="9" fill="#4338CA"/>
+  <circle cx="184" cy="76" r="9" fill="#3B5BDB"/>
+  <circle cx="184" cy="164" r="9" fill="#0E7490"/>
+</svg>
