@@ -32,6 +32,8 @@ export type PanelView = { post(msg: HostMessage): void; reveal(): void; close():
 
 /** One open graph tab. Messages from the extension wait until the tab has loaded its graph (ruling R5). */
 export class GraphPanel {
+  /** The tab's latest `draftState`: it has unsaved step edits. */
+  dirty = false;
   private loaded = false;
   private queue: HostMessage[] = [];
 
@@ -123,6 +125,9 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
           return;
         case 'host':
           d.runHostCommand(msg.command, d.panel);
+          return;
+        case 'draftState':
+          d.panel.dirty = msg.dirty;
           return;
         case 'setMinimap':
           d.setMinimap(msg.value);

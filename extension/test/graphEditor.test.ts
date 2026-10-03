@@ -37,6 +37,15 @@ function setup() {
 }
 
 describe('graph tab messages', () => {
+  it('keeps the latest draft state on the panel', () => {
+    const s = setup();
+    expect(s.panel.dirty).toBe(false);
+    s.handler.handle({ type: 'draftState', dirty: true });
+    expect(s.panel.dirty).toBe(true);
+    s.handler.handle({ type: 'draftState', dirty: false });
+    expect(s.panel.dirty).toBe(false);
+  });
+
   it('connects the tab to its engine when its page is ready, once per page load', () => {
     const s = setup();
     const connect = s.app.connect.bind(s.app);

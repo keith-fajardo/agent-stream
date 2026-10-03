@@ -5,13 +5,15 @@ import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { graphCommands } from './commands';
 import { EngineManager, isChecking, type EngineEvents, type Folder } from './engines';
 import { folderFor, workspaceFolders } from './folders';
-import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
-import { GraphsView } from './graphsView';
+import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, graphTarget, graphUri, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
+import { FolderItem, GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
 import { runCommands } from './runCommands';
 import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
-import { statusBarText } from './statusBar';
+import { SessionManager, type GraphTabInfo } from './sessions';
+import { SessionItem, SessionsView } from './sessionsView';
+import { sessionStatusText, statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
 
 let engines: EngineManager | undefined;
@@ -116,6 +118,153 @@ export async function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(`The graph ${graphId} was deleted, so its tab was closed.`);
   };
 
+  // Work sessions: each folder's set of graph tabs (sessions spec §5).
+  const sessionStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+  sessionStatus.command = 'agentStream.switchSession';
+  context.subscriptions.push(sessionStatus);
+  const graphTabs = (): GraphTabInfo[] => {
+    const out: GraphTabInfo[] = [];
+    for (const group of vscode.window.tabGroups.all)
+      group.tabs.forEach((tab, index) => {
+        if (!(tab.input instanceof vscode.TabInputCustom) || tab.input.viewType !== GRAPH_VIEW_TYPE) return;
+        const folder = folderFor(tab.input.uri);
+        const graphId = folder && graphTarget(folder.path, tab.input.uri.fsPath);
+        if (folder && graphId) out.push({ folderKey: folder.key, graphId, group: group.viewColumn, index, active: group.isActive && tab.isActive });
+      });
+    return out;
+  };
+  const sessionsView = new SessionsView({
+    folders: workspaceFolders,
+    sessions: (f) => manager.get(f).listSessions(),
+    active: (f) => sessions.active(f).id,
+  });
+  const sessionsTree = vscode.window.createTreeView('agentStream.sessions', { treeDataProvider: sessionsView });
+  const showSession = () => {
+    const folders = workspaceFolders();
+    const p = panels.active();
+    const folder = p?.folder ?? (folders.length === 1 ? folders[0] : undefined);
+    if (!folder) {
+      sessionStatus.hide();
+      return;
+    }
+    const t = sessionStatusText(sessions.active(folder).name);
+    sessionStatus.text = t.text;
+    sessionStatus.tooltip = t.tooltip;
+    sessionStatus.show();
+  };
+  const sessions: SessionManager = new SessionManager({
+    folders: workspaceFolders,
+    app: (f) => manager.get(f),
+    graphTabs,
+    dirtyTabs: (key) => panels.all().filter((p) => p.folder.key === key && p.dirty).length,
+    closeGraphTabs: async (key) => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) =>
+        g.tabs.filter((tab) => {
+          if (!(tab.input instanceof vscode.TabInputCustom) || tab.input.viewType !== GRAPH_VIEW_TYPE) return false;
+          return folderFor(tab.input.uri)?.key === key;
+        }),
+      );
+      await vscode.window.tabGroups.close(tabs);
+    },
+    openGraphTab: async (folder, graphId, group, preserveFocus) => {
+      await vscode.commands.executeCommand('vscode.openWith', graphUri(folder, graphId), GRAPH_VIEW_TYPE, { viewColumn: group, preview: false, preserveFocus });
+    },
+    confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
+    info: (message) => void vscode.window.showInformationMessage(message),
+    memory: context.workspaceState,
+    changed: () => {
+      sessionsView.refresh();
+      showSession();
+    },
+  });
+  events.sessions = () => {
+    sessionsView.refresh();
+    showSession();
+  };
+  showSession();
+
+  type SessionArg = { folder?: Folder; sessionId?: string } | undefined;
+  const pickFolder = async (arg: SessionArg): Promise<Folder | undefined> => {
+    if (arg?.folder) return arg.folder;
+    const folders = workspaceFolders();
+    const p = panels.active();
+    if (p) return p.folder;
+    if (folders.length === 1) return folders[0];
+    const picked = await vscode.window.showQuickPick(
+      folders.map((f) => ({ label: f.name, folder: f })),
+      { placeHolder: 'Which folder?' },
+    );
+    return picked?.folder;
+  };
+  const pickSession = async (folder: Folder, arg: SessionArg, withNew: boolean): Promise<string | undefined> => {
+    if (arg?.sessionId) return arg.sessionId;
+    const NEW = '\u0000new';
+    const items = manager
+      .get(folder)
+      .listSessions()
+      .map((s) => ({ label: s.name, description: s.problem ? `Can't be read: ${s.problem}` : `${s.tabCount} ${s.tabCount === 1 ? 'tab' : 'tabs'}`, id: s.id }));
+    if (withNew) items.push({ label: 'New Session…', description: '', id: NEW });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Session' });
+    return picked?.id;
+  };
+  const resolveArg = (a: unknown): SessionArg => (a instanceof SessionItem ? { folder: a.folder, sessionId: a.sessionId } : a instanceof FolderItem ? { folder: a.folder } : (a as SessionArg));
+  const nameBox = (value: string | undefined, prompt: string) =>
+    vscode.window.showInputBox({ prompt, value, validateInput: (v) => (v.trim() ? undefined : 'A session needs a name.') });
+  const newSession = async (folder: Folder) => {
+    const name = await nameBox(undefined, 'Session name');
+    if (name) await sessions.create(folder, name);
+  };
+  const withSession = (run: (folder: Folder, sessionId: string, arg: SessionArg) => Promise<void> | void) => async (raw?: unknown) => {
+    const arg = resolveArg(raw);
+    const folder = await pickFolder(arg);
+    if (!folder) return;
+    const id = await pickSession(folder, arg, false);
+    if (id === undefined) return;
+    await run(folder, id, arg);
+  };
+  const failure = (r: { ok: true } | { ok: false; error: string }) => {
+    if (!r.ok) void vscode.window.showErrorMessage(r.error);
+  };
+  context.subscriptions.push(
+    sessionsTree,
+    vscode.commands.registerCommand('agentStream.newSession', async (raw?: unknown) => {
+      const folder = await pickFolder(resolveArg(raw));
+      if (folder) await newSession(folder);
+    }),
+    vscode.commands.registerCommand('agentStream.switchSession', async (raw?: unknown) => {
+      const arg = resolveArg(raw);
+      const folder = await pickFolder(arg);
+      if (!folder) return;
+      const id = await pickSession(folder, arg, true);
+      if (id === undefined) return;
+      if (id === '\u0000new') await newSession(folder);
+      else await sessions.switchTo(folder, id);
+    }),
+    vscode.commands.registerCommand(
+      'agentStream.renameSession',
+      withSession(async (folder, id) => {
+        const current = manager.get(folder).listSessions().find((s) => s.id === id);
+        const name = await nameBox(current?.name, 'New session name');
+        if (name) failure(sessions.rename(folder, id, name));
+      }),
+    ),
+    vscode.commands.registerCommand(
+      'agentStream.duplicateSession',
+      withSession((folder, id) => failure(sessions.duplicate(folder, id))),
+    ),
+    vscode.commands.registerCommand(
+      'agentStream.deleteSession',
+      withSession((folder, id) => sessions.delete(folder, id)),
+    ),
+    vscode.window.tabGroups.onDidChangeTabs(() => sessions.scheduleCapture()),
+    vscode.window.tabGroups.onDidChangeTabGroups(() => sessions.scheduleCapture()),
+    vscode.window.onDidChangeActiveTextEditor(() => showSession()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      sessionsView.refresh();
+      showSession();
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('agentStream.retrySignIn', () => manager.checkProvider()),
     vscode.commands.registerCommand('agentStream.selectProvider', () =>
@@ -148,7 +297,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   await manager.checkProvider();
-  return { engines: manager, panels };
+  return { engines: manager, panels, sessions };
 }
 
 export function deactivate(): void {

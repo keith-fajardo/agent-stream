@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { checkingStatus } from '../src/engines';
-import { statusBarText } from '../src/statusBar';
+import { sessionStatusText, statusBarText } from '../src/statusBar';
 
 describe('statusBarText', () => {
   it('shows the provider and plan when it can run', () => {
@@ -26,5 +26,11 @@ describe('statusBarText', () => {
 
   it('shows the check in progress', () => {
     expect(statusBarText(checkingStatus({ id: 'claude', name: 'Claude' })).text).toBe('$(sync~spin) Agent Stream');
+  });
+});
+
+describe('sessionStatusText', () => {
+  it('shows the active session', () => {
+    expect(sessionStatusText('Default')).toEqual({ text: '$(layers) Default', tooltip: 'Agent Stream session: Default. Click to switch.' });
   });
 });

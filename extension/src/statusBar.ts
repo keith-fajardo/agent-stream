@@ -7,3 +7,7 @@ export function statusBarText(status: ProviderStatus): { text: string; tooltip: 
   if (status.preview) return { text: `$(beaker) ${status.label}`, tooltip: status.detail ?? status.error ?? status.label };
   return { text: `$(warning) Agent Stream: ${status.label}`, tooltip: status.error ?? status.label };
 }
+
+export function sessionStatusText(name: string): { text: string; tooltip: string } {
+  return { text: `$(layers) ${name}`, tooltip: `Agent Stream session: ${name}. Click to switch.` };
+}

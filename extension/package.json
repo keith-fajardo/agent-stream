@@ -30,7 +30,10 @@
       "properties": {
         "agentStream.provider": {
           "type": "string",
-          "enum": ["claude", "copilot"],
+          "enum": [
+            "claude",
+            "copilot"
+          ],
           "default": "claude",
           "enumDescriptions": [
             "Claude: your Claude subscription through Claude Code.",
@@ -83,6 +86,10 @@
         {
           "id": "agentStream.graphs",
           "name": "Graphs"
+        },
+        {
+          "id": "agentStream.sessions",
+          "name": "Sessions"
         },
         {
           "id": "agentStream.approvals",
@@ -202,6 +209,32 @@
         "command": "agentStream.showSidebar",
         "title": "Show Sidebar",
         "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.newSession",
+        "title": "New Session",
+        "category": "Agent Stream",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentStream.switchSession",
+        "title": "Switch Session",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.renameSession",
+        "title": "Rename Session",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.duplicateSession",
+        "title": "Duplicate Session",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.deleteSession",
+        "title": "Delete Session",
+        "category": "Agent Stream"
       }
     ],
     "menus": {
@@ -219,6 +252,11 @@
         {
           "command": "agentStream.approveAll",
           "when": "view == agentStream.approvals",
+          "group": "navigation"
+        },
+        {
+          "command": "agentStream.newSession",
+          "when": "view == agentStream.sessions",
           "group": "navigation"
         }
       ],
@@ -257,6 +295,21 @@
           "command": "agentStream.deny",
           "when": "view == agentStream.approvals && viewItem == approval",
           "group": "inline@2"
+        },
+        {
+          "command": "agentStream.renameSession",
+          "when": "view == agentStream.sessions && viewItem == session",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "agentStream.duplicateSession",
+          "when": "view == agentStream.sessions && viewItem == session",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "agentStream.deleteSession",
+          "when": "view == agentStream.sessions && viewItem =~ /^session/",
+          "group": "4_delete@1"
         }
       ],
       "commandPalette": [
