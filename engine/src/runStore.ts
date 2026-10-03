@@ -58,6 +58,17 @@ export class RunStore {
     return meta;
   }
 
+  /** Every run of every graph, newest first. */
+  all(): RunMeta[] {
+    if (!existsSync(this.paths.runsDir)) return [];
+    return readdirSync(this.paths.runsDir)
+      .filter(isRunId)
+      .sort()
+      .reverse()
+      .map((id) => this.get(id))
+      .filter((m): m is RunMeta => !!m);
+  }
+
   /** The newest run of every graph, keyed by graph id. */
   latestByGraph(): Map<string, RunSummary> {
     const out = new Map<string, RunSummary>();

@@ -1,7 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { checkSetup, createWorktrees, inspectCheckout, MAX_TICKETS, planWorktrees, realWorktreeFs, writeStarterGraph, type GitExec, type WorktreeFs } from '@agent-stream/engine';
-import type { GraphTarget, Ui } from './commands';
+import {
+  abTestGraph,
+  checkSetup,
+  createWorktrees,
+  inspectCheckout,
+  MAX_TICKETS,
+  MAX_VARIANTS,
+  MIN_VARIANTS,
+  planWorktrees,
+  pruneWorkspaces,
+  realWorktreeFs,
+  removeWorkspace,
+  variantProblem,
+  writeStarterGraph,
+  type GitExec,
+  type RunWorkspaceItem,
+  type WorktreeFs,
+} from '@agent-stream/engine';
+import type { GraphTarget, PickItem, Ui } from './commands';
 import type { EngineManager, Folder } from './engines';
 
 /** What the wizards read from disk; tests use the real one on temp folders. */
@@ -105,5 +122,86 @@ export function parallelCommands(d: ParallelDeps) {
     for (const item of picked ?? []) await d.ui.openInNewWindow(item.path);
   }
 
-  return { setUpParallelTickets };
+  /** A graph with one variant workspace per variant and a read-only compare step (spec §5.4). */
+  async function newAbTestGraph(target?: { folder?: Folder }): Promise<void> {
+    const folder = await d.folderFor(target);
+    if (!folder) return;
+    const name = await d.ui.inputBox({ prompt: 'Name of the A/B test graph', placeHolder: 'Warehouse cost test', validate: (v) => (v.trim() ? undefined : 'A graph needs a name.') });
+    if (name === undefined) return;
+    const variants: string[] = [];
+    for (let n = 1; n <= MAX_VARIANTS; n++) {
+      const optional = n > MIN_VARIANTS;
+      const earlier = [...variants];
+      const value = await d.ui.inputBox({
+        prompt: optional ? `Variant ${n} (leave empty to finish)` : `Variant ${n}`,
+        placeHolder: n === 1 ? 'wh_small' : n === 2 ? 'wh_large' : undefined,
+        validate: (v) => (v.trim() ? (variantProblem(v.trim(), earlier) ?? undefined) : optional ? undefined : 'Enter a variant name, for example wh_small.'),
+      });
+      if (value === undefined) return;
+      if (!value.trim()) break;
+      variants.push(value.trim());
+    }
+    let content: string;
+    try {
+      content = JSON.stringify(abTestGraph(name.trim(), variants));
+    } catch (e) {
+      return d.ui.error(e instanceof Error ? e.message : String(e));
+    }
+    const r = d.engines.get(folder).importGraph(content);
+    if (!r.ok) return d.ui.error(`Couldn't create the A/B test graph: ${r.error}`);
+    await d.open({ folder, graphId: r.graph.id });
+  }
+
+  /** Opens, branches or removes the variant workspaces this folder's runs created; nothing is removed any other way (spec §5.5). */
+  async function manageRunWorkspaces(target?: { folder?: Folder }): Promise<void> {
+    const folder = await d.folderFor(target);
+    if (!folder) return;
+    const app = d.engines.get(folder);
+    const entries = app.runWorkspaces();
+    if (entries.length === 0) return d.ui.info('No run workspaces in this folder.');
+    type Entry = RunWorkspaceItem & { missing: boolean; changes: boolean };
+    const items = await Promise.all(
+      entries.map(async (w): Promise<PickItem<Entry>> => {
+        const missing = !d.fs.exists(w.path);
+        const changes = !missing && (await d.git(['status', '--porcelain'], w.path)).stdout.trim() !== '';
+        return { label: `${w.runId} · ${w.name}${missing ? ' · missing' : ''}${changes ? ' · has changes' : ''}`, description: w.graphName, detail: w.path, value: { ...w, missing, changes } };
+      }),
+    );
+    const chosen = await d.ui.quickPick(items, 'Choose a run workspace');
+    if (!chosen) return;
+    const actions: PickItem<'open' | 'branch' | 'remove'>[] = chosen.missing
+      ? [{ label: 'Remove', value: 'remove' }]
+      : [
+          { label: 'Open in New VS Code Window', value: 'open' },
+          { label: 'Create Branch Here', value: 'branch' },
+          { label: 'Remove', value: 'remove' },
+        ];
+    const action = await d.ui.quickPick(actions, `${chosen.runId} · ${chosen.name}`);
+    if (!action) return;
+    if (action === 'open') return d.ui.openInNewWindow(chosen.path);
+    if (action === 'branch') {
+      const branch = await d.ui.inputBox({
+        prompt: 'Name of the new branch',
+        value: `ab/${chosen.runId}-${chosen.name}`,
+        validate: (v) => (v.trim() && !/\s/.test(v.trim()) ? undefined : 'Enter a branch name without spaces.'),
+      });
+      if (branch === undefined) return;
+      const name = branch.trim();
+      const r = await d.git(['switch', '-c', name], chosen.path);
+      if (r.code !== 0) return d.ui.error(`Couldn't create the branch ${name}: ${r.stderr.trim() || r.stdout.trim()}`);
+      return d.ui.info(`Created the branch ${name} in ${chosen.path}. Its uncommitted changes stay there.`);
+    }
+    if (chosen.running) return d.ui.error(`Run ${chosen.runId} is still running. Stop it first.`);
+    if (chosen.changes && !(await d.ui.confirm(`Remove ${chosen.path}? Its uncommitted changes will be lost.`, 'Remove'))) return;
+    // A workspace deleted by hand is forgotten with prune (spec §8).
+    const removed = chosen.missing
+      ? await pruneWorkspaces({ checkoutRoot: chosen.checkoutRoot, git: d.git })
+      : await removeWorkspace({ checkoutRoot: chosen.checkoutRoot, path: chosen.path, force: chosen.changes, git: d.git });
+    if (!removed.ok) return d.ui.error(`Couldn't remove ${chosen.path}: ${removed.error}`);
+    const marked = app.markWorkspaceRemoved(chosen.runId, chosen.name);
+    if (!marked.ok) return d.ui.error(marked.error);
+    d.ui.info(`Removed ${chosen.path}.`);
+  }
+
+  return { setUpParallelTickets, newAbTestGraph, manageRunWorkspaces };
 }

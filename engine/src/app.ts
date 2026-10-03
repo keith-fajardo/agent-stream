@@ -93,6 +93,9 @@ export function blockedMessage(o: { graphName: string; holder: LeaseHolder; hold
   return o.lockFile ? `${text} Its lock file ${o.lockFile} can't be read; delete it if no run is changing files.` : text;
 }
 
+/** A variant workspace a run recorded and Manage Run Workspaces hasn't removed (spec §5.5). */
+export type RunWorkspaceItem = { runId: string; graphId: string; graphName: string; name: string; path: string; head: string; checkoutRoot: string; running: boolean };
+
 export function createApp(d: AppDeps) {
   let provider = d.provider;
   let status = d.status;
@@ -554,6 +557,35 @@ export function createApp(d: AppDeps) {
     }
   }
 
+  /** Every variant workspace this folder's runs recorded and haven't removed, newest run first (spec §5.5, ruling R16). */
+  function runWorkspaces(): RunWorkspaceItem[] {
+    const names = new Map(graphStore.list().map((g) => [g.id, g.name]));
+    return runStore.all().flatMap((run) =>
+      Object.entries(run.workspaces ?? {})
+        .filter(([, w]) => !w.removed)
+        .map(([name, w]) => ({
+          runId: run.id,
+          graphId: run.graphId,
+          graphName: names.get(run.graphId) ?? run.graphId,
+          name,
+          path: w.path,
+          head: w.head,
+          checkoutRoot: run.checkout?.root ?? d.projectDir,
+          running: !!runner.get(run.id),
+        })),
+    );
+  }
+  /** Manage Run Workspaces removed it: the run keeps the entry, marked removed (spec §5.5). */
+  function markWorkspaceRemoved(runId: string, name: string): { ok: true } | { ok: false; error: string } {
+    if (runner.get(runId)) return { ok: false, error: `Run ${runId} is still running. Stop it first.` };
+    const run = runStore.get(runId);
+    const w = run?.workspaces?.[name];
+    if (!run || !w) return { ok: false, error: `Run ${runId} has no workspace "${name}".` };
+    run.workspaces = { ...run.workspaces, [name]: { ...w, removed: true } };
+    runStore.save(run);
+    return { ok: true };
+  }
+
   return {
     connect,
     handle,
@@ -572,6 +604,8 @@ export function createApp(d: AppDeps) {
     deleteGraph,
     exportGraph: (id: string) => graphStore.exportGraph(id),
     importGraph,
+    runWorkspaces,
+    markWorkspaceRemoved,
     listSessions,
     createSession,
     renameSession,

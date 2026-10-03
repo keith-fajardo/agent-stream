@@ -186,6 +186,16 @@
         "icon": "$(git-branch)"
       },
       {
+        "command": "agentStream.newAbTestGraph",
+        "title": "New A/B Test Graph",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.manageRunWorkspaces",
+        "title": "Manage Run Workspaces",
+        "category": "Agent Stream"
+      },
+      {
         "command": "agentStream.runGraph",
         "title": "Run Graph",
         "category": "Agent Stream"

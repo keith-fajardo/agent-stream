@@ -15,6 +15,13 @@ const meta = (id: string, graphId = 'g', status: RunMeta['status'] = 'succeeded'
 });
 
 describe('RunStore', () => {
+  it('lists every run of every graph, newest first', () => {
+    const store = new RunStore(tmpProject());
+    store.create(meta('20261002-100000-aaaa'));
+    store.create(meta('20261002-120000-cccc', 'other'));
+    store.create(meta('20261002-110000-bbbb'));
+    expect(store.all().map((m) => m.id)).toEqual(['20261002-120000-cccc', '20261002-110000-bbbb', '20261002-100000-aaaa']);
+  });
   it("lists a graph's runs newest first", () => {
     const store = new RunStore(tmpProject());
     store.create(meta('20261002-100000-aaaa'));

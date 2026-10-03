@@ -625,6 +625,29 @@ describe('app', () => {
   });
 
   describe('for the extension', () => {
+    it('lists the variant workspaces of its runs, newest first, and marks one removed', () => {
+      const { app, graphId, paths } = setupWithGraph();
+      const run = (id: string, workspaces: RunMeta['workspaces'], checkout?: RunMeta['checkout']): RunMeta => ({
+        id,
+        graphId,
+        status: 'succeeded',
+        startedAt: 't',
+        snapshot: emptyGraph(graphId, 'G', 't'),
+        nodes: {},
+        workspaces,
+        ...(checkout && { checkout }),
+      });
+      app.runStore.create(run('20261003-100000-aaaa', { wh_a: { path: 'wt-a', head: 'h' } }));
+      app.runStore.create(run('20261003-110000-bbbb', { wh_b: { path: 'wt-b', head: 'h' }, wh_c: { path: 'wt-c', head: 'h', removed: true } }, { root: 'repo', linkedWorktree: false }));
+      expect(app.runWorkspaces()).toEqual([
+        { runId: '20261003-110000-bbbb', graphId, graphName: 'G', name: 'wh_b', path: 'wt-b', head: 'h', checkoutRoot: 'repo', running: false },
+        { runId: '20261003-100000-aaaa', graphId, graphName: 'G', name: 'wh_a', path: 'wt-a', head: 'h', checkoutRoot: paths.root, running: false },
+      ]);
+      expect(app.markWorkspaceRemoved('20261003-100000-aaaa', 'wh_a')).toEqual({ ok: true });
+      expect(app.runStore.get('20261003-100000-aaaa')?.workspaces?.wh_a).toEqual({ path: 'wt-a', head: 'h', removed: true });
+      expect(app.runWorkspaces().map((w) => w.name)).toEqual(['wh_b']);
+      expect(app.markWorkspaceRemoved('20261003-100000-aaaa', 'nope')).toEqual({ ok: false, error: 'Run 20261003-100000-aaaa has no workspace "nope".' });
+    });
     it('changes the provider and its sign-in state at runtime', async () => {
       const { app, client } = setup({ provider: 'claude', ok: false, label: 'not signed in', error: 'Not signed in.' });
       const a = client();
