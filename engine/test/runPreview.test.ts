@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op, type RunMeta } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type Graph, type Op, type RunMeta } from '@agent-stream/shared';
 import { envLookup, looksLikeCredential, previewRun } from '../src/runPreview';
 
 function graphOf(ops: Op[]): Graph {
@@ -109,7 +109,7 @@ describe('previewRun', () => {
   });
 
   it('adds the command shell problem only when the graph has command steps', () => {
-    const problem = 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.';
+    const problem = 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.';
     expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env(), commandShellProblem: problem }).preview.problems).toEqual([]);
     expect(previewRun({ graph: graphOf([cmd('A', 'a')]), values: {}, env: env(), commandShellProblem: problem }).preview.problems).toEqual([problem]);
   });

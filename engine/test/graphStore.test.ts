@@ -66,9 +66,9 @@ describe('GraphStore', () => {
     const { id } = store.create('G');
     expect(store.get(id).goal).toBe('');
     const file = join(paths.graphsDir, `${id}.json`);
-    const edited = { ...JSON.parse(readFileSync(file, 'utf8')), goal: 'edited by hand outside claude-stream' };
+    const edited = { ...JSON.parse(readFileSync(file, 'utf8')), goal: 'edited by hand outside agent-stream' };
     writeFileSync(file, `${JSON.stringify(edited, null, 2)}\n`);
-    expect(store.get(id).goal).toBe('edited by hand outside claude-stream');
+    expect(store.get(id).goal).toBe('edited by hand outside agent-stream');
   });
 
   it('reports a graph file broken after it was loaded and never overwrites it', () => {
@@ -193,7 +193,7 @@ describe('ChatLog', () => {
       const { id } = store.create('Parity');
       const exported = store.exportGraph(id);
       if (!exported.ok) throw new Error(exported.error);
-      expect(exported.fileName).toBe('parity.claude-stream.json');
+      expect(exported.fileName).toBe('parity.agent-stream.json');
       const imported = store.importGraph(exported.content);
       expect(imported.ok && imported.graph.id).toBe('parity-2');
       expect(store.importGraph('nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });

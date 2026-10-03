@@ -13,7 +13,7 @@ import {
   type NodeStatus,
   type RenderedRun,
   type RunMeta,
-} from '@claude-stream/shared';
+} from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import type { Executors, NodeOutcome } from './executors';
@@ -179,7 +179,7 @@ export class Runner extends EventEmitter {
       .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
       .catch((e: unknown) => {
         // Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection.
-        console.error('[claude-stream] internal error in run', meta.id, 'node', nodeId, e);
+        console.error('[agent-stream] internal error in run', meta.id, 'node', nodeId, e);
         const status = meta.nodes[nodeId]?.status;
         if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
           run.running.delete(nodeId);
@@ -187,7 +187,7 @@ export class Runner extends EventEmitter {
           this.setNode(run, nodeId, {
             status: 'failed',
             endedAt: this.clock(),
-            error: `claude-stream internal error: ${e instanceof Error ? e.message : String(e)}`,
+            error: `Agent Stream internal error: ${e instanceof Error ? e.message : String(e)}`,
           });
         }
         this.schedule(run);
@@ -200,7 +200,7 @@ export class Runner extends EventEmitter {
     try {
       this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);
     } catch (e) {
-      console.error('[claude-stream] could not write output for run', run.meta.id, nodeId, e);
+      console.error('[agent-stream] could not write output for run', run.meta.id, nodeId, e);
     }
     this.emitEvent(run, nodeId, { type: 'result', ok: outcome.ok, durationMs, error: outcome.error, exitCode: outcome.exitCode, usage: outcome.usage });
     const status: NodeStatus = outcome.ok ? 'succeeded' : run.stopping ? 'cancelled' : 'failed';
@@ -220,7 +220,7 @@ export class Runner extends EventEmitter {
     try {
       this.deps.runStore.appendEvent(run.meta.id, nodeId, event);
     } catch (e) {
-      console.error('[claude-stream] could not log an event for run', run.meta.id, nodeId, e);
+      console.error('[agent-stream] could not log an event for run', run.meta.id, nodeId, e);
     }
     this.safeEmit('event', run.meta.id, nodeId, event);
     if (!run.running.has(nodeId)) return;
@@ -258,7 +258,7 @@ export class Runner extends EventEmitter {
     try {
       this.deps.runStore.save(meta);
     } catch (e) {
-      console.error('[claude-stream] could not save run', meta.id, e);
+      console.error('[agent-stream] could not save run', meta.id, e);
     }
   }
 
@@ -267,7 +267,7 @@ export class Runner extends EventEmitter {
     try {
       this.emit(event, ...args);
     } catch (e) {
-      console.error(`[claude-stream] a '${event}' listener failed`, e);
+      console.error(`[agent-stream] a '${event}' listener failed`, e);
     }
   }
 }

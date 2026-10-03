@@ -1,4 +1,4 @@
-import type { Graph, GraphNode, NodeEventBody, NodeUsage } from '@claude-stream/shared';
+import type { Graph, GraphNode, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 
 export type NodeOutcome = { ok: boolean; output: string; error?: string; exitCode?: number | null; usage?: NodeUsage };
 

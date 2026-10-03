@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOp, emptyGraph, type Graph, type Op, type RenderedRun } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type Graph, type Op, type RenderedRun } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
@@ -102,7 +102,7 @@ describe('Runner', () => {
     expect(fake.started).toEqual(['n1', 'n2']);
     const prompt = fake.contexts.get('n2')!.prompt;
     expect(prompt).toContain('out-n1');
-    expect(prompt).toContain(join('.claude-stream', 'runs', r.run.id, 'nodes', 'n1', 'output.md'));
+    expect(prompt).toContain(join('.agent-stream', 'runs', r.run.id, 'nodes', 'n1', 'output.md'));
     fake.finish('n2');
     const done = await r.done;
     expect(done.status).toBe('succeeded');
@@ -246,7 +246,7 @@ describe('Runner when the filesystem or a listener fails', () => {
     const done = await r.done;
     expect(done.status).toBe('succeeded');
     expect(done.nodes).toMatchObject({ n1: { status: 'succeeded' }, n2: { status: 'succeeded' } });
-    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[claude-stream]'), expect.anything(), expect.anything(), expect.any(Error));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('[agent-stream]'), expect.anything(), expect.anything(), expect.any(Error));
   });
 
   it('finishes the run when node events cannot be logged', { timeout: 2000 }, async () => {
@@ -294,7 +294,7 @@ describe('Runner when the filesystem or a listener fails', () => {
     const done = await r.done;
     expect(done.status).toBe('failed');
     expect(done.nodes.n1.status).toBe('failed');
-    expect(done.nodes.n1.error).toMatch(/^claude-stream internal error: /);
+    expect(done.nodes.n1.error).toMatch(/^Agent Stream internal error: /);
     expect(done.nodes.n2.status).toBe('not_run');
   });
 

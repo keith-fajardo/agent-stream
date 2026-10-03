@@ -71,7 +71,7 @@ describe('projectSettingsProblem', () => {
     return dir;
   }
   const routedAway = (key: string) =>
-    `This project's .claude/settings.json sets ${key}, which would route Claude away from your subscription. Remove it to use claude-stream here.`;
+    `This project's .claude/settings.json sets ${key}, which would route Claude away from your subscription. Remove it to use Agent Stream here.`;
 
   it.each([
     ['CLAUDE_CODE_USE_BEDROCK', { env: { CLAUDE_CODE_USE_BEDROCK: '1' } }],

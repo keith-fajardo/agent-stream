@@ -4,7 +4,7 @@ import { join } from 'node:path';
 export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string };
 
 export function projectPaths(root: string): ProjectPaths {
-  const dataDir = join(root, '.claude-stream');
+  const dataDir = join(root, '.agent-stream');
   return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs') };
 }
 

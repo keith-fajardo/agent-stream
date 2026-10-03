@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { MAX_VARIABLE_VALUE_CHARS } from '@claude-stream/shared';
+import { MAX_VARIABLE_VALUE_CHARS } from '@agent-stream/shared';
 import { writeFileAtomic } from './fsutil';
 
 /**
@@ -11,14 +11,22 @@ import { writeFileAtomic } from './fsutil';
  * Grep and Glob never search it (ruling R-7.4). Named by a hash of the folder's real path.
  */
 export function valuesFileFor(projectDir: string, home: string = homedir()): string {
+  return join(home, '.agent-stream', 'values', `${projectHash(projectDir)}.json`);
+}
+
+/** Where earlier versions (named Claude Stream) kept the values; moved to valuesFileFor on startup. */
+export function legacyValuesFileFor(projectDir: string, home: string = homedir()): string {
+  return join(home, '.claude-stream', 'values', `${projectHash(projectDir)}.json`);
+}
+
+function projectHash(projectDir: string): string {
   let canonical: string;
   try {
     canonical = realpathSync(projectDir);
   } catch {
     canonical = resolve(projectDir); // the folder doesn't exist (yet)
   }
-  const hash = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
-  return join(home, '.claude-stream', 'values', `${hash}.json`);
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
 type Values = Record<string, string>;

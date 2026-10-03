@@ -13,7 +13,7 @@ describe('findGitBash', () => {
     expect(findGitBash({ env: {}, setting: 'D:\\Git\\bin\\bash.exe', probe: probe(['D:\\Git\\bin\\bash.exe', BASH]) })).toEqual({ ok: true, path: 'D:\\Git\\bin\\bash.exe' });
     expect(findGitBash({ env: {}, setting: 'D:\\nope.exe', probe: probe([BASH]) })).toEqual({
       ok: false,
-      error: "claudeStream.gitBashPath points to D:\\nope.exe, which doesn't exist.",
+      error: "agentStream.gitBashPath points to D:\\nope.exe, which doesn't exist.",
     });
   });
 
@@ -46,7 +46,7 @@ describe('findClaude', () => {
     expect(findClaude({ platform: 'win32', env: {}, home, probe: probe(['C:\\Users\\Me\\.local\\bin\\claude.exe']) })).toEqual({ ok: true, path: 'C:\\Users\\Me\\.local\\bin\\claude.exe' });
     expect(findClaude({ platform: 'win32', env: { Path: 'C:\\npm' }, home, probe: probe(['C:\\npm\\claude.cmd']) })).toEqual({
       ok: false,
-      error: 'Found C:\\npm\\claude.cmd, but claude-stream needs claude.exe. Set claudeStream.claudePath to the full path of claude.exe.',
+      error: 'Found C:\\npm\\claude.cmd, but Agent Stream needs claude.exe. Set agentStream.claudePath to the full path of claude.exe.',
     });
   });
 
@@ -54,7 +54,7 @@ describe('findClaude', () => {
     expect(findClaude({ platform: 'darwin', env: {}, home: '/h', setting: '/x/claude', probe: probe(['/x/claude']) })).toEqual({ ok: true, path: '/x/claude' });
     expect(findClaude({ platform: 'darwin', env: {}, home: '/h', setting: '/x/claude', probe: probe([]) })).toEqual({
       ok: false,
-      error: "claudeStream.claudePath points to /x/claude, which doesn't exist or can't be run.",
+      error: "agentStream.claudePath points to /x/claude, which doesn't exist or can't be run.",
     });
   });
 });
@@ -73,10 +73,10 @@ describe('commandShell', () => {
     expect(commandShell({ platform: 'linux', env: {}, command: 'x' })).toMatchObject({ file: '/bin/sh' });
     expect(commandShell({ platform: 'win32', env: {}, command: 'dbt build', gitBashPath: 'C:\\Program Files\\Git\\bin\\bash.exe' })).toEqual({
       file: 'C:\\Program Files\\Git\\bin\\bash.exe',
-      args: ['-lc', '__cs_cmd=$CLAUDE_STREAM_COMMAND; unset CLAUDE_STREAM_COMMAND; eval "$__cs_cmd"'],
+      args: ['-lc', '__cs_cmd=$AGENT_STREAM_COMMAND; unset AGENT_STREAM_COMMAND; eval "$__cs_cmd"'],
       detached: false,
       windowsHide: true,
-      env: { CLAUDE_STREAM_COMMAND: 'dbt build' },
+      env: { AGENT_STREAM_COMMAND: 'dbt build' },
     });
     expect(commandShell({ platform: 'win32', env: {}, command: 'x' })).toEqual({ error: GIT_BASH_MISSING });
   });

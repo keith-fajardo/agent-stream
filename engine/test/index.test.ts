@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as engine from '@claude-stream/engine';
+import * as engine from '@agent-stream/engine';
 
 describe('engine public API', () => {
   it('exports what the extension uses', () => {

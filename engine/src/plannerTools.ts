@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import type { Graph, Op } from '@claude-stream/shared';
+import type { Graph, Op } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
 import type { RunStore } from './runStore';
@@ -111,7 +111,7 @@ export function graphTools(d: PlannerToolDeps): SdkMcpToolDefinition<any>[] {
     ),
     tool(
       'request_run',
-      "Ask the user to start a run. This opens a confirmation dialog in claude-stream; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
+      "Ask the user to start a run. This opens a confirmation dialog in Agent Stream; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
       { fromNodeId: z.string().optional() },
       async ({ fromNodeId }) => {
         const error = d.requestRun(fromNodeId);

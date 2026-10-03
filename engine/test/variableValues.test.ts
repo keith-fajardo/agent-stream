@@ -3,20 +3,28 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFile
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { valuesFileFor, VariableValues } from '../src/variableValues';
+import { legacyValuesFileFor, valuesFileFor, VariableValues } from '../src/variableValues';
 import { tmpValuesFile } from './helpers';
 
 const sha16 = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
+describe('legacyValuesFileFor', () => {
+  it('is the old ~/.claude-stream/values path with the same hash', () => {
+    const home = mkdtempSync(join(tmpdir(), 'home-'));
+    const project = mkdtempSync(join(tmpdir(), 'proj-'));
+    expect(legacyValuesFileFor(project, home)).toBe(join(home, '.claude-stream', 'values', basename(valuesFileFor(project, home))));
+  });
+});
+
 describe('valuesFileFor', () => {
-  it('keeps the values of a project folder under <home>/.claude-stream/values/, named by its path hash', () => {
+  it('keeps the values of a project folder under <home>/.agent-stream/values/, named by its path hash', () => {
     const home = mkdtempSync(join(tmpdir(), 'home-'));
     const project = mkdtempSync(join(tmpdir(), 'proj-'));
     const file = valuesFileFor(project, home);
-    expect(dirname(file)).toBe(join(home, '.claude-stream', 'values'));
+    expect(dirname(file)).toBe(join(home, '.agent-stream', 'values'));
     expect(basename(file)).toMatch(/^[0-9a-f]{16}\.json$/);
     expect(basename(file)).toBe(`${sha16(realpathSync(project))}.json`);
-    expect(dirname(valuesFileFor(project))).toBe(join(homedir(), '.claude-stream', 'values'));
+    expect(dirname(valuesFileFor(project))).toBe(join(homedir(), '.agent-stream', 'values'));
   });
 
   it('is the same for any spelling of a folder and differs between folders', () => {
@@ -84,7 +92,7 @@ describe('VariableValues', () => {
   });
 
   it('creates the missing folders on the first save, open only to the user on macOS and Linux', () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'home-')), '.claude-stream', 'values', '0123456789abcdef.json');
+    const file = join(mkdtempSync(join(tmpdir(), 'home-')), '.agent-stream', 'values', '0123456789abcdef.json');
     new VariableValues(file).set('g', 'schema', 'dev');
     expect(new VariableValues(file).get('g')).toEqual({ schema: 'dev' });
     if (process.platform === 'win32') return;

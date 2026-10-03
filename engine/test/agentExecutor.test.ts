@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
+import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { createAgentExecutor } from '../src/agentExecutor';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext } from '../src/executors';
@@ -130,8 +130,23 @@ describe('agent executor', () => {
     expect(events.map((e) => e.type)).toEqual(['start', 'approval_requested', 'approval_decided']);
   });
 
+  it('also denies reading the legacy variable values file', async () => {
+    const legacyValuesFile = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+    const results: unknown[] = [];
+    const { fn } = fake(async function* (options) {
+      yield init();
+      const hook = options.hooks!.PreToolUse![0].hooks[0];
+      const input = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: legacyValuesFile }, tool_use_id: 'tu9', session_id: 's1', transcript_path: '/t', cwd: '/proj' } as HookInput;
+      results.push(await hook(input, 'tu9', { signal: new AbortController().signal }));
+      yield success('ok');
+    });
+    const { c } = ctx();
+    expect((await createAgentExecutor({ claudePath: 'claude', broker: new ApprovalBroker(), queryFn: fn, legacyValuesFile })(c)).ok).toBe(true);
+    expect(results[0]).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+  });
+
   it('denies reading the variable values file without asking', async () => {
-    const valuesFile = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+    const valuesFile = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
     const broker = new ApprovalBroker();
     const results: unknown[] = [];
     const { fn } = fake(async function* (options) {

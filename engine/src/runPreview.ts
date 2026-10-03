@@ -9,7 +9,7 @@ import {
   type RenderedRun,
   type RunMeta,
   type RunPreview,
-} from '@claude-stream/shared';
+} from '@agent-stream/shared';
 import { renderTemplate, templateErrorMessage, templateNames, type EnvLookup } from './templates';
 
 /** dbt's own Jinja names: an unknown one of these gets a hint to wrap it in {% raw %}. */

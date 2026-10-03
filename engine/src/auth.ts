@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AuthInfo } from '@claude-stream/shared';
+import type { AuthInfo } from '@agent-stream/shared';
 
 /** Variables that make Claude Code use an API key or send requests (and the login token) to another host. */
 const REMOVED_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
@@ -34,14 +34,14 @@ export function projectSettingsProblem(projectDir: string): string | null {
   try {
     settings = JSON.parse(readFileSync(path, 'utf8'));
   } catch (e) {
-    return `This project's .claude/settings.json could not be read (${(e as Error).message}), so claude-stream cannot confirm it keeps Claude on your subscription. Fix it to use claude-stream here.`;
+    return `This project's .claude/settings.json could not be read (${(e as Error).message}), so Agent Stream cannot confirm it keeps Claude on your subscription. Fix it to use Agent Stream here.`;
   }
   if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
-    return "This project's .claude/settings.json is not a JSON object, so claude-stream cannot confirm it keeps Claude on your subscription. Fix it to use claude-stream here.";
+    return "This project's .claude/settings.json is not a JSON object, so Agent Stream cannot confirm it keeps Claude on your subscription. Fix it to use Agent Stream here.";
   }
   const { env, apiKeyHelper } = settings as { env?: unknown; apiKeyHelper?: unknown };
   const routedAway = (key: string) =>
-    `This project's .claude/settings.json sets ${key}, which would route Claude away from your subscription. Remove it to use claude-stream here.`;
+    `This project's .claude/settings.json sets ${key}, which would route Claude away from your subscription. Remove it to use Agent Stream here.`;
   if (apiKeyHelper !== undefined) return routedAway('apiKeyHelper');
   if (typeof env === 'object' && env !== null) {
     for (const key of Object.keys(env)) {

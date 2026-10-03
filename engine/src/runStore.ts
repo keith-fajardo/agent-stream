@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { NodeEvent, NodeStatus, RunMeta, RunSummary } from '@claude-stream/shared';
+import type { NodeEvent, NodeStatus, RunMeta, RunSummary } from '@agent-stream/shared';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import type { ProjectPaths } from './paths';
 
@@ -14,7 +14,7 @@ export function isRunId(id: string): boolean {
   return RUN_ID_RE.test(id);
 }
 
-/** Run metadata, per-node event logs and outputs under .claude-stream/runs/<runId>/. */
+/** Run metadata, per-node event logs and outputs under .agent-stream/runs/<runId>/. */
 export class RunStore {
   constructor(private paths: ProjectPaths) {}
 

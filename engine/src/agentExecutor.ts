@@ -1,5 +1,5 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { NodeEventBody, NodeUsage } from '@claude-stream/shared';
+import type { NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { NodeExecutor, NodeOutcome } from './executors';
@@ -13,6 +13,8 @@ export type AgentExecutorDeps = {
   env?: NodeJS.ProcessEnv;
   /** The variable values file; agents are denied reading it. */
   valuesFile?: string;
+  /** The pre-rename values file, denied too until it has been moved. */
+  legacyValuesFile?: string;
 };
 
 function usageOf(msg: SDKResultMessage): NodeUsage {
@@ -93,7 +95,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): NodeExecutor {
       nodeId: ctx.node.id,
       nodeTitle: ctx.node.title,
       projectDir: ctx.cwd,
-      privateFiles: deps.valuesFile ? [deps.valuesFile] : [],
+      privateFiles: [deps.valuesFile, deps.legacyValuesFile].filter((f): f is string => !!f),
       signal: abortController.signal,
       emit: ctx.emit,
     });

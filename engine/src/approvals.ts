@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { ApprovalRequest, Decision } from '@claude-stream/shared';
+import type { ApprovalRequest, Decision } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 
 type Pending = { request: ApprovalRequest; resolve: (decision: Decision) => void };

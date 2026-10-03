@@ -1,4 +1,4 @@
-import type { Graph, GraphNode, NodeRunState } from '@claude-stream/shared';
+import type { Graph, GraphNode, NodeRunState } from '@agent-stream/shared';
 
 export const MAX_UPSTREAM_CHARS = 20_000;
 

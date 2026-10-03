@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyGraph, type Graph, type GraphNode } from '@claude-stream/shared';
+import { emptyGraph, type Graph, type GraphNode } from '@agent-stream/shared';
 import { buildNodePrompt, MAX_UPSTREAM_CHARS } from '../src/prompt';
 
 const node = (id: string, kind: 'agent' | 'command', extra: Partial<GraphNode> = {}): GraphNode => ({
@@ -16,12 +16,12 @@ const graph = (goal: string): Graph => ({ ...emptyGraph('g', 'G', 't'), goal });
 describe('buildNodePrompt', () => {
   it('includes the goal, the step and the upstream results', () => {
     const prompt = buildNodePrompt(graph('Prove the new model is equivalent'), node('n3', 'agent', { title: 'Compare', prompt: 'Compare the results.' }), [
-      { node: node('n1', 'agent', { title: 'Plan' }), state: { status: 'succeeded' }, output: 'wrote parity.sql', outputPath: '.claude-stream/runs/r/nodes/n1/output.md' },
+      { node: node('n1', 'agent', { title: 'Plan' }), state: { status: 'succeeded' }, output: 'wrote parity.sql', outputPath: '.agent-stream/runs/r/nodes/n1/output.md' },
       {
         node: node('n2', 'command', { title: 'Build', command: 'dbt build -s x' }),
         state: { status: 'succeeded', exitCode: 0, durationMs: 42_100 },
         output: 'OK\n',
-        outputPath: '.claude-stream/runs/r/nodes/n2/output.md',
+        outputPath: '.agent-stream/runs/r/nodes/n2/output.md',
       },
     ]);
     expect(prompt).toBe(`# Workflow goal
@@ -33,11 +33,11 @@ Compare the results.
 # Results from earlier steps
 ## n1 · Plan (agent, succeeded)
 wrote parity.sql
-Full output: .claude-stream/runs/r/nodes/n1/output.md
+Full output: .agent-stream/runs/r/nodes/n1/output.md
 
 ## n2 · Build (command \`dbt build -s x\`, exit 0, 42.1 s)
 OK
-Full output: .claude-stream/runs/r/nodes/n2/output.md
+Full output: .agent-stream/runs/r/nodes/n2/output.md
 `);
   });
 

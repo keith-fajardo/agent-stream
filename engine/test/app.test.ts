@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type AuthInfo, type ServerMessage } from '@claude-stream/shared';
+import { emptyGraph, type AuthInfo, type ServerMessage } from '@agent-stream/shared';
 import { createApp } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import { RunStore } from '../src/runStore';
@@ -398,7 +399,7 @@ describe('app', () => {
       auth: signedIn,
       maxParallel: 1,
       platform: 'win32',
-      gitBash: { ok: false, error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.' },
+      gitBash: { ok: false, error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.' },
       executors: { agent: instant, command: instant },
       queryFn: async function* () {},
     });
@@ -408,7 +409,7 @@ describe('app', () => {
     app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'b', kind: 'command', command: 'x' } }, 'user');
     await app.handle(c, { type: 'previewRun', graphId: g.id });
     const preview = msgs.find((m): m is Extract<ServerMessage, { type: 'runPreview' }> => m.type === 'runPreview')!.preview;
-    expect(preview.problems).toEqual(['Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.']);
+    expect(preview.problems).toEqual(['Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.']);
   });
 
   describe('for the extension', () => {
@@ -434,6 +435,58 @@ describe('app', () => {
       await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
       app.dispose();
       await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('cancelled'));
+    });
+
+    describe('migrating the old names', () => {
+      const mk = (extra: Partial<Parameters<typeof createApp>[0]> = {}) => {
+        const root = mkdtempSync(join(tmpdir(), 'agent-stream-mig-'));
+        const base = { projectDir: root, valuesFile: tmpValuesFile(), claudePath: 'claude', auth: signedIn, maxParallel: 1, executors: { agent: instant, command: instant }, queryFn: async function* () {} };
+        return { root, make: () => createApp({ ...base, ...extra }) };
+      };
+
+      it('moves .claude-stream to .agent-stream so the graphs still list', () => {
+        const { root, make } = mk();
+        const old = join(root, '.claude-stream');
+        mkdirSync(join(old, 'graphs'), { recursive: true });
+        writeFileSync(join(old, 'graphs', 'g1.json'), JSON.stringify(emptyGraph('g1', 'Old graph', '2026-10-02T00:00:00.000Z')));
+        const app = make();
+        expect(existsSync(old)).toBe(false);
+        expect(app.graphStore.list().map((g) => g.id)).toEqual(['g1']);
+        expect(app.startupWarnings()).toEqual([]);
+      });
+
+      it('warns and uses .agent-stream when both folders exist', () => {
+        const { root, make } = mk();
+        mkdirSync(join(root, '.claude-stream'));
+        mkdirSync(join(root, '.agent-stream'));
+        expect(make().startupWarnings()).toEqual([expect.stringContaining('Found both .agent-stream and an older .claude-stream folder')]);
+        expect(existsSync(join(root, '.claude-stream'))).toBe(true);
+      });
+
+      it('warns, and still starts on the new folder, when the rename fails', () => {
+        const { root, make } = mk({
+          rename: () => {
+            throw new Error('EBUSY: locked');
+          },
+        });
+        mkdirSync(join(root, '.claude-stream'));
+        const app = make();
+        expect(app.startupWarnings()).toEqual([expect.stringContaining('EBUSY: locked')]);
+        expect(existsSync(join(root, '.agent-stream', 'graphs'))).toBe(true);
+      });
+
+      it('moves the legacy values file to the new one', () => {
+        const home = mkdtempSync(join(tmpdir(), 'agent-stream-home-'));
+        const legacyValuesFile = join(home, '.claude-stream', 'values', 'h.json');
+        const valuesFile = join(home, '.agent-stream', 'values', 'h.json');
+        mkdirSync(dirname(legacyValuesFile), { recursive: true });
+        writeFileSync(legacyValuesFile, JSON.stringify({ version: 1, graphs: { g1: { schema: 'dev' } } }));
+        const { make } = mk({ valuesFile, legacyValuesFile });
+        const app = make();
+        expect(existsSync(legacyValuesFile)).toBe(false);
+        expect(app.startupWarnings()).toEqual([]);
+        expect(JSON.parse(readFileSync(valuesFile, 'utf8')).graphs.g1).toEqual({ schema: 'dev' });
+      });
     });
 
     it('reports an unreadable local values file once at startup', () => {

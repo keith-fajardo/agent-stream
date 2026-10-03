@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlink
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
+import { emptyGraph, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { createCommandExecutor } from '../src/commandExecutor';
 import type { NodeContext } from '../src/executors';
 
@@ -96,7 +96,7 @@ describe.skipIf(process.platform === 'win32')('command executor', () => {
       ok: false,
       output: '',
       exitCode: null,
-      error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.',
+      error: 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.',
     });
     expect(events.map((e) => e.type)).toEqual(['start']);
   });

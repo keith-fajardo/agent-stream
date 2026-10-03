@@ -1,5 +1,5 @@
 import type { CanUseTool, HookCallbackMatcher, HookInput, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
-import type { Decision, NodeEventBody } from '@claude-stream/shared';
+import type { Decision, NodeEventBody } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
 import { privatePathDenial } from './privatePaths';
 
@@ -86,7 +86,7 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
             permissionDecision: 'allow',
-            permissionDecisionReason: 'Approved by the user in claude-stream.',
+            permissionDecisionReason: 'Approved by the user in Agent Stream.',
           },
         };
       }
@@ -98,7 +98,7 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: `claude-stream could not ask for approval: ${message}`,
+          permissionDecisionReason: `Agent Stream could not ask for approval: ${message}`,
         },
       };
     }
@@ -114,7 +114,7 @@ export function makeApprovalGate(o: GateOptions): ApprovalGate {
       return { behavior: 'deny', message };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { behavior: 'deny', message: `claude-stream could not ask for approval: ${message}` };
+      return { behavior: 'deny', message: `Agent Stream could not ask for approval: ${message}` };
     }
   };
 

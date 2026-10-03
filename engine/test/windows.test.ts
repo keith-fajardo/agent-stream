@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { emptyGraph, type GraphNode, type NodeEventBody } from '@claude-stream/shared';
+import { emptyGraph, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { createCommandExecutor } from '../src/commandExecutor';
 import type { NodeContext } from '../src/executors';
 import { findGitBash } from '../src/platform';
@@ -42,7 +42,7 @@ describe.runIf(process.platform === 'win32')('on real Windows', () => {
 
   it('keeps the rendered command out of the environment of what the command starts', async () => {
     if (!gitBash.ok) throw new Error(gitBash.error);
-    const outcome = await createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path })(ctx('echo "${CLAUDE_STREAM_COMMAND-unset}"', mkdtempSync(join(tmpdir(), 'e-'))));
+    const outcome = await createCommandExecutor({ platform: 'win32', gitBashPath: gitBash.path })(ctx('echo "${AGENT_STREAM_COMMAND-unset}"', mkdtempSync(join(tmpdir(), 'e-'))));
     expect(outcome).toMatchObject({ ok: true });
     expect(outcome.output.trim()).toBe('unset');
   });

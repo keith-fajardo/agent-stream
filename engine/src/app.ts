@@ -1,3 +1,4 @@
+import type { renameSync } from 'node:fs';
 import {
   validateRunnable,
   type ApprovalRequest,
@@ -12,7 +13,7 @@ import {
   type Op,
   type RunMeta,
   type ServerMessage,
-} from '@claude-stream/shared';
+} from '@agent-stream/shared';
 import { createAgentExecutor } from './agentExecutor';
 import { ApprovalBroker } from './approvals';
 import { ChatLog } from './chatLog';
@@ -20,6 +21,7 @@ import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors } from './executors';
 import { GraphStore } from './graphStore';
+import { migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
 import { GIT_BASH_MISSING, type Found } from './platform';
@@ -41,6 +43,10 @@ export type AppDeps = {
    * the project. Required, so nothing (a test included) writes into the home folder by default.
    */
   valuesFile: string;
+  /** The pre-rename values file (see legacyValuesFileFor): moved to valuesFile on startup, and denied to Claude meanwhile. */
+  legacyValuesFile?: string;
+  /** For tests: replaces fs.renameSync in the migrations. */
+  rename?: typeof renameSync;
   claudePath: string;
   auth: AuthInfo;
   maxParallel: number;
@@ -60,6 +66,8 @@ export function createApp(d: AppDeps) {
   let claudePath = d.claudePath;
   const clock = d.clock ?? systemClock;
   const paths = projectPaths(d.projectDir);
+  const migrationWarnings = migrateProjectFolder(d.projectDir, d.rename);
+  if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
   ensureDataDirs(paths);
   const graphStore = new GraphStore(paths, clock);
   const chatLog = new ChatLog(paths);
@@ -72,7 +80,7 @@ export function createApp(d: AppDeps) {
   runStore.recoverInterrupted(clock());
   const broker = new ApprovalBroker(clock);
   const executors = d.executors ?? {
-    agent: createAgentExecutor({ claudePath: () => claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile }),
+    agent: createAgentExecutor({ claudePath: () => claudePath, broker, queryFn: d.queryFn, valuesFile: d.valuesFile, legacyValuesFile: d.legacyValuesFile }),
     command: createCommandExecutor({ platform, gitBashPath: d.gitBash?.ok ? d.gitBash.path : undefined }),
   };
   const runner = new Runner({ runStore, broker, executors, projectDir: d.projectDir, maxParallel: d.maxParallel, clock });
@@ -141,7 +149,7 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, claudePath: () => claudePath, requestRun, queryFn: d.queryFn, clock });
+  const planner = new Planner({ graphStore, runStore, chatLog, projectDir: d.projectDir, valuesFile: d.valuesFile, legacyValuesFile: d.legacyValuesFile, claudePath: () => claudePath, requestRun, queryFn: d.queryFn, clock });
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op) => {
@@ -189,7 +197,7 @@ export function createApp(d: AppDeps) {
 
   function startupWarnings(): string[] {
     values.get('');
-    return values.problem ? [values.problem] : [];
+    return values.problem ? [...migrationWarnings, values.problem] : migrationWarnings;
   }
 
   function connect(client: Client): () => void {
@@ -223,7 +231,7 @@ export function createApp(d: AppDeps) {
         if (!auth.ok) return error(`Chat is disabled: ${auth.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[claude-stream] planner error', e));
+        planner.send(msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
       }
       case 'previewRun': {

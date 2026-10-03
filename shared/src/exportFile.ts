@@ -2,7 +2,9 @@ import { edgeId } from './graph';
 import { parseGraph } from './schemas';
 import type { Graph, GraphNode, GraphResult, VariableDef } from './types';
 
-export const EXPORT_FORMAT = 'claude-stream/graph';
+export const EXPORT_FORMAT = 'agent-stream/graph';
+/** The format name written before the rename to Agent Stream; still accepted on import. */
+const LEGACY_EXPORT_FORMAT = 'claude-stream/graph';
 export const EXPORT_VERSION = 1;
 export const MAX_IMPORT_CHARS = 1024 * 1024;
 
@@ -42,8 +44,8 @@ export function parseExportFile(content: string, id: string, now: string): Graph
     return { ok: false, error: 'The file is not valid JSON.' };
   }
   const head = (typeof json === 'object' && json !== null ? json : {}) as { format?: unknown; version?: unknown; graph?: unknown };
-  if (head.format !== EXPORT_FORMAT) return { ok: false, error: 'This is not a claude-stream graph file.' };
-  if (head.version !== EXPORT_VERSION) return { ok: false, error: `This file is version ${String(head.version)}; this claude-stream reads version ${EXPORT_VERSION}.` };
+  if (head.format !== EXPORT_FORMAT && head.format !== LEGACY_EXPORT_FORMAT) return { ok: false, error: 'This is not an Agent Stream graph file.' };
+  if (head.version !== EXPORT_VERSION) return { ok: false, error: `This file is version ${String(head.version)}; this Agent Stream reads version ${EXPORT_VERSION}.` };
   const g = (typeof head.graph === 'object' && head.graph !== null ? head.graph : {}) as Record<string, unknown>;
   const name = typeof g.name === 'string' ? g.name.trim() : '';
   if (!name) return { ok: false, error: 'The graph in this file has no name.' };

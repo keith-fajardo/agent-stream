@@ -14,7 +14,7 @@ import {
   type GraphResult,
   type Op,
   type OpRecord,
-} from '@claude-stream/shared';
+} from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import { isGraphId, type ProjectPaths } from './paths';
@@ -145,7 +145,7 @@ export class GraphStore extends EventEmitter {
   exportGraph(id: string): { ok: true; fileName: string; content: string } | { ok: false; error: string } {
     const r = this.load(id);
     if (!r.ok) return r;
-    return { ok: true, fileName: `${id}.claude-stream.json`, content: `${JSON.stringify(toExportFile(r.graph, this.clock()), null, 2)}\n` };
+    return { ok: true, fileName: `${id}.agent-stream.json`, content: `${JSON.stringify(toExportFile(r.graph, this.clock()), null, 2)}\n` };
   }
 
   importGraph(content: string): GraphResult {

@@ -9,14 +9,14 @@ import { ensureDataDirs, projectPaths, type ProjectPaths } from '../src/paths';
 export const testGitBash: Found = { ok: true, path: 'C:\\Program Files\\Git\\bin\\bash.exe' };
 
 export function tmpProject(): ProjectPaths {
-  const paths = projectPaths(mkdtempSync(join(tmpdir(), 'claude-stream-')));
+  const paths = projectPaths(mkdtempSync(join(tmpdir(), 'agent-stream-')));
   ensureDataDirs(paths);
   return paths;
 }
 
 /** A variable values file in a fresh temp folder (the file itself doesn't exist yet), so no test writes into the real home folder. */
 export function tmpValuesFile(): string {
-  return join(mkdtempSync(join(tmpdir(), 'claude-stream-values-')), 'values.json');
+  return join(mkdtempSync(join(tmpdir(), 'agent-stream-values-')), 'values.json');
 }
 
 export function fixedClock(start = Date.parse('2026-10-02T00:00:00.000Z')): Clock {

@@ -4,11 +4,12 @@ import {
   findClaude as realFindClaude,
   findGitBash as realFindGitBash,
   projectSettingsProblem,
+  legacyValuesFileFor,
   valuesFileFor,
   type App,
   type Found,
-} from '@claude-stream/engine';
-import type { ApprovalRequest, AuthInfo, GraphListItem, ServerMessage } from '@claude-stream/shared';
+} from '@agent-stream/engine';
+import type { ApprovalRequest, AuthInfo, GraphListItem, ServerMessage } from '@agent-stream/shared';
 import type { Settings } from './settings';
 
 /** A workspace folder: `key` is its URI string, `path` its file-system path. */
@@ -98,6 +99,7 @@ export class EngineManager {
       platform: this.d.platform,
       gitBash,
       valuesFile: valuesFileFor(folder.path, this.d.home),
+      legacyValuesFile: legacyValuesFileFor(folder.path, this.d.home),
     });
     // Registered before connecting: `hello` arrives synchronously and listeners may call get() again.
     const entry: Entry = { folder, app, detach: () => {} };

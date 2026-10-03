@@ -20,6 +20,18 @@ function sample(): Graph {
   return g;
 }
 
+describe('export format names', () => {
+  it('writes agent-stream/graph and still reads the legacy claude-stream/graph', () => {
+    const file = toExportFile(sample(), T);
+    expect(file.format).toBe('agent-stream/graph');
+    for (const format of ['agent-stream/graph', 'claude-stream/graph']) {
+      const r = parseExportFile(JSON.stringify({ ...file, format }), 'copy', T);
+      expect(r.ok).toBe(true);
+    }
+    expect(parseExportFile(JSON.stringify({ ...file, format: 'other/graph' }), 'copy', T)).toMatchObject({ ok: false });
+  });
+});
+
 describe('export files', () => {
   it('contains the definition only: no authorship, ids of the graph, planner state or values', () => {
     const file = toExportFile(sample(), T);
@@ -58,8 +70,8 @@ describe('export files', () => {
     const parse = (content: string) => parseExportFile(content, 'x', T);
     expect(parse('x'.repeat(MAX_IMPORT_CHARS + 1))).toEqual({ ok: false, error: 'The file is larger than 1 MB.' });
     expect(parse('{nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });
-    expect(parse(JSON.stringify({ format: 'other' }))).toEqual({ ok: false, error: 'This is not a claude-stream graph file.' });
-    expect(parse(JSON.stringify({ ...good, version: 2 }))).toEqual({ ok: false, error: 'This file is version 2; this claude-stream reads version 1.' });
+    expect(parse(JSON.stringify({ format: 'other' }))).toEqual({ ok: false, error: 'This is not an Agent Stream graph file.' });
+    expect(parse(JSON.stringify({ ...good, version: 2 }))).toEqual({ ok: false, error: 'This file is version 2; this Agent Stream reads version 1.' });
     expect(parse(JSON.stringify({ ...good, graph: { ...good.graph, name: ' ' } }))).toEqual({ ok: false, error: 'The graph in this file has no name.' });
     const cyclic = { ...good, graph: { ...good.graph, edges: [{ from: 'n1', to: 'n2' }, { from: 'n2', to: 'n1' }] } };
     expect(parse(JSON.stringify(cyclic))).toEqual({ ok: false, error: 'The graph in this file is invalid: the graph has a cycle' });

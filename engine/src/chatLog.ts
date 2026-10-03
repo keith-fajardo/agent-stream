@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ChatEntry } from '@claude-stream/shared';
+import type { ChatEntry } from '@agent-stream/shared';
 import { readJsonLines } from './fsutil';
 import { isGraphId, type ProjectPaths } from './paths';
 

@@ -16,9 +16,9 @@ export const realProbe: Probe = {
 };
 export type Found = { ok: true; path: string } | { ok: false; error: string };
 
-export const GIT_BASH_MISSING = 'Command steps need Git Bash on Windows. Install Git for Windows, or set claudeStream.gitBashPath.';
+export const GIT_BASH_MISSING = 'Command steps need Git Bash on Windows. Install Git for Windows, or set agentStream.gitBashPath.';
 export const CLAUDE_MISSING =
-  'Could not find Claude Code (claude). Install it from https://code.claude.com and sign in with your Claude account, or set claudeStream.claudePath.';
+  'Could not find Claude Code (claude). Install it from https://code.claude.com and sign in with your Claude account, or set agentStream.claudePath.';
 
 /** An environment variable, matched without case on Windows (`Path`, `ProgramFiles`). */
 function envValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string | undefined {
@@ -36,7 +36,7 @@ export function findGitBash(o: { env: NodeJS.ProcessEnv; setting?: string; probe
   const probe = o.probe ?? realProbe;
   const p = path.win32;
   const setting = o.setting?.trim();
-  if (setting) return probe.exists(setting) ? { ok: true, path: setting } : { ok: false, error: `claudeStream.gitBashPath points to ${setting}, which doesn't exist.` };
+  if (setting) return probe.exists(setting) ? { ok: true, path: setting } : { ok: false, error: `agentStream.gitBashPath points to ${setting}, which doesn't exist.` };
   const candidates: string[] = [];
   const fromEnv = envValue(o.env, 'CLAUDE_CODE_GIT_BASH_PATH', 'win32');
   if (fromEnv) candidates.push(fromEnv);
@@ -55,7 +55,7 @@ export function findGitBash(o: { env: NodeJS.ProcessEnv; setting?: string; probe
   return { ok: false, error: GIT_BASH_MISSING };
 }
 
-const cmdLauncher = (found: string) => `Found ${found}, but claude-stream needs claude.exe. Set claudeStream.claudePath to the full path of claude.exe.`;
+const cmdLauncher = (found: string) => `Found ${found}, but Agent Stream needs claude.exe. Set agentStream.claudePath to the full path of claude.exe.`;
 
 /** Claude Code (spec §8.3). VS Code started from the Dock or Start menu may not share the terminal's PATH. */
 export function findClaude(o: { platform: NodeJS.Platform; env: NodeJS.ProcessEnv; home: string; setting?: string; probe?: Probe }): Found {
@@ -65,7 +65,7 @@ export function findClaude(o: { platform: NodeJS.Platform; env: NodeJS.ProcessEn
   const usable = (c: string) => (win ? probe.exists(c) : probe.executable(c));
   const setting = o.setting?.trim();
   if (setting) {
-    if (!usable(setting)) return { ok: false, error: `claudeStream.claudePath points to ${setting}, which doesn't exist or can't be run.` };
+    if (!usable(setting)) return { ok: false, error: `agentStream.claudePath points to ${setting}, which doesn't exist or can't be run.` };
     if (win && !/\.exe$/i.test(setting)) return { ok: false, error: cmdLauncher(setting) };
     return { ok: true, path: setting };
   }
@@ -112,8 +112,8 @@ export function commandShell(o: { platform: NodeJS.Platform; env: NodeJS.Process
     if (!o.gitBashPath) return { error: GIT_BASH_MISSING };
     // The command travels in the environment (MSYS would mangle it as an argument); it is unset before it runs,
     // so the rendered command, which may hold values, isn't passed on to what the command starts.
-    const script = '__cs_cmd=$CLAUDE_STREAM_COMMAND; unset CLAUDE_STREAM_COMMAND; eval "$__cs_cmd"';
-    return { file: o.gitBashPath, args: ['-lc', script], detached: false, windowsHide: true, env: { CLAUDE_STREAM_COMMAND: o.command } };
+    const script = '__cs_cmd=$AGENT_STREAM_COMMAND; unset AGENT_STREAM_COMMAND; eval "$__cs_cmd"';
+    return { file: o.gitBashPath, args: ['-lc', script], detached: false, windowsHide: true, env: { AGENT_STREAM_COMMAND: o.command } };
   }
   return { file: o.shell ?? posixShell(o.env.SHELL), args: ['-lc', o.command], detached: true, windowsHide: false };
 }

@@ -10,7 +10,7 @@ import type { QueryFn } from '../src/sdk';
 import { fixedClock, tmpProject } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
-const VALUES_FILE = resolve('/', 'home', 'me', '.claude-stream', 'values', '0123456789abcdef.json');
+const VALUES_FILE = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
 const init = (apiKeySource = 'none') => msg({ type: 'system', subtype: 'init', apiKeySource, session_id: 'sess-1' });
 const say = (...content: object[]) => msg({ type: 'assistant', parent_tool_use_id: null, message: { content }, session_id: 'sess-1' });
 const done = () =>
@@ -281,13 +281,13 @@ describe('Planner private values', () => {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason: "Variable values are private to this machine; claude-stream doesn't let Claude read the variable values file.",
+        permissionDecisionReason: "Variable values are private to this machine; Agent Stream doesn't let Claude read the variable values file.",
       },
     });
     expect(await run('Grep', { pattern: 'x', path: parse(VALUES_FILE).root, glob: '*' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
-    expect(await run('Glob', { pattern: '**/*', path: resolve('/', 'home', 'me', '.claude-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await run('Glob', { pattern: '**/*', path: resolve('/', 'home', 'me', '.agent-stream') })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(await run('Grep', { pattern: 'x', path: join(s.paths.root, 'src') })).toEqual({});
-    expect(await run('Read', { file_path: join(s.paths.root, '.claude-stream', 'variables.local.json') })).toEqual({});
+    expect(await run('Read', { file_path: join(s.paths.root, '.agent-stream', 'variables.local.json') })).toEqual({});
     expect(await run('Read', { file_path: 'models/a.sql' })).toEqual({});
   });
 });

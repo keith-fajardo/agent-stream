@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type ApprovalRequest, type Graph, type Op } from '@claude-stream/shared';
+import { applyOp, emptyGraph, type ApprovalRequest, type Graph, type Op } from '@agent-stream/shared';
 import { createAgentExecutor } from '../src/agentExecutor';
 import { ApprovalBroker } from '../src/approvals';
 import { checkAuth } from '../src/auth';
@@ -12,7 +12,7 @@ import { Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
 import { tmpProject } from './helpers';
 
-const live = process.env.CLAUDE_STREAM_LIVE === '1';
+const live = process.env.AGENT_STREAM_LIVE === '1';
 
 describe.skipIf(!live)('live: real Claude on the subscription', () => {
   it('runs agent and command steps with an approval round-trip', async () => {
@@ -46,7 +46,7 @@ describe.skipIf(!live)('live: real Claude on the subscription', () => {
       { type: 'addNode', node: { title: 'Say pong', kind: 'agent', prompt: 'Reply with exactly the word PONG and nothing else. Do not use any tools.' } },
       {
         type: 'addNode',
-        node: { title: 'Write file', kind: 'agent', prompt: 'Use the Write tool to create hello.txt in the current folder containing exactly: hi from claude-stream. Then reply DONE.' },
+        node: { title: 'Write file', kind: 'agent', prompt: 'Use the Write tool to create hello.txt in the current folder containing exactly: hi from agent-stream. Then reply DONE.' },
       },
       { type: 'addNode', node: { title: 'Check file', kind: 'command', command: 'cat hello.txt' } },
       { type: 'connect', from: 'n1', to: 'n2' },
@@ -67,7 +67,7 @@ describe.skipIf(!live)('live: real Claude on the subscription', () => {
     expect(run.status, JSON.stringify(run.nodes, null, 2)).toBe('succeeded');
     expect(runStore.readOutput(run.id, 'n1')).toContain('PONG');
     expect(approved).toContain('Write');
-    expect(readFileSync(join(paths.root, 'hello.txt'), 'utf8')).toContain('hi from claude-stream');
-    expect(runStore.readOutput(run.id, 'n3')).toContain('hi from claude-stream');
+    expect(readFileSync(join(paths.root, 'hello.txt'), 'utf8')).toContain('hi from agent-stream');
+    expect(runStore.readOutput(run.id, 'n3')).toContain('hi from agent-stream');
   }, 300_000);
 });

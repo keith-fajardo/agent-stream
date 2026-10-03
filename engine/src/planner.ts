@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
-import type { ChatEntry, ChatRole, Op, OpRecord } from '@claude-stream/shared';
+import type { ChatEntry, ChatRole, Op, OpRecord } from '@agent-stream/shared';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import type { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
@@ -12,7 +12,7 @@ import { blocksOf, realQuery, type QueryFn } from './sdk';
 
 const SESSION_RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
 
-export const PLANNER_APPEND = `You are the planner inside claude-stream, a local tool where the user and you co-create a workflow graph that is then executed step by step.
+export const PLANNER_APPEND = `You are the planner inside Agent Stream, a local tool where the user and you co-create a workflow graph that is then executed step by step.
 
 How the graph works:
 - Each node is a step. kind "agent" is a separate Claude agent run that receives the workflow goal, its own prompt, and the outputs of the nodes it depends on. kind "command" is an exact shell command run in the project root, with no LLM involved.
@@ -35,7 +35,7 @@ Variables and templates:
 - {{ env_var('NAME', 'default') }} reads an environment variable on the user's machine.
 - In command steps every {{ ... }} value is shell-quoted automatically. Write {{ flags | unquoted }} only for a value that must expand to several arguments, and keep {{ }} outside quoted strings.
 - Values "true" and "false" are booleans, so {% if full_refresh %}--full-refresh{% endif %} works.
-- dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so claude-stream leaves it alone.`;
+- dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so Agent Stream leaves it alone.`;
 
 export function describeOp(op: Op): string {
   switch (op.type) {
@@ -85,6 +85,8 @@ export type PlannerDeps = {
   projectDir: string;
   /** The variable values file; the planner is denied reading it. */
   valuesFile?: string;
+  /** The pre-rename values file, denied too until it has been moved. */
+  legacyValuesFile?: string;
   claudePath: string | (() => string);
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
   queryFn?: QueryFn;
@@ -120,7 +122,7 @@ export class Planner extends EventEmitter {
       try {
         this.add(graphId, 'error', 'The planner is still working on your previous message.');
       } catch (e) {
-        console.error('[claude-stream] planner error', e);
+        console.error('[agent-stream] planner error', e);
       }
       return;
     }
@@ -162,7 +164,7 @@ export class Planner extends EventEmitter {
               hooks: [
                 async (input) => {
                   if (input.hook_event_name !== 'PreToolUse') return {};
-                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input, this.d.valuesFile ? [this.d.valuesFile] : []);
+                  const reason = privatePathDenial(this.d.projectDir, input.tool_name, input.tool_input, [this.d.valuesFile, this.d.legacyValuesFile].filter((f): f is string => !!f));
                   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
                 },
               ],
@@ -221,14 +223,14 @@ export class Planner extends EventEmitter {
         const message = e instanceof Error ? e.message : String(e);
         this.add(graphId, 'error', hadSession ? `${message}${SESSION_RESET_NOTE}` : message);
       } catch (inner) {
-        console.error('[claude-stream] planner error', e, inner);
+        console.error('[agent-stream] planner error', e, inner);
       }
     } finally {
       this.busy.delete(graphId);
       try {
         this.emit('busy', graphId, false);
       } catch (e) {
-        console.error('[claude-stream] planner error', e);
+        console.error('[agent-stream] planner error', e);
       }
     }
   }
