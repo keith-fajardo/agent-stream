@@ -455,4 +455,17 @@ describe('agent changes against the baseline', () => {
     expect(store.baseline(copy.graph.id)).toEqual({ ok: true });
     expect(store.agentChanges(copy.graph.id)).toEqual([]);
   });
+
+  it('keeps access and workspace through duplicate, and Revert restores them', () => {
+    const store = new GraphStore(tmpProject(), fixedClock());
+    const { id } = store.create('G');
+    store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p', access: 'read', workspace: 'wh_a' } }, 'user');
+    const copy = store.duplicate(id);
+    if (!copy.ok) throw new Error(copy.error);
+    expect(copy.graph.nodes[0]).toMatchObject({ access: 'read', workspace: 'wh_a' });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { access: 'write', workspace: '' } }, 'agent', { kind: 'planner', sessionId: 's' });
+    expect(store.agentChanges(id)).toEqual([expect.objectContaining({ id: 'n1', fields: ['access', 'workspace'] })]);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user').ok).toBe(true);
+    expect(store.get(id).nodes[0]).toMatchObject({ access: 'read', workspace: 'wh_a' });
+  });
 });

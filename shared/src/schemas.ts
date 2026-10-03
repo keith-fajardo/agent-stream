@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { nodeIdProblem, topoOrder } from './graph';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 import type { ClientMessage, Graph, GraphResult, WebviewHostMessage } from './types';
@@ -6,6 +7,7 @@ import type { ClientMessage, Graph, GraphResult, WebviewHostMessage } from './ty
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
 const nodeKind = z.enum(['agent', 'command']);
+const access = z.enum(['read', 'write']);
 const timeoutSec = z.number().positive();
 const description = z.string().max(2000).optional();
 
@@ -17,6 +19,8 @@ const graphNodeSchema = z.object({
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),
+  access: access.optional(),
+  workspace: z.string().optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -45,6 +49,9 @@ export function parseGraph(json: unknown): GraphResult {
     if (idProblem) return { ok: false, error: idProblem };
     if (ids.has(n.id)) return { ok: false, error: `duplicate node id ${n.id}` };
     ids.add(n.id);
+    if (n.access === 'read' && n.kind === 'command') return { ok: false, error: `${n.id}: ${COMMAND_ALWAYS_WRITES}` };
+    const workspaceProblem = n.workspace === undefined ? null : workspaceNameProblem(n.workspace);
+    if (workspaceProblem) return { ok: false, error: `${n.id}: ${workspaceProblem}` };
   }
   const seen = new Set<string>();
   for (const e of graph.edges) {
@@ -69,6 +76,8 @@ const newNode = z.object({
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),
+  access: access.optional(),
+  workspace: z.string().optional(),
   position: position.optional(),
 });
 
@@ -79,6 +88,8 @@ const nodePatch = z.object({
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),
+  access: access.optional(),
+  workspace: z.string().optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);

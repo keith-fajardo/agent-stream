@@ -1,6 +1,6 @@
 import type { AgentChange, ChangedField, Graph, GraphNode } from './types';
 
-const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec'];
+const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec', 'access', 'workspace'];
 const norm = (v: unknown) => (v === undefined || v === null ? '' : String(v));
 
 export function changedFields(before: GraphNode, after: GraphNode): ChangedField[] {

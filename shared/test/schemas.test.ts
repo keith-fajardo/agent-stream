@@ -159,3 +159,29 @@ describe('unsafe step ids', () => {
   });
 });
 });
+
+describe('parseGraph step access and workspace', () => {
+  it('reads access and workspace', () => {
+    const r = parseGraph({ id: 'g', name: 'G', nodes: [{ ...node('n1'), access: 'read', workspace: 'wh_a' }] });
+    expect(r.ok && r.graph.nodes[0]).toMatchObject({ access: 'read', workspace: 'wh_a' });
+  });
+
+  it('refuses a read-only command step', () => {
+    expect(parseGraph({ id: 'g', name: 'G', nodes: [{ id: 'n1', title: 'b', kind: 'command', access: 'read' }] })).toEqual({
+      ok: false,
+      error: 'n1: Command steps can always change files; only agent steps can be read-only.',
+    });
+  });
+
+  it('refuses a bad workspace name', () => {
+    expect(parseGraph({ id: 'g', name: 'G', nodes: [{ ...node('n1'), workspace: 'WH' }] })).toEqual({
+      ok: false,
+      error: 'n1: Workspace names use lowercase letters, digits, - and _, starting with a letter.',
+    });
+  });
+
+  it('accepts access and workspace in step edits, and refuses an unknown access', () => {
+    expect(parseWebviewMessage({ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { access: 'read', workspace: '' } } })).toMatchObject({ ok: true, kind: 'engine' });
+    expect(parseWebviewMessage({ type: 'op', graphId: 'g', op: { type: 'addNode', node: { title: 't', kind: 'agent', access: 'maybe' } } }).ok).toBe(false);
+  });
+});

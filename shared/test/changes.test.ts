@@ -44,3 +44,11 @@ describe('review ops', () => {
     expect(parseWebviewMessage({ type: 'op', graphId: 'g', op: { type: 'revertChange', target: { kind: 'step', id: 'n1' } } }).ok).toBe(false);
   });
 });
+
+describe('changed fields for access and workspace', () => {
+  it('lists access and workspace changes', () => {
+    expect(diffGraphs(graph([node('n1')]), graph([node('n1', { access: 'read', workspace: 'wh_a' })]))).toEqual([
+      { kind: 'node', change: 'changed', id: 'n1', title: 'n1', fields: ['access', 'workspace'] },
+    ]);
+  });
+});

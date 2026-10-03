@@ -309,3 +309,73 @@ describe('refinable', () => {
     expect(refinable(node({ kind: 'command', command: 'ls' }))).toBe(true);
   });
 });
+
+describe('step access and workspace', () => {
+  const apply = (g: Graph, op: Op): Graph => {
+    const r = applyOp(g, op, 'user', T2);
+    if (!r.ok) throw new Error(r.error);
+    return r.graph;
+  };
+
+  it('stores read-only access and a workspace on add, and stores write as no field', () => {
+    const g = build([
+      { type: 'addNode', node: { title: 'Read', kind: 'agent', prompt: 'p', access: 'read', workspace: 'wh_small' } },
+      { type: 'addNode', node: { title: 'Write', kind: 'agent', prompt: 'p', access: 'write' } },
+    ]);
+    expect(g.nodes[0]).toMatchObject({ access: 'read', workspace: 'wh_small' });
+    expect(g.nodes[1]).not.toHaveProperty('access');
+    expect(g.nodes[1]).not.toHaveProperty('workspace');
+  });
+
+  it('refuses read-only command steps on add and update', () => {
+    const msg = 'Command steps can always change files; only agent steps can be read-only.';
+    expectError(emptyGraph('g', 'G', T), { type: 'addNode', node: { title: 'x', kind: 'command', command: 'ls', access: 'read' } }, msg);
+    expectError(build([cmd('b', 'ls')]), { type: 'updateNode', id: 'n1', patch: { access: 'read' } }, msg);
+    expectError(build([agent('a')]), { type: 'updateNode', id: 'n1', patch: { kind: 'command', command: 'ls', access: 'read' } }, msg);
+  });
+
+  it('drops access when a step becomes a command step', () => {
+    const g = build([{ type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p', access: 'read' } }]);
+    const next = apply(g, { type: 'updateNode', id: 'n1', patch: { kind: 'command', command: 'ls' } });
+    expect(next.nodes[0].kind).toBe('command');
+    expect(next.nodes[0]).not.toHaveProperty('access');
+  });
+
+  it('sets, keeps and clears access and workspace on update', () => {
+    let g = build([agent('a')]);
+    g = apply(g, { type: 'updateNode', id: 'n1', patch: { access: 'read', workspace: 'wh_a' } });
+    expect(g.nodes[0]).toMatchObject({ access: 'read', workspace: 'wh_a' });
+    g = apply(g, { type: 'updateNode', id: 'n1', patch: { title: 'renamed' } });
+    expect(g.nodes[0]).toMatchObject({ title: 'renamed', access: 'read', workspace: 'wh_a' });
+    g = apply(g, { type: 'updateNode', id: 'n1', patch: { access: 'write', workspace: '' } });
+    expect(g.nodes[0]).not.toHaveProperty('access');
+    expect(g.nodes[0]).not.toHaveProperty('workspace');
+  });
+
+  it('refuses bad workspace names on add and update', () => {
+    const msg = 'Workspace names use lowercase letters, digits, - and _, starting with a letter.';
+    expectError(emptyGraph('g', 'G', T), { type: 'addNode', node: { title: 'x', kind: 'agent', workspace: 'Bad Name' } }, msg);
+    expectError(build([agent('a')]), { type: 'updateNode', id: 'n1', patch: { workspace: '../x' } }, msg);
+  });
+
+  it('changes the content signature with access and with workspace, and not for an explicit write', () => {
+    const g = build([agent('a')]);
+    expect(contentSignature(apply(g, { type: 'updateNode', id: 'n1', patch: { access: 'read' } }))).not.toBe(contentSignature(g));
+    expect(contentSignature(apply(g, { type: 'updateNode', id: 'n1', patch: { workspace: 'wh_a' } }))).not.toBe(contentSignature(g));
+    expect(contentSignature({ ...g, nodes: [{ ...g.nodes[0], access: 'write' }] })).toBe(contentSignature(g));
+  });
+
+  it('re-executes an agent step whose access or workspace changed, and everything after it', () => {
+    const g = build([agent('a'), agent('b'), link('n1', 'n2')]);
+    const allOk = Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }])) as Record<string, NodeRunState>;
+    expect(reusableNodeIds(g, { snapshot: g, nodes: allOk })).toEqual(new Set(['n1', 'n2']));
+    expect(reusableNodeIds(apply(g, { type: 'updateNode', id: 'n1', patch: { access: 'read' } }), { snapshot: g, nodes: allOk })).toEqual(new Set());
+    expect(reusableNodeIds(apply(g, { type: 'updateNode', id: 'n2', patch: { workspace: 'wh_a' } }), { snapshot: g, nodes: allOk })).toEqual(new Set(['n1']));
+  });
+
+  it('never reuses a step that has a workspace', () => {
+    const g = build([agent('a'), { type: 'addNode', node: { title: 'b', kind: 'command', command: 'make', workspace: 'wh_a' } }, agent('c'), link('n2', 'n3')]);
+    const allOk = Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }])) as Record<string, NodeRunState>;
+    expect(reusableNodeIds(g, { snapshot: g, nodes: allOk })).toEqual(new Set(['n1']));
+  });
+});

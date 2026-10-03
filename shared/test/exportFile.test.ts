@@ -99,3 +99,16 @@ describe('export files with unsafe step ids', () => {
   });
 });
 });
+
+describe('step access and workspace in export files', () => {
+  it('carries access and workspace through export and import', () => {
+    const r = applyOp(sample(), { type: 'updateNode', id: 'n2', patch: { access: 'read', workspace: 'wh_a' } }, 'user', T);
+    if (!r.ok) throw new Error(r.error);
+    const file = toExportFile(r.graph, T);
+    expect(file.graph.nodes[1]).toMatchObject({ id: 'n2', access: 'read', workspace: 'wh_a' });
+    expect(file.graph.nodes[0]).not.toHaveProperty('access');
+    expect(file.graph.nodes[0]).not.toHaveProperty('workspace');
+    const back = parseExportFile(JSON.stringify(file), 'copy', T);
+    expect(back.ok && back.graph.nodes[1]).toMatchObject({ access: 'read', workspace: 'wh_a' });
+  });
+});

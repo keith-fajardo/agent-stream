@@ -2,6 +2,8 @@ export type Actor = 'user' | 'agent';
 export type NodeKind = 'agent' | 'command';
 export type Position = { x: number; y: number };
 
+export type NodeAccess = 'read' | 'write';
+
 export type GraphNode = {
   id: string;
   title: string;
@@ -11,6 +13,10 @@ export type GraphNode = {
   prompt?: string;
   command?: string;
   timeoutSec?: number;
+  /** 'read': an agent step that only reads and reports (spec §3.1). Missing means it can change files. */
+  access?: NodeAccess;
+  /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
+  workspace?: string;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -43,6 +49,10 @@ export type NewNodeInput = {
   prompt?: string;
   command?: string;
   timeoutSec?: number;
+  /** 'read': an agent step that only reads and reports (spec §3.1). Missing means it can change files. */
+  access?: NodeAccess;
+  /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
+  workspace?: string;
   position?: Position;
 };
 
@@ -53,6 +63,10 @@ export type NodePatch = {
   prompt?: string;
   command?: string;
   timeoutSec?: number;
+  /** 'read': an agent step that only reads and reports (spec §3.1). Missing means it can change files. */
+  access?: NodeAccess;
+  /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
+  workspace?: string;
 };
 
 export type Op =
@@ -79,7 +93,7 @@ export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource };
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
