@@ -1,5 +1,6 @@
 import type { renameSync } from 'node:fs';
 import {
+  isWriteCapable,
   refinable,
   validateRunnable,
   type AgentChange,
@@ -113,13 +114,15 @@ export function createApp(d: AppDeps) {
     return { ok: true, text, warnings: preview.warnings };
   }
   /**
-   * Agent steps on `p`, each asking the user through its own step gate. Each also gets the graph tools
-   * (add_step, change_step), which ask the user themselves, so the gate lets them through.
+   * Agent steps on `p`, each asking the user through its own step gate. A step that can change files also gets the graph
+   * tools (add_step, change_step), which ask the user themselves, so the gate lets them through. A read-only step gets no
+   * graph tools, and its gate refuses everything that isn't read-only without asking (spec §4.4).
    */
   const agentFor =
     (p: AgentProvider): NodeExecutor =>
     (ctx) => {
-      const graphTools = createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
+      const readOnly = !isWriteCapable(ctx.node);
+      const graphTools = readOnly ? [] : createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
       return p.runStep(
         { ...ctx, graphTools },
         createStepGate({
@@ -133,6 +136,7 @@ export function createApp(d: AppDeps) {
           privateFiles: privateFiles(),
           signal: ctx.signal,
           emit: ctx.emit,
+          readOnly,
           selfApproving: new Set(graphTools.map((t) => `mcp__run_graph__${t.name}`)),
         }),
       );

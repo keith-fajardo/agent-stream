@@ -112,3 +112,12 @@ describe('buildNodePrompt and workspaces', () => {
     expect(later).not.toContain('You are working in workspace');
   });
 });
+
+describe('buildNodePrompt and read-only steps', () => {
+  it('tells a read-only step to investigate and report, under its heading', () => {
+    expect(buildNodePrompt(graph(''), node('n1', 'agent', { title: 'Look', prompt: 'Look around.', access: 'read', description: 'Reads the code.' }), [])).toBe(
+      "# Your step: Look\nThis step is read-only: investigate and report; don't change files or run commands.\nIn short: Reads the code.\nLook around.\n",
+    );
+    expect(buildNodePrompt(graph(''), node('n1', 'agent', { prompt: 'x' }), [])).not.toContain('read-only');
+  });
+});

@@ -87,6 +87,22 @@ describe('step gate', () => {
     expect(gate.privacy('Read', { file_path: join('models', 'orders.sql') })).toBeNull();
     expect(gate.privacy('Grep', { pattern: 'x' })).toBeNull();
   });
+  it('refuses every tool that is not read-only in a read-only step, without asking', async () => {
+    const broker = new ApprovalBroker(() => 't');
+    const emit = vi.fn();
+    const gate = createStepGate({ broker, runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: PROJECT, privateFiles: [VALUES], signal: new AbortController().signal, emit, readOnly: true });
+    expect(await gate.decide('Grep', { pattern: 'x', path: join(PROJECT, 'src') })).toEqual({ allow: true, by: 'readOnly' });
+    expect(await gate.decide('Edit', { file_path: join(PROJECT, 'a.ts') })).toEqual({
+      allow: false,
+      reason: 'This step is read-only, so Edit isn\'t allowed. Mark the step "Can edit files" if it needs to change something.',
+    });
+    expect(await gate.approve('Bash', { command: 'ls' })).toEqual({
+      allow: false,
+      reason: 'This step is read-only, so Bash isn\'t allowed. Mark the step "Can edit files" if it needs to change something.',
+    });
+    expect(broker.pending()).toEqual([]);
+    expect(emit).not.toHaveBeenCalled();
+  });
 });
 
 describe('planner gate', () => {

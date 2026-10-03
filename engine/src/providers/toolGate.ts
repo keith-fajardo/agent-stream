@@ -7,6 +7,10 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Gr
 /** Approvals wait for the user indefinitely; a day is the practical upper bound. */
 export const APPROVAL_HOOK_TIMEOUT_SEC = 24 * 60 * 60;
 
+/** Why a read-only step can't use a tool (spec §4.4). Never asks the user. */
+export const readOnlyRefusal = (toolName: string): string =>
+  `This step is read-only, so ${toolName} isn't allowed. Mark the step "Can edit files" if it needs to change something.`;
+
 export type ToolDecision = { allow: true; by: 'readOnly' | 'user' | 'graphTool' } | { allow: false; reason: string };
 
 export interface ToolGate {
@@ -36,6 +40,8 @@ export type StepGateOptions = {
   selfApproving?: ReadonlySet<string>;
   /** The folder whose .agent-stream/runs hold this run's records, when the step works elsewhere (a variant worktree, ruling R18). */
   runsRoot?: string;
+  /** A read-only step (access: 'read'): every tool that isn't read-only is refused without asking (spec §4.4). */
+  readOnly?: boolean;
 };
 
 /** Why a step's request was not approved, as the agent is told. */
@@ -127,6 +133,7 @@ export function createStepGate(o: StepGateOptions): ToolGate {
     isReadOnly: (toolName) => READ_ONLY_TOOLS.has(toolName),
     isSelfApproving: (toolName) => o.selfApproving?.has(toolName) ?? false,
     async approve(toolName, input, signal) {
+      if (o.readOnly) return { allow: false, reason: readOnlyRefusal(toolName) };
       try {
         const d = await ask(toolName, input, signal);
         return d.decision === 'approve' ? { allow: true, by: 'user' } : { allow: false, reason: denialReason(d, o.signal.aborted) };

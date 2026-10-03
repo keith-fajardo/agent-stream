@@ -14,6 +14,8 @@ export function truncateTail(text: string, max: number): string {
 
 const brief = (n: GraphNode): string => n.description?.trim() || '';
 
+export const READ_ONLY_LINE = "This step is read-only: investigate and report; don't change files or run commands.";
+
 /** Where a step in a variant workspace works (spec §4.3a). */
 export type StepWorkspace = { path: string; head: string };
 
@@ -33,6 +35,7 @@ export function buildNodePrompt(graph: Graph, node: GraphNode, upstream: Upstrea
   if (graph.goal.trim()) parts.push(`# Workflow goal\n${graph.goal.trim()}`);
   if (graph.instructions?.trim()) parts.push(`# Instructions & context\n${graph.instructions.trim()}`);
   const step = [`# Your step: ${node.title}`];
+  if (node.access === 'read') step.push(READ_ONLY_LINE);
   if (node.workspace && workspace) {
     step.push(`You are working in workspace "${node.workspace}" at ${workspace.path}: a separate Git worktree of this repository at ${workspace.head.slice(0, 7)}. Change files only there.`);
   }

@@ -865,6 +865,26 @@ describe('app', () => {
       expect(seen).toEqual([{ tools: ['add_step', 'change_step'], selfApproving: [true, true, false] }]);
     });
 
+    it('gives a read-only step no graph tools and a gate that refuses edits without asking', async () => {
+      const seen: { tools: string[]; decision: unknown }[] = [];
+      const provider = testProvider({
+        runStep: async (ctx, gate) => {
+          seen.push({ tools: (ctx.graphTools ?? []).map((t) => t.name), decision: await gate.decide('Edit', { file_path: join(ctx.cwd, 'a.ts') }) });
+          return { ok: true, output: '' };
+        },
+      });
+      const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+      const c = client();
+      const g = app.graphStore.create('G');
+      app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'look', kind: 'agent', prompt: 'p', access: 'read' } }, 'user');
+      await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+      await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+      expect(seen).toEqual([
+        { tools: [], decision: { allow: false, reason: 'This step is read-only, so Edit isn\'t allowed. Mark the step "Can edit files" if it needs to change something.' } },
+      ]);
+      expect(app.broker.pending()).toEqual([]);
+    });
+
     it('fills in a step agent\'s change with the graph\'s values before asking', async () => {
       const held = deferred<void>();
       let tools: import('../src/providers/types').GraphTool[] = [];
