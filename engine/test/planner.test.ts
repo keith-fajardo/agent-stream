@@ -6,7 +6,8 @@ import { Planner, PLANNER_APPEND, describeOp } from '../src/planner';
 import type { AgentProvider, PlannerTurn, PlannerTurnResult } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { SessionStore } from '../src/sessionStore';
-import { deferred, fixedClock, signedIn, tmpProject } from './helpers';
+import { ALTERNATIVES_RULE, PARALLEL_POLICY, PLANNER_AB_RULES, PLANNER_TICKET_RULES, SERIALIZATION_GUIDANCE } from '../src/policy';
+import { deferred, fixedClock, outsideGit, signedIn, tmpProject } from './helpers';
 
 const VALUES_FILE = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
 const RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
@@ -52,6 +53,7 @@ function setup(turns: Turn[] = [], over: Partial<AgentProvider> = {}) {
     provider: () => provider,
     privateFiles: () => [VALUES_FILE],
     requestRun: () => null,
+    checkout: outsideGit(paths.root),
     clock: fixedClock(),
   });
   const busy: boolean[] = [];
@@ -76,7 +78,7 @@ describe('Planner', () => {
     expect(t).toMatchObject({ prompt: 'Plan a parity test', systemAppend: PLANNER_APPEND, cwd: s.paths.root });
     expect(t.resume).toBeUndefined();
     expect(t.tools.map((x) => x.name)).toEqual([
-      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run',
+      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets',
     ]);
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'Plan a parity test'],
@@ -416,5 +418,10 @@ describe('describeOp for reviewed agent changes', () => {
     expect(describeOp({ type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } })).toBe('reverted the agent change to n1->n2');
     expect(describeOp({ type: 'acceptChange', target: { kind: 'all' } })).toBe('accepted all agent changes');
     expect(describeOp({ type: 'revertChange', target: { kind: 'all' } })).toBe('reverted all agent changes');
+  });
+
+  it('carries the parallel tickets policy, the alternatives rule and the serialization guidance verbatim', () => {
+    for (const text of [PARALLEL_POLICY, ALTERNATIVES_RULE, PLANNER_TICKET_RULES, SERIALIZATION_GUIDANCE, PLANNER_AB_RULES]) expect(PLANNER_APPEND).toContain(text);
+    expect(PLANNER_APPEND.indexOf(ALTERNATIVES_RULE)).toBe(PLANNER_APPEND.indexOf(PARALLEL_POLICY) + PARALLEL_POLICY.length + '\n- '.length);
   });
 });

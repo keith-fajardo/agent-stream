@@ -14,7 +14,7 @@ import { couldNotAsk, createPlannerGate } from '../src/providers/toolGate';
 import type { PlannerEvent, PlannerTurn } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { SessionStore } from '../src/sessionStore';
-import { fixedClock, signedIn, tmpProject } from './helpers';
+import { fixedClock, outsideGit, signedIn, tmpProject } from './helpers';
 
 const msg = (m: object) => m as unknown as SDKMessage;
 const VALUES_FILE = resolve('/', 'home', 'me', '.agent-stream', 'values', '0123456789abcdef.json');
@@ -58,7 +58,7 @@ async function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
     prompt: 'hi',
     systemAppend: PLANNER_APPEND,
     cwd: paths.root,
-    tools: graphTools({ graphStore, runStore, graphId, source: { kind: 'planner', sessionId: 'default' }, requestRun: () => null }),
+    tools: graphTools({ graphStore, runStore, graphId, source: { kind: 'planner', sessionId: 'default' }, requestRun: () => null, checkout: outsideGit(paths.root) }),
     gate: createPlannerGate({ projectDir: paths.root, privateFiles: [VALUES_FILE], graphToolNames: new Set(['add_node']) }),
     signal: new AbortController().signal,
     onEvent: (e) => events.push(e),
@@ -298,6 +298,7 @@ describe('Claude provider with the planner', () => {
       provider: () => provider,
       privateFiles: () => [VALUES_FILE],
       requestRun: () => null,
+      checkout: outsideGit(paths.root),
       clock: fixedClock(),
     });
     const busy: boolean[] = [];

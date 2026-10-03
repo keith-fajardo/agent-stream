@@ -6,6 +6,7 @@ import type { Clock } from '../src/clock';
 import type { Found } from '../src/platform';
 import { ensureDataDirs, projectPaths, type ProjectPaths } from '../src/paths';
 import type { GitExec, GitResult, WorktreeEntry } from '../src/git';
+import type { CheckoutSource } from '../src/plannerTools';
 import type { AgentProvider } from '../src/providers/types';
 import { createWriteLeases, type WriteLeases } from '../src/writeLease';
 
@@ -98,3 +99,6 @@ export function testLeases(o: { pid?: number } = {}): WriteLeases {
 export function appTestDeps() {
   return { git: noGit, leases: testLeases(), home: mkdtempSync(join(tmpdir(), 'agent-stream-home-')) };
 }
+
+/** A planner checkout source for a folder outside Git. */
+export const outsideGit = (root: string): CheckoutSource => async () => ({ info: { git: false, root, reason: 'Not a Git repository' } });

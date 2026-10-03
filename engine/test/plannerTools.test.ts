@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { GraphStore } from '../src/graphStore';
-import { graphTools } from '../src/plannerTools';
+import type { CheckoutInfo } from '@agent-stream/shared';
+import { ALL_HAVE_WORKTREES_ADVICE } from '../src/policy';
+import { graphTools, type CheckoutSource } from '../src/plannerTools';
 import { RunStore } from '../src/runStore';
-import { fixedClock, tmpProject } from './helpers';
+import { fixedClock, outsideGit, tmpProject } from './helpers';
 
-function setup() {
+function setup(checkout?: CheckoutSource) {
   const paths = tmpProject();
   const graphStore = new GraphStore(paths, fixedClock());
   const runStore = new RunStore(paths);
@@ -16,6 +18,7 @@ function setup() {
     runStore,
     graphId,
     source: { kind: 'planner', sessionId: 's' },
+    checkout: checkout ?? outsideGit(paths.root),
     requestRun: (fromNodeId) => {
       runRequests.push(fromNodeId);
       return runError;
@@ -33,7 +36,7 @@ function setup() {
 describe('planner graph tools', () => {
   it('exposes the documented tools', () => {
     expect(setup().tools.map((t) => t.name)).toEqual([
-      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run',
+      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets',
     ]);
   });
 
@@ -189,5 +192,76 @@ describe('planner graph tools', () => {
     expect((await s.call('set_variable', { name: 'env_var' })).isError).toBe(true);
     expect(await s.call('delete_variable', { name: 'schema' })).toEqual({ text: 'Deleted variable schema.', isError: false });
     expect(s.graphStore.get(s.graphId).variables).toEqual([]);
+  });
+});
+
+describe('planner tools for access, workspaces and tickets', () => {
+  const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  const repo = (worktrees: { path: string; branch?: string }[] = []): CheckoutInfo => ({
+    git: true,
+    root: '/work/app',
+    linkedWorktree: false,
+    branch: 'main',
+    head: SHA,
+    dirty: false,
+    worktrees: [{ path: '/work/app', branch: 'main', head: SHA, current: true }, ...worktrees.map((w) => ({ ...w, head: SHA, current: false }))],
+  });
+
+  it('sets access and workspace with add_node and update_node, and get_graph shows them', async () => {
+    const s = setup();
+    expect(await s.call('add_node', { kind: 'agent', title: 'Look', prompt: 'p', access: 'read' })).toEqual({ text: 'Added n1.', isError: false });
+    expect(await s.call('add_node', { kind: 'command', title: 'Run', command: 'make', workspace: 'wh_a' })).toEqual({ text: 'Added n2.', isError: false });
+    const shown = JSON.parse((await s.call('get_graph')).text) as { nodes: Record<string, unknown>[] };
+    expect(shown.nodes[0]).toMatchObject({ id: 'n1', access: 'read' });
+    expect(shown.nodes[0]).not.toHaveProperty('workspace');
+    expect(shown.nodes[1]).toMatchObject({ id: 'n2', workspace: 'wh_a' });
+    expect(shown.nodes[1]).not.toHaveProperty('access');
+    expect(await s.call('update_node', { id: 'n2', workspace: '' })).toEqual({ text: 'Updated n2.', isError: false });
+    expect(s.graphStore.get(s.graphId).nodes[1]).not.toHaveProperty('workspace');
+    expect(await s.call('update_node', { id: 'n2', access: 'read' })).toEqual({ text: 'Command steps can always change files; only agent steps can be read-only.', isError: true });
+    expect(await s.call('add_node', { kind: 'agent', title: 'Bad', prompt: 'p', workspace: 'Bad Name' })).toEqual({
+      text: 'Workspace names use lowercase letters, digits, - and _, starting with a letter.',
+      isError: true,
+    });
+  });
+
+  it('checkout_info returns the checkout and the lease holder as JSON', async () => {
+    const holder = { runId: '20261003-090000-aaaa', graphId: 'other', folder: '/work/app', pid: 1, startedAt: 't' };
+    expect(JSON.parse((await setup(async () => ({ info: repo(), lease: holder })).call('checkout_info')).text)).toEqual({ checkout: repo(), lease: holder });
+    expect(JSON.parse((await setup(async () => ({ info: repo() })).call('checkout_info')).text)).toEqual({ checkout: repo(), lease: null });
+  });
+
+  it('check_tickets finds each ticket worktree by its feat/<slug> branch', async () => {
+    const s = setup(async () => ({ info: repo([{ path: '/work/app-abc-1', branch: 'feat/abc-1' }, { path: '/work/app-abc-2', branch: 'feat/abc-2' }]) }));
+    expect(JSON.parse((await s.call('check_tickets', { tickets: ['ABC-1', 'ABC 2'] })).text)).toEqual({
+      tickets: [
+        { ticket: 'ABC-1', slug: 'abc-1', branch: 'feat/abc-1', worktree: '/work/app-abc-1' },
+        { ticket: 'ABC 2', slug: 'abc-2', branch: 'feat/abc-2', worktree: '/work/app-abc-2' },
+      ],
+      allHaveWorktrees: true,
+      advice: ALL_HAVE_WORKTREES_ADVICE,
+    });
+  });
+
+  it('check_tickets suggests Set Up Parallel Tickets when a ticket has no worktree', async () => {
+    const s = setup(async () => ({ info: repo([{ path: '/work/app-abc-1', branch: 'feat/abc-1' }]) }));
+    const r = JSON.parse((await s.call('check_tickets', { tickets: ['ABC-1', 'ABC-3'] })).text);
+    expect(r.tickets[1]).toEqual({ ticket: 'ABC-3', slug: 'abc-3', branch: 'feat/abc-3' });
+    expect(r).toMatchObject({ allHaveWorktrees: false, advice: 'Not every ticket has its own worktree. Suggest the command Agent Stream: Set Up Parallel Tickets, or plan the tickets one after another.' });
+  });
+
+  it('check_tickets says worktrees cannot be verified outside Git', async () => {
+    expect(JSON.parse((await setup().call('check_tickets', { tickets: ['ABC-1'] })).text)).toEqual({
+      tickets: [{ ticket: 'ABC-1', slug: 'abc-1', branch: 'feat/abc-1' }],
+      allHaveWorktrees: false,
+      advice: "Worktrees can't be verified here; plan the tickets one after another.",
+    });
+  });
+
+  it('check_tickets takes 1 to 20 tickets that have letters or numbers', async () => {
+    const s = setup();
+    expect((await s.call('check_tickets', { tickets: [] })).isError).toBe(true);
+    expect((await s.call('check_tickets', { tickets: Array.from({ length: 21 }, (_, i) => `T-${i}`) })).isError).toBe(true);
+    expect(await s.call('check_tickets', { tickets: ['ABC-1', '???'] })).toEqual({ text: 'Ticket 2 needs letters or numbers.', isError: true });
   });
 });

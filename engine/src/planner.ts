@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import type { ChatEntry, ChatRole, Op, OpRecord } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
-import { graphTools } from './plannerTools';
+import { graphTools, type CheckoutSource } from './plannerTools';
+import { ALTERNATIVES_RULE, PARALLEL_POLICY, PLANNER_AB_RULES, PLANNER_TICKET_RULES, SERIALIZATION_GUIDANCE } from './policy';
 import { createPlannerGate } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import type { RunStore } from './runStore';
@@ -15,6 +16,7 @@ export const PLANNER_APPEND = `You are the planner inside Agent Stream, a local 
 How the graph works:
 - Each node is a step. kind "agent" is a separate AI agent run that receives the workflow goal, its own prompt, and the outputs of the nodes it depends on. kind "command" is an exact shell command run in the project root, with no LLM involved.
 - An edge from A to B means B runs after A and receives A's output. Nodes with no path between them run in parallel.
+- Steps that can change files take turns within one workspace; read-only steps (access: read) and steps in other workspaces run alongside them.
 - Agent nodes ask the user before every file edit or shell command. Command nodes run exactly as written once the user starts the run.
 
 How to work:
@@ -34,7 +36,15 @@ Variables and templates:
 - {{ env_var('NAME', 'default') }} reads an environment variable on the user's machine.
 - In command steps every {{ ... }} value is shell-quoted automatically. Write {{ flags | unquoted }} only for a value that must expand to several arguments, and keep {{ }} outside quoted strings.
 - Values "true" and "false" are booleans, so {% if full_refresh %}--full-refresh{% endif %} works.
-- dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so Agent Stream leaves it alone.`;
+- dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so Agent Stream leaves it alone.
+
+Parallel work and workspaces:
+- ${PARALLEL_POLICY}
+- ${ALTERNATIVES_RULE}
+- ${PLANNER_TICKET_RULES}
+- ${SERIALIZATION_GUIDANCE}
+- ${PLANNER_AB_RULES}
+- Use checkout_info to see the branch, other worktrees and which run is changing files in this checkout.`;
 
 export function describeOp(op: Op): string {
   switch (op.type) {
@@ -92,6 +102,8 @@ export type PlannerDeps = {
   /** Files the planner is denied reading (the variable values files). */
   privateFiles: () => string[];
   requestRun: (graphId: string, fromNodeId?: string) => string | null;
+  /** Where the folder's graphs work and who holds its write lease (checkout_info, check_tickets). */
+  checkout: CheckoutSource;
   clock?: Clock;
 };
 
@@ -177,6 +189,7 @@ export class Planner extends EventEmitter {
         graphId,
         source: { kind: 'planner', sessionId },
         requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
+        checkout: this.d.checkout,
       });
       const r = await provider.planTurn({
         // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.

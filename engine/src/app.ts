@@ -250,7 +250,16 @@ export function createApp(d: AppDeps) {
     return null;
   }
 
-  const planner = new Planner({ graphStore, runStore, sessions, projectDir: d.projectDir, provider: () => provider, privateFiles, requestRun, clock });
+  const planner = new Planner({ graphStore, runStore, sessions, projectDir: d.projectDir, provider: () => provider,
+    privateFiles,
+    requestRun,
+    checkout: async () => {
+      const info = await inspect();
+      const lease = d.leases.holder(info.root);
+      return { info, ...(lease && { lease }) };
+    },
+    clock,
+  });
 
   /** Work sessions: the store's 'changed' event broadcasts the list. */
   function listSessions() {

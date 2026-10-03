@@ -1,9 +1,14 @@
 import { z, type ZodRawShape } from 'zod';
-import type { ChangeSource, Graph, Op } from '@agent-stream/shared';
+import type { ChangeSource, CheckoutInfo, Graph, LeaseHolder, Op } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
+import { ALL_HAVE_WORKTREES_ADVICE, MISSING_WORKTREES_ADVICE, OUTSIDE_GIT_ADVICE } from './policy';
 import type { GraphTool, ToolReply } from './providers/types';
 import type { RunStore } from './runStore';
+import { ticketSlugs } from './worktrees';
+
+/** Where the folder's graphs work and who holds its write lease. */
+export type CheckoutSource = () => Promise<{ info: CheckoutInfo; lease?: LeaseHolder }>;
 
 export type PlannerToolDeps = {
   graphStore: GraphStore;
@@ -13,6 +18,8 @@ export type PlannerToolDeps = {
   source: ChangeSource;
   /** Opens the run confirmation dialog in the graph's tab; returns an error message or null. */
   requestRun: (fromNodeId?: string) => string | null;
+  /** checkout_info and check_tickets read it. */
+  checkout: CheckoutSource;
 };
 
 export const reply = (text: string, isError = false): ToolReply => (isError ? { text, isError: true } : { text });
@@ -32,6 +39,7 @@ export function defineTool<S extends ZodRawShape>(name: string, description: str
 }
 
 const kind = z.enum(['agent', 'command']);
+const access = z.enum(['read', 'write']);
 const RUN_EXCERPT_CHARS = 2000;
 
 export function summarizeGraph(graph: Graph) {
@@ -39,8 +47,11 @@ export function summarizeGraph(graph: Graph) {
     goal: graph.goal,
     instructions: graph.instructions,
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, createdBy, updatedBy }) => ({
-      id, title, kind: k, description, prompt, command, timeoutSec, createdBy, updatedBy,
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, createdBy, updatedBy }) => ({
+      id, title, kind: k, description, prompt, command, timeoutSec,
+      ...(a === 'read' && { access: 'read' as const }),
+      ...(workspace && { workspace }),
+      createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
   };
@@ -57,7 +68,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout.',
       {
         kind,
         title: z.string(),
@@ -66,9 +77,11 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),
         after: z.array(z.string()).optional(),
+        access: access.optional(),
+        workspace: z.string().optional(),
       },
       async (a) => {
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec } });
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -81,7 +94,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout.',
       {
         id: z.string(),
         title: z.string().optional(),
@@ -90,6 +103,8 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         prompt: z.string().optional(),
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),
+        access: access.optional(),
+        workspace: z.string().optional(),
       },
       async ({ id, ...patch }) => outcome(apply({ type: 'updateNode', id, patch }), `Updated ${id}.`),
     ),
@@ -148,5 +163,32 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
       }
       return reply(lines.join('\n'));
     }),
+    defineTool(
+      'checkout_info',
+      'Read-only. Return where this graph works, as JSON: the Git checkout (root, branch, HEAD, uncommitted changes, other worktrees) and the run that is changing files there, if any.',
+      {},
+      async () => {
+        const { info, lease } = await d.checkout();
+        return reply(JSON.stringify({ checkout: info, lease: lease ?? null }, null, 2));
+      },
+    ),
+    defineTool(
+      'check_tickets',
+      'Read-only. Check whether each ticket already has its own Git worktree on branch feat/<slug>. Call it before planning work for several tickets.',
+      { tickets: z.array(z.string()).min(1).max(20) },
+      async ({ tickets }) => {
+        const s = ticketSlugs(tickets);
+        if (!s.ok) return reply(s.error, true);
+        const { info } = await d.checkout();
+        const rows = tickets.map((ticket, i) => {
+          const branch = `feat/${s.slugs[i]}`;
+          const worktree = info.git ? info.worktrees.find((w) => w.branch === branch)?.path : undefined;
+          return { ticket, slug: s.slugs[i], branch, ...(worktree && { worktree }) };
+        });
+        const allHaveWorktrees = info.git && rows.every((r) => r.worktree);
+        const advice = !info.git ? OUTSIDE_GIT_ADVICE : allHaveWorktrees ? ALL_HAVE_WORKTREES_ADVICE : MISSING_WORKTREES_ADVICE;
+        return reply(JSON.stringify({ tickets: rows, allHaveWorktrees, advice }, null, 2));
+      },
+    ),
   ];
 }
