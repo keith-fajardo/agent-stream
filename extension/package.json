@@ -30,10 +30,7 @@
       "properties": {
         "agentStream.provider": {
           "type": "string",
-          "enum": [
-            "claude",
-            "copilot"
-          ],
+          "enum": ["claude", "copilot"],
           "default": "claude",
           "enumDescriptions": [
             "Claude: your Claude subscription through Claude Code.",

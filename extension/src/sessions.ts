@@ -14,10 +14,16 @@ export type SessionsDeps = {
   info(message: string): void;
   memory: { get(key: string): string | undefined; update(key: string, value: string | undefined): PromiseLike<void> };
   changed(): void;
+  hasEngine(folder: Folder): boolean;
   debounceMs?: number;
 };
 
 export const activeSessionKey = (folderKey: string) => `agentStream.activeSession:${folderKey}`;
+/** The folder whose session the status bar shows: the active graph tab's, else the only folder. */
+export function sessionStatusFolder(activeGraphFolder: Folder | undefined, folders: Folder[]): Folder | undefined {
+  return activeGraphFolder ?? (folders.length === 1 ? folders[0] : undefined);
+}
+
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Work sessions for every folder (sessions spec §5): which one is active, its tabs, and switching. */
@@ -54,21 +60,40 @@ export class SessionManager {
         next.set(t.group, index + 1);
         return { graphId: t.graphId, group: t.group, index };
       });
-      this.d.app(folder).saveSessionTabs(this.active(folder).id, sessionTabs, mine.find((t) => t.active)?.graphId);
+      if (mine.length === 0 && !this.d.hasEngine(folder)) continue;
+      const app = this.d.app(folder);
+      const id = this.active(folder).id;
+      let activeGraphId = mine.find((t) => t.active)?.graphId;
+      if (!activeGraphId) {
+        const kept = app.sessionStore.load(id);
+        const prev = kept.ok ? kept.session.activeGraphId : undefined;
+        if (prev && mine.some((t) => t.graphId === prev)) activeGraphId = prev;
+      }
+      app.saveSessionTabs(id, sessionTabs, activeGraphId);
     }
   }
 
   async switchTo(folder: Folder, sessionId: string): Promise<boolean> {
+    if (this.switching) {
+      this.d.info('A session switch is already in progress.');
+      return false;
+    }
     const app = this.d.app(folder);
     const target = app.sessionStore.load(sessionId);
     if (!target.ok) {
       this.d.info(target.error);
       return false;
     }
+    if (this.active(folder).id === sessionId) return true;
     if (!(await this.confirmDiscard(folder))) return false;
+    if (this.switching) {
+      this.d.info('A session switch is already in progress.');
+      return false;
+    }
     this.captureNow();
     this.switching = true;
     let skipped = 0;
+    let failed = false;
     try {
       await this.d.closeGraphTabs(folder.key);
       await this.d.memory.update(activeSessionKey(folder.key), sessionId);
@@ -80,12 +105,16 @@ export class SessionManager {
       }
       const focus = tabs.find((t) => t.graphId === target.session.activeGraphId && existing.has(t.graphId));
       if (focus) await this.d.openGraphTab(folder, focus.graphId, focus.group, false);
+    } catch (e) {
+      failed = true;
+      this.d.info(`Could not switch to ${target.session.name}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       this.switching = false;
+      this.d.changed();
     }
+    if (failed) return false;
     if (skipped) this.d.info(`${skipped} ${plural(skipped, 'graph', 'graphs')} in this session no longer ${plural(skipped, 'exists', 'exist')} and ${plural(skipped, 'was', 'were')} skipped.`);
     this.captureNow();
-    this.d.changed();
     return true;
   }
 

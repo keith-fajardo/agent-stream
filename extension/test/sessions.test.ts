@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, type App } from '@agent-stream/engine';
 import type { Folder } from '../src/engines';
-import { activeSessionKey, SessionManager, type GraphTabInfo } from '../src/sessions';
+import { activeSessionKey, SessionManager, sessionStatusFolder, type GraphTabInfo } from '../src/sessions';
 import { signedIn, testProvider } from './helpers';
 
 function world() {
@@ -34,6 +34,7 @@ function world() {
     info: vi.fn(),
     memory: { get: (k: string) => memory.get(k), update: async (k: string, v: string | undefined) => void memory.set(k, v) },
     changed: vi.fn(),
+    hasEngine: vi.fn(() => true),
     debounceMs: 0,
   };
   const graph = (f: Folder, name: string) => apps.get(f.key)!.createGraph(name).id;
@@ -113,5 +114,81 @@ describe('SessionManager', () => {
     expect(app.listSessions().map((s) => s.id)).toEqual(['default']);
     await w.manager.delete(a, 'default');
     expect(app.listSessions()).toEqual([expect.objectContaining({ id: 'default', name: 'Default', tabCount: 0 })]);
+  });
+});
+
+describe('SessionManager robustness', () => {
+  it('keeps the active graph when focus is elsewhere', () => {
+    const w = world();
+    const [a] = w.folders;
+    const g1 = w.graph(a, 'One'), g2 = w.graph(a, 'Two');
+    w.setTabs([{ folderKey: a.key, graphId: g1, group: 1, index: 0, active: true }, { folderKey: a.key, graphId: g2, group: 1, index: 1, active: false }]);
+    w.manager.captureNow();
+    w.setTabs(w.tabs().map((t) => ({ ...t, active: false })));
+    w.manager.captureNow();
+    expect(w.apps.get(a.key)!.sessionStore.get('default').activeGraphId).toBe(g1);
+    w.setTabs([{ folderKey: a.key, graphId: g2, group: 1, index: 0, active: false }]);
+    w.manager.captureNow();
+    expect(w.apps.get(a.key)!.sessionStore.get('default').activeGraphId).toBeUndefined();
+  });
+
+  it('a failing open reports, returns false, saves no partial tab set and still announces', async () => {
+    const w = world();
+    const [a] = w.folders;
+    const g1 = w.graph(a, 'One'), g2 = w.graph(a, 'Two');
+    const app = w.apps.get(a.key)!;
+    const b = app.createSession('B');
+    const stored = [{ graphId: g1, group: 1, index: 0 }, { graphId: g2, group: 1, index: 1 }];
+    app.saveSessionTabs(b.id, stored, g1);
+    w.deps.openGraphTab.mockImplementationOnce(async () => {}).mockRejectedValueOnce(new Error('boom'));
+    expect(await w.manager.switchTo(a, b.id)).toBe(false);
+    expect(w.deps.info).toHaveBeenCalledWith('Could not switch to B: boom');
+    expect(w.deps.changed).toHaveBeenCalled();
+    expect(app.sessionStore.get(b.id).tabs).toEqual(stored);
+  });
+
+  it('refuses a second switch while one is running', async () => {
+    const w = world();
+    const [a] = w.folders;
+    const b = w.apps.get(a.key)!.createSession('B');
+    let release!: () => void;
+    w.deps.closeGraphTabs.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const first = w.manager.switchTo(a, b.id);
+    await vi.waitFor(() => expect(w.deps.closeGraphTabs).toHaveBeenCalled());
+    expect(await w.manager.switchTo(a, b.id)).toBe(false);
+    expect(w.deps.info).toHaveBeenCalledWith('A session switch is already in progress.');
+    release();
+    expect(await first).toBe(true);
+  });
+
+  it('switching to the active session does nothing', async () => {
+    const w = world();
+    const [a] = w.folders;
+    w.dirty.set(a.key, 1);
+    expect(await w.manager.switchTo(a, 'default')).toBe(true);
+    expect(w.deps.confirm).not.toHaveBeenCalled();
+    expect(w.calls).toEqual([]);
+  });
+
+  it('skips folders with no graph tabs and no engine', () => {
+    const w = world();
+    const [a, b] = w.folders;
+    const g = w.graph(a, 'One');
+    w.deps.hasEngine.mockImplementation(() => false);
+    const app = vi.spyOn(w.deps, 'app');
+    w.setTabs([{ folderKey: a.key, graphId: g, group: 1, index: 0, active: true }]);
+    w.manager.captureNow();
+    expect(app.mock.calls.map(([f]) => f.key)).toEqual([a.key, a.key]);
+    expect(app.mock.calls.some(([f]) => f.key === b.key)).toBe(false);
+  });
+});
+
+describe('sessionStatusFolder', () => {
+  const f = (n: string) => ({ key: `file:///${n}`, name: n, path: `/${n}` });
+  it('is the active graph tab’s folder, else the only folder, else none', () => {
+    expect(sessionStatusFolder(f('b'), [f('a'), f('b')])).toEqual(f('b'));
+    expect(sessionStatusFolder(undefined, [f('a')])).toEqual(f('a'));
+    expect(sessionStatusFolder(undefined, [f('a'), f('b')])).toBeUndefined();
+    expect(sessionStatusFolder(undefined, [])).toBeUndefined();
   });
 });

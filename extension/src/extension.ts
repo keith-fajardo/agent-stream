@@ -11,7 +11,7 @@ import { ApprovalNotifier } from './notifications';
 import { runCommands } from './runCommands';
 import { selectProvider } from './selectProvider';
 import { readSettings } from './settings';
-import { SessionManager, type GraphTabInfo } from './sessions';
+import { SessionManager, sessionStatusFolder, type GraphTabInfo } from './sessions';
 import { SessionItem, SessionsView } from './sessionsView';
 import { sessionStatusText, statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
@@ -140,9 +140,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   const sessionsTree = vscode.window.createTreeView('agentStream.sessions', { treeDataProvider: sessionsView });
   const showSession = () => {
-    const folders = workspaceFolders();
-    const p = panels.active();
-    const folder = p?.folder ?? (folders.length === 1 ? folders[0] : undefined);
+    const folder = sessionStatusFolder(panels.active()?.folder, workspaceFolders());
     if (!folder) {
       sessionStatus.hide();
       return;
@@ -172,6 +170,7 @@ export async function activate(context: vscode.ExtensionContext) {
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     info: (message) => void vscode.window.showInformationMessage(message),
     memory: context.workspaceState,
+    hasEngine: (f) => manager.has(f.key),
     changed: () => {
       sessionsView.refresh();
       showSession();
@@ -202,6 +201,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const items = manager
       .get(folder)
       .listSessions()
+      .filter((s) => !(withNew && s.problem))
       .map((s) => ({ label: s.name, description: s.problem ? `Can't be read: ${s.problem}` : `${s.tabCount} ${s.tabCount === 1 ? 'tab' : 'tabs'}`, id: s.id }));
     if (withNew) items.push({ label: 'New Session…', description: '', id: NEW });
     const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Session' });
@@ -256,9 +256,14 @@ export async function activate(context: vscode.ExtensionContext) {
       'agentStream.deleteSession',
       withSession((folder, id) => sessions.delete(folder, id)),
     ),
-    vscode.window.tabGroups.onDidChangeTabs(() => sessions.scheduleCapture()),
-    vscode.window.tabGroups.onDidChangeTabGroups(() => sessions.scheduleCapture()),
-    vscode.window.onDidChangeActiveTextEditor(() => showSession()),
+    vscode.window.tabGroups.onDidChangeTabs(() => {
+      sessions.scheduleCapture();
+      showSession();
+    }),
+    vscode.window.tabGroups.onDidChangeTabGroups(() => {
+      sessions.scheduleCapture();
+      showSession();
+    }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       sessionsView.refresh();
       showSession();

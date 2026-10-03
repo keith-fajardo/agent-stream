@@ -118,6 +118,11 @@ export class EngineManager {
     return problem ? { ...this.status, ok: false, error: problem } : this.status;
   }
 
+  /** Whether this folder already has a running engine (`get` would create one). */
+  has(folderKey: string): boolean {
+    return this.engines.has(folderKey);
+  }
+
   get(folder: Folder): App {
     const existing = this.engines.get(folder.key);
     if (existing) return existing.app;
