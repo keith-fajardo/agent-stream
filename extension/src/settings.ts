@@ -17,7 +17,8 @@ export type Settings = {
 
 /** An integer setting clamped to its range; anything that isn't an integer reads as the default. */
 function intSetting(value: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(value);
+  // '', null and booleans would read as 0 or 1 through Number(); only a number or a numeric string counts.
+  const n = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
   return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 

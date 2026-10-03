@@ -130,3 +130,15 @@ describe('privatePathDenial', () => {
     expect(privatePathDenial(root, 'Read', { file_path: 3 }, [values])).toBeNull();
   });
 });
+
+describe('privatePathDenial on a case-insensitive platform', () => {
+  it.skipIf(process.platform === 'win32')('refuses a differently-cased values-file path on darwin', () => {
+    const real = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      expect(privatePathDenial(root, 'Read', { file_path: values.toUpperCase() }, [values])).toBe(reason);
+    } finally {
+      Object.defineProperty(process, 'platform', real);
+    }
+  });
+});

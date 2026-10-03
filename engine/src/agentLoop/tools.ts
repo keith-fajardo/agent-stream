@@ -24,6 +24,9 @@ const MAX_GREP_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8192;
 const MAX_GLOB_FOUND = 10_000;
+/** Glob stops walking after this many entries, and lets the event loop run (so Stop is seen) every GLOB_YIELD_EVERY. */
+const MAX_GLOB_ENTRIES = 200_000;
+const GLOB_YIELD_EVERY = 2000;
 /** How long Grep may search before it is stopped: a model-supplied pattern can backtrack catastrophically. */
 export const GREP_TIMEOUT_MS = 20_000;
 const PRIVATE_FOLDER = 'That folder holds Agent Stream run records and sessions, which are private.';
@@ -87,7 +90,8 @@ const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 const AGENT_STREAM_PRIVATE = new Set(['runs', 'sessions']);
 
 /** Every file under `dir`, in name order, not following links, skipping .git, node_modules and .agent-stream/{runs,sessions}. */
-function* walk(dir: string): Generator<string> {
+function* walk(dir: string, limit?: { signal: AbortSignal; max: number; visited: number; hit: boolean }): Generator<string> {
+  if (limit && (limit.signal.aborted || limit.hit)) return;
   let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -96,10 +100,17 @@ function* walk(dir: string): Generator<string> {
   }
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const e of entries) {
+    if (limit) {
+      if (limit.hit) return;
+      if (++limit.visited > limit.max) {
+        limit.hit = true;
+        return;
+      }
+    }
     const full = join(dir, e.name);
     if (e.isDirectory()) {
       if (SKIPPED_FOLDERS.has(e.name) || (AGENT_STREAM_PRIVATE.has(e.name) && basename(dir) === '.agent-stream')) continue;
-      yield* walk(full);
+      yield* walk(full, limit);
     } else if (e.isFile()) yield full;
   }
 }
@@ -219,8 +230,10 @@ const globInput = z.object({
 });
 
 /** Read, Grep and Glob (spec §4.2): everything a read-only step or the planner gets. */
-export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } = {}): LoopTool[] {
+export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number; globMaxEntries?: number; globYieldEvery?: number } = {}): LoopTool[] {
   const grepTimeoutMs = options.grepTimeoutMs ?? GREP_TIMEOUT_MS;
+  const globMaxEntries = options.globMaxEntries ?? MAX_GLOB_ENTRIES;
+  const globYieldEvery = options.globYieldEvery ?? GLOB_YIELD_EVERY;
   return [
     defineLoopTool('Read', 'Read a text file. Lines come numbered from 1; use offset and limit for long files.', readInput, async ({ file_path, offset, limit }) => {
       const file = toolPath(cwd, file_path);
@@ -285,7 +298,13 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
       const re = globToRegExp(pattern);
       const found: { file: string; mtime: number }[] = [];
       let capped = false;
-      for (const file of walk(root)) {
+      const limit = { signal, max: globMaxEntries, visited: 0, hit: false };
+      let sinceYield = 0;
+      for (const file of walk(root, limit)) {
+        if (++sinceYield >= globYieldEvery) {
+          sinceYield = 0;
+          await new Promise<void>((done) => setImmediate(done));
+        }
         if (signal.aborted) return { text: 'Cancelled.', isError: true };
         if (re.test(posixRelative(root, file))) found.push({ file, mtime: statOf(file)?.mtimeMs ?? 0 });
         if (found.length >= MAX_GLOB_FOUND) {
@@ -293,11 +312,14 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number } =
           break;
         }
       }
-      if (found.length === 0) return { text: 'No files found.' };
+      if (signal.aborted) return { text: 'Cancelled.', isError: true };
+      const footer = `Stopped after visiting ${globMaxEntries} entries.`;
+      if (found.length === 0) return { text: limit.hit ? footer : 'No files found.' };
       found.sort((a, b) => b.mtime - a.mtime);
       const lines = found.slice(0, MAX_GLOB_RESULTS).map((f) => shown(cwd, f.file));
       if (capped) lines.push(`(Showing the newest ${MAX_GLOB_RESULTS} of more than ${MAX_GLOB_FOUND} files.)`);
       else if (found.length > MAX_GLOB_RESULTS) lines.push(`(Showing the newest ${MAX_GLOB_RESULTS} of ${found.length} files.)`);
+      if (limit.hit) lines.push(footer);
       return { text: lines.join('\n') };
     }),
   ];
@@ -353,7 +375,8 @@ function writeTools(cwd: string, runShell: RunShell): LoopTool[] {
       const file = toolPath(cwd, file_path);
       if (isPrivatePath(file)) return { text: PRIVATE_FOLDER, isError: true };
       mkdirSync(dirname(file), { recursive: true });
-      writeFileAtomic(file, content);
+      const existing = statOf(file);
+      writeFileAtomic(file, content, existing?.isFile() ? existing.mode & 0o777 : undefined);
       return { text: `Wrote ${file} (${Buffer.byteLength(content)} bytes).` };
     }),
     defineLoopTool('Bash', 'Run a shell command in the working folder (a login shell; Git Bash on Windows). Returns its output and exit code.', bashInput, async ({ command }, signal) => {

@@ -21,7 +21,7 @@ export function privatePathDenial(projectDir: string, toolName: string, input: u
   // A search without a path searches the project folder, which may hold the values file (a home folder opened as the workspace).
   const p = key === 'path' && (given === undefined || given === null || given === '') ? projectDir : given;
   if (typeof p !== 'string' || p === '') return null;
-  const norm = (x: string) => (process.platform === 'win32' ? x.toLowerCase() : x);
+  const norm = (x: string) => (process.platform === 'win32' || process.platform === 'darwin' ? x.toLowerCase() : x);
   // Claude Code expands a leading ~ to the home folder, where the values file lives.
   const expanded = /^~(?=$|[\\/])/.test(p) ? join(homedir(), p.slice(1)) : p;
   // One root for both the checked path and the runs folder, so a drive-less projectDir can't make them disagree on Windows.

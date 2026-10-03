@@ -218,6 +218,30 @@ describe('limits', () => {
   });
 });
 
+describe('Glob walk limits', () => {
+  const tree = () => project({ 'a.ts': '', 'b.ts': '', 'c.ts': '', 'd.ts': '', 'sub/e.ts': '' });
+
+  it('sees a Stop that fires while the walk is under way', async () => {
+    const ac = new AbortController();
+    setImmediate(() => ac.abort());
+    const glob = find(readOnlyTools(tree(), { globYieldEvery: 1 }), 'Glob');
+    expect(await glob.run({ pattern: '**' }, ac.signal)).toEqual({ text: 'Cancelled.', isError: true });
+  });
+
+  it('stops after the entry cap and says so', async () => {
+    const glob = find(readOnlyTools(tree(), { globMaxEntries: 3 }), 'Glob');
+    const r = await glob.run({ pattern: '**' }, signal);
+    const lines = r.text.split('\n');
+    expect(lines.at(-1)).toBe('Stopped after visiting 3 entries.');
+    expect(lines.length).toBe(4);
+  });
+
+  it('uses 200,000 as the default cap', async () => {
+    const r = await run(project({ 'a.ts': '' }), 'Glob', { pattern: '**' });
+    expect(r.text).not.toContain('Stopped after');
+  });
+});
+
 describe('private folders: exceptions and edges', () => {
   const refusal = { text: 'That folder holds Agent Stream run records and sessions, which are private.', isError: true };
   const out = '.agent-stream/runs/r1/nodes/n1/output.md';
@@ -334,6 +358,17 @@ describe('Write', () => {
     expect(readFileSync(file, 'utf8')).toBe('hi');
     await runTool(cwd, 'Write', { file_path: file, content: 'again' });
     expect(readFileSync(file, 'utf8')).toBe('again');
+  });
+});
+
+describe('Write keeps the mode of an existing file', () => {
+  it.skipIf(process.platform === 'win32')('a 0755 file stays 0755 after Write', async () => {
+    const cwd = project({ 'run.sh': '#!/bin/sh\n' });
+    const file = join(cwd, 'run.sh');
+    chmodSync(file, 0o755);
+    await runTool(cwd, 'Write', { file_path: 'run.sh', content: 'echo hi\n' });
+    expect(readFileSync(file, 'utf8')).toBe('echo hi\n');
+    expect(statSync(file).mode & 0o777).toBe(0o755);
   });
 });
 

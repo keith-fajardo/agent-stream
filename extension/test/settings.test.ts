@@ -36,6 +36,19 @@ describe('readSettings', () => {
     expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 });
   });
 
+  it('uses the default, not the minimum, for a value that is not a number', () => {
+    const values: Record<string, unknown> = {};
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: (key: string) => values[key] } as never);
+    for (const bad of ['', null, true, false, 'abc', undefined, NaN, []]) {
+      values['copilot.maxRequestsPerStep'] = bad;
+      values['copilot.maxRequestsPerTurn'] = bad;
+      values.maxParallel = bad;
+      expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10, maxParallel: 3 });
+    }
+    values['copilot.maxRequestsPerStep'] = '40';
+    expect(readSettings().copilotMaxRequestsPerStep).toBe(40);
+  });
+
   it('declares the Copilot request caps in the manifest with their ranges', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     const props = manifest.contributes.configuration.properties;
