@@ -349,7 +349,8 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand('agentStream.selectModel', () =>
       selectModel({
-        models: async () => (await manager.currentProvider().listModels?.()) ?? [],
+        // An explicit request: a list that failed earlier in this window may be tried once more.
+        models: async () => (await manager.currentProvider().listModels?.({ retry: true })) ?? [],
         current: () => {
           const { model, effort } = readSettings();
           return { model, effort };
@@ -367,7 +368,10 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('agentStream.provider') || e.affectsConfiguration('agentStream.claudePath')) void manager.checkProvider();
       // Runs and planner turns read the defaults when they start; only the tooltip needs refreshing.
-      else if (e.affectsConfiguration('agentStream.model') || e.affectsConfiguration('agentStream.effort')) showAuth(manager.status);
+      else if (e.affectsConfiguration('agentStream.model') || e.affectsConfiguration('agentStream.effort')) {
+        showAuth(manager.status);
+        manager.modelDefaultsChanged();
+      }
     }),
     vscode.commands.registerCommand('agentStream.signInDetails', () =>
       signInDetails(manager.status, {

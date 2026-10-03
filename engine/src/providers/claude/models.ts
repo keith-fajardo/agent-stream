@@ -1,11 +1,17 @@
 import type { ModelInfo, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { isEffortLevel, type EffortLevel, type ModelChoice } from '@agent-stream/shared';
+import { CLI_DEFAULT_MODEL, findModel, isEffortLevel, type EffortLevel, type ModelChoice } from '@agent-stream/shared';
 import { sanitizedEnv } from './auth';
 import type { ModelQueryFn } from './sdk';
 
 export function toModelChoice(info: ModelInfo): ModelChoice {
   const efforts = info.supportsEffort === false ? [] : (info.supportedEffortLevels ?? []).filter(isEffortLevel);
-  return { value: info.value, label: info.displayName || info.value, ...(info.description && { description: info.description }), efforts };
+  return {
+    value: info.value,
+    label: info.displayName || info.value,
+    ...(info.description && { description: info.description }),
+    efforts,
+    ...(info.resolvedModel && info.resolvedModel !== info.value && { resolved: info.resolvedModel }),
+  };
 }
 
 const MODELS_TIMEOUT_MS = 30_000;
@@ -40,15 +46,18 @@ export async function fetchModels(queryFn: ModelQueryFn, claudePath: string, env
 
 /**
  * The SDK's model and effort options for a choice: only what is set. An effort the model's known levels don't include
- * is dropped (`warn` is told), never failing the turn; with the list unknown, or a model it doesn't name, it is kept.
+ * is dropped (`warn` is told), never failing the turn; with the list unknown, or a model it doesn't name, it is kept. A full id
+ * matches the alias row it resolves to; no model matches Claude Code's default row.
  */
 export function modelOptions(choice: { model?: string; effort?: EffortLevel }, known: ModelChoice[] | undefined, warn: (key: string, message: string) => void): Pick<Options, 'model' | 'effort'> {
   const out: Pick<Options, 'model' | 'effort'> = {};
   if (choice.model) out.model = choice.model;
   if (choice.effort) {
-    const entry = choice.model ? known?.find((m) => m.value === choice.model) : undefined;
+    // No model: Claude Code's default runs, so its own default row says which levels there are.
+    const id = choice.model ?? CLI_DEFAULT_MODEL;
+    const entry = findModel(known, id);
     if (entry && !entry.efforts.includes(choice.effort)) {
-      warn(`${choice.model}|${choice.effort}`, `[agent-stream] ${entry.label} (${choice.model}) has no "${choice.effort}" effort level; running without an effort level.`);
+      warn(`${id}|${choice.effort}`, `[agent-stream] ${entry.label} (${id}) has no "${choice.effort}" effort level; running without an effort level.`);
     } else out.effort = choice.effort;
   }
   return out;

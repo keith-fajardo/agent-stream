@@ -64,4 +64,35 @@ describe('selectModel', () => {
     ]);
     expect(d.write).toHaveBeenCalledWith('old', '');
   });
+
+  it("merges Claude Code's default row into Default, which then offers that row's levels", async () => {
+    const { d, quickPick } = deps(['', 'max']);
+    d.models.mockResolvedValueOnce([{ value: 'default', label: 'Default (recommended)', efforts: ['low', 'max'] }, ...MODELS]);
+    await selectModel(d);
+    const [models] = quickPick.mock.calls[0] as unknown as [{ value: string }[]];
+    expect(models.map((i) => i.value)).toEqual(['', 'sonnet', 'haiku']);
+    const [efforts] = quickPick.mock.calls[1] as unknown as [{ value: string }[]];
+    expect(efforts.map((i) => i.value)).toEqual(['', 'low', 'max']);
+    expect(d.write).toHaveBeenCalledWith('', 'max');
+  });
+
+  it('marks the alias row a saved full id resolves to, offering its levels', async () => {
+    const { d, quickPick } = deps(['claude-sonnet-5', 'low'], { model: 'claude-sonnet-5', effort: 'high' });
+    d.models.mockResolvedValueOnce([{ ...MODELS[0], resolved: 'claude-sonnet-5' }, MODELS[1]]);
+    await selectModel(d);
+    const [models] = quickPick.mock.calls[0] as unknown as [{ label: string; value: string }[]];
+    expect(models.map((i) => [i.label, i.value])).toEqual([
+      ['Default', ''],
+      ['$(check) Sonnet', 'sonnet'],
+      ['Haiku', 'haiku'],
+    ]);
+    // The fake picks by value; a saved id that isn't listed as such is not offered twice.
+    expect(d.write).not.toHaveBeenCalled();
+    const again = deps(['sonnet', 'low'], { model: 'claude-sonnet-5', effort: 'high' });
+    again.d.models.mockResolvedValueOnce([{ ...MODELS[0], resolved: 'claude-sonnet-5' }, MODELS[1]]);
+    await selectModel(again.d);
+    const [efforts] = again.quickPick.mock.calls[1] as unknown as [{ label: string; value: string }[]];
+    expect(efforts.map((i) => i.label)).toEqual(['Default', 'low', '$(check) high']);
+    expect(again.d.write).toHaveBeenCalledWith('sonnet', 'low');
+  });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type EffortLevel, type ModelSelection, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
+import { emptyGraph, type EffortLevel, type ModelChoice, type ModelSelection, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 import { CHANGED_SINCE_REVIEW, createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import type { GitExec } from '../src/git';
@@ -1442,9 +1442,43 @@ describe('app: model and effort', () => {
     const { app, graphId } = setupWithGraph({ provider: testProvider({ listModels: async () => MODELS }) });
     const a = client(app);
     await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
-    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'claude', models: MODELS }));
+    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'claude', models: MODELS, defaultEfforts: [] }));
     app.setProvider(testProvider({ id: 'copilot', name: 'GitHub Copilot' }), signedIn);
-    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'copilot', models: [] }));
+    await vi.waitFor(() => expect(a.last('models')).toEqual({ type: 'models', provider: 'copilot', models: [], defaultEfforts: [] }));
+  });
+
+  it("gives Default the levels of the settings' model, else Claude Code's default row, and re-sends them when the settings change", async () => {
+    const listed = [{ value: 'default', label: 'Default (recommended)', efforts: ['low', 'max'] as EffortLevel[] }, ...MODELS];
+    const defaults: ModelSelection = {};
+    const retries: (boolean | undefined)[] = [];
+    const { app, graphId } = setupWithGraph({ provider: testProvider({ listModels: async (o) => (retries.push(o?.retry), listed) }), modelDefaults: () => defaults });
+    const a = client(app);
+    await app.handle(a.client, { type: 'openChat', graphId, sessionId: 'default' });
+    await vi.waitFor(() => expect(a.last('models')?.defaultEfforts).toEqual(['low', 'max']));
+    // A chat opening may retry a failed list once.
+    expect(retries).toEqual([true]);
+    defaults.model = 'sonnet';
+    app.modelDefaultsChanged();
+    await vi.waitFor(() => expect(a.last('models')?.defaultEfforts).toEqual(['low', 'high']));
+    expect(a.all('models')).toHaveLength(2);
+  });
+
+  it('never waits on the model list for a preview: the cached list names the model, else its id', async () => {
+    let known: ModelChoice[] | undefined;
+    const listModels = vi.fn(() => new Promise<ModelChoice[]>(() => {}));
+    const defaults: ModelSelection = { model: 'claude-sonnet-5', effort: 'high' };
+    const { app, graphId } = setupWithGraph({ provider: testProvider({ listModels, knownModels: () => known }), modelDefaults: () => defaults });
+    app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    const c = client(app);
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    expect(c.last('runPreview').preview).toMatchObject({ model: { value: 'claude-sonnet-5', label: 'claude-sonnet-5' }, effort: 'high' });
+    // One background fetch, without a retry; the hanging list never held the dialog up.
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(listModels.mock.calls[0]).toEqual([]);
+    known = [{ value: 'sonnet', label: 'Sonnet', resolved: 'claude-sonnet-5', efforts: ['low', 'high'] }];
+    await app.handle(c.client, { type: 'previewRun', graphId });
+    expect(c.last('runPreview').preview.model).toEqual({ value: 'claude-sonnet-5', label: 'Sonnet' });
+    expect(listModels).toHaveBeenCalledTimes(1);
   });
 
   it('runs with the settings captured at start, records them, and never takes a mid-run change', async () => {
@@ -1452,6 +1486,7 @@ describe('app: model and effort', () => {
     const seen: { node: string; model?: string; effort?: string }[] = [];
     const provider = testProvider({
       listModels: async () => MODELS,
+      knownModels: () => MODELS,
       runStep: async (ctx) => {
         seen.push({ node: ctx.node.id, model: ctx.model, effort: ctx.effort });
         if (ctx.node.id === 'n1') {

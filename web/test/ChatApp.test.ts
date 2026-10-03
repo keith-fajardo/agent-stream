@@ -77,7 +77,7 @@ describe('ChatApp', () => {
       dispatch({ kind: 'server', msg: { type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] } });
       dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
       dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false } });
-      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS, defaultEfforts: [] } });
     });
     const model = el.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
     expect([...model.options].map((o) => o.textContent)).toEqual(['Default', 'Sonnet', 'Haiku']);
@@ -98,7 +98,7 @@ describe('ChatApp', () => {
     await act(async () => {
       dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
       dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'sonnet', effort: 'low' } });
-      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: MODELS, defaultEfforts: [] } });
     });
     const pick = async (label: string, value: string) => {
       const select = el.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement;
@@ -122,7 +122,7 @@ describe('ChatApp', () => {
     await act(async () => {
       dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
       dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'old-model' } });
-      dispatch({ kind: 'server', msg: { type: 'models', provider: 'copilot', models: [{ value: 'gpt', label: 'GPT', efforts: [], unavailable: true }] } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'copilot', models: [{ value: 'gpt', label: 'GPT', efforts: [], unavailable: true }], defaultEfforts: [] } });
     });
     const model = el.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
     expect(model.value).toBe('old-model');
@@ -131,5 +131,56 @@ describe('ChatApp', () => {
       ['GPT (unavailable)', true],
       ['old-model', false],
     ]);
+  });
+  const pickIn = (el: HTMLElement) => async (label: string, value: string) => {
+    const select = el.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement;
+    await act(async () => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
+  const options = (el: HTMLElement, label: string) => [...(el.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement).options].map((o) => o.textContent);
+
+  it("merges Claude Code's default row into Default, which offers that row's levels", async () => {
+    const el = await render();
+    const listed: ModelChoice[] = [{ value: 'default', label: 'Default (recommended)', efforts: ['low', 'max'] }, ...MODELS];
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: listed, defaultEfforts: ['low', 'max'] } });
+    });
+    expect(options(el, 'Model')).toEqual(['Default', 'Sonnet', 'Haiku']);
+    expect(options(el, 'Effort')).toEqual(['Default', 'low', 'max']);
+    await pickIn(el)('Effort', 'max');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', effort: 'max' });
+    // Back to Default from a model: an effort Default offers is kept.
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'plannerModel', graphId: 'g1', sessionId: 'default', model: 'sonnet', effort: 'low' } }));
+    await pickIn(el)('Model', '');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', effort: 'low' });
+  });
+
+  it('never hides a saved effort: a model the list lacks still shows it, so it can be cleared', async () => {
+    const el = await render();
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'old-model', effort: 'high' } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: [], defaultEfforts: [] } });
+    });
+    expect(options(el, 'Effort')).toEqual(['Default', 'high']);
+    expect((el.querySelector('select[aria-label="Effort"]') as HTMLSelectElement).value).toBe('high');
+    await pickIn(el)('Effort', '');
+    expect(posted.at(-1)).toEqual({ type: 'setPlannerModel', graphId: 'g1', sessionId: 'default', model: 'old-model' });
+  });
+
+  it('gives a full model id the levels of the alias row it resolves to', async () => {
+    const el = await render();
+    const listed: ModelChoice[] = [{ value: 'sonnet', label: 'Sonnet', resolved: 'claude-sonnet-5', efforts: ['low', 'high'] }];
+    await act(async () => {
+      dispatch({ kind: 'server', msg: { type: 'chatTarget', target } });
+      dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 'default', chat: [], busy: false, model: 'claude-sonnet-5' } });
+      dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: listed, defaultEfforts: [] } });
+    });
+    expect((el.querySelector('select[aria-label="Model"]') as HTMLSelectElement).value).toBe('claude-sonnet-5');
+    expect(options(el, 'Effort')).toEqual(['Default', 'low', 'high']);
   });
 });

@@ -263,4 +263,22 @@ describe('engines and the default model', () => {
     settings = { ...settings, model: '', effort: '' };
     expect(seen[0].modelDefaults?.()).toEqual({});
   });
+
+  it("tells every engine when the settings' default model or effort changes", () => {
+    const apps: App[] = [];
+    const manager = new EngineManager({
+      ...baseDeps(),
+      settings: () => defaults,
+      createApp: (deps) => {
+        const app = createApp(deps);
+        apps.push(app);
+        return app;
+      },
+    });
+    manager.get(folder('a'));
+    manager.get(folder('b'));
+    const spies = apps.map((a) => vi.spyOn(a, 'modelDefaultsChanged'));
+    manager.modelDefaultsChanged();
+    for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
+  });
 });

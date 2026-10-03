@@ -18,7 +18,7 @@ const done = () => msg({ type: 'result', subtype: 'success', is_error: false, re
 
 const INFOS: ModelInfo[] = [
   { value: 'default', displayName: 'Default (recommended)', description: 'The most capable model', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-  { value: 'sonnet', displayName: 'Sonnet', description: 'Everyday tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high'] },
+  { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Everyday tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high'] },
   { value: 'haiku', displayName: 'Haiku', description: '', supportsEffort: false },
   // Levels listed but effort not supported: no levels offered.
   { value: 'old', displayName: 'Old', description: 'Legacy', supportsEffort: false, supportedEffortLevels: ['low'] },
@@ -113,6 +113,23 @@ describe('Claude provider: model and effort', () => {
     expect(s.calls.slice(3).map((c) => c.options.effort)).toEqual(['medium', 'xhigh', 'max']);
   });
 
+  it("checks a full model id against the alias row it resolves to, and no model against Claude Code's default row", async () => {
+    const s = setup({ infos: async () => [...INFOS.slice(1), { value: 'default', displayName: 'Default (recommended)', description: '', supportsEffort: true, supportedEffortLevels: ['low', 'high'] }] });
+    await s.signIn();
+    await s.provider.listModels!();
+    await s.provider.planTurn(turn({ model: 'claude-sonnet-5', effort: 'high' }));
+    await s.provider.planTurn(turn({ model: 'claude-sonnet-5', effort: 'max' }));
+    await s.provider.planTurn(turn({ effort: 'max' }));
+    await s.provider.planTurn(turn({ effort: 'high' }));
+    expect(s.calls.map((c) => [c.options.model, c.options.effort])).toEqual([
+      ['claude-sonnet-5', 'high'],
+      ['claude-sonnet-5', undefined],
+      [undefined, undefined],
+      [undefined, 'high'],
+    ]);
+    expect(s.log).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the effort while the model list is unknown', async () => {
     const s = setup();
     await s.signIn();
@@ -127,7 +144,7 @@ describe('Claude provider: listModels', () => {
     await s.signIn();
     expect(await s.provider.listModels!()).toEqual([
       { value: 'default', label: 'Default (recommended)', description: 'The most capable model', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-      { value: 'sonnet', label: 'Sonnet', description: 'Everyday tasks', efforts: ['low', 'medium', 'high'] },
+      { value: 'sonnet', label: 'Sonnet', description: 'Everyday tasks', efforts: ['low', 'medium', 'high'], resolved: 'claude-sonnet-5' },
       { value: 'haiku', label: 'Haiku', efforts: [] },
       { value: 'old', label: 'Old', description: 'Legacy', efforts: [] },
     ]);
@@ -152,17 +169,35 @@ describe('Claude provider: listModels', () => {
     expect(s.modelCalls).toHaveLength(1);
   });
 
-  it('returns [] on failure, logs once, and tries again later', async () => {
+  it('returns [] on failure and logs once; the failure stays for the window, with one retry when asked', async () => {
     let fail = true;
     const s = setup({ infos: async () => (fail ? Promise.reject(new Error('boom')) : INFOS) });
     await s.signIn();
     expect(await s.provider.listModels!()).toEqual([]);
     expect(await s.provider.listModels!()).toEqual([]);
+    expect(s.modelCalls).toHaveLength(1);
     expect(s.log).toHaveBeenCalledTimes(1);
     expect(s.log.mock.calls[0][0]).toContain('boom');
-    expect(s.close).toHaveBeenCalledTimes(2);
+    expect(s.close).toHaveBeenCalledTimes(1);
+    // Select Model or a chat opening may try once more; after that the failure stands.
+    expect(await s.provider.listModels!({ retry: true })).toEqual([]);
+    expect(await s.provider.listModels!({ retry: true })).toEqual([]);
+    expect(s.modelCalls).toHaveLength(2);
+    expect(s.log).toHaveBeenCalledTimes(1);
+    expect(s.provider.knownModels!()).toBeUndefined();
+  });
+
+  it('succeeds on the one retry, and knows the list from then on', async () => {
+    let fail = true;
+    const s = setup({ infos: async () => (fail ? Promise.reject(new Error('boom')) : INFOS) });
+    await s.signIn();
+    expect(s.provider.knownModels!()).toBeUndefined();
+    await s.provider.listModels!();
     fail = false;
-    expect(await s.provider.listModels!()).toHaveLength(4);
+    expect(await s.provider.listModels!({ retry: true })).toHaveLength(4);
+    expect(s.provider.knownModels!()).toHaveLength(4);
+    expect(await s.provider.listModels!({ retry: true })).toHaveLength(4);
+    expect(s.modelCalls).toHaveLength(2);
   });
 
   it('returns [] before Claude Code is found, without starting it', async () => {

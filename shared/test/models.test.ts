@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isEffortLevel, modelLine } from '../src/format';
+import { defaultEffortsFor, findModel, menuModels } from '../src/models';
+import type { ModelChoice } from '../src/types';
 import { parseWebviewMessage } from '../src/schemas';
 
 describe('modelLine', () => {
@@ -26,5 +28,31 @@ describe('setPlannerModel', () => {
   });
   it('refuses an unknown effort', () => {
     expect(parseWebviewMessage({ type: 'setPlannerModel', graphId: 'g', sessionId: 's', effort: 'huge' }).ok).toBe(false);
+  });
+});
+
+describe('model lookup', () => {
+  const MODELS: ModelChoice[] = [
+    { value: 'default', label: 'Default (recommended)', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    { value: 'sonnet', label: 'Sonnet', resolved: 'claude-sonnet-5', efforts: ['low', 'high'] },
+    { value: 'claude-opus-4-6', label: 'Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] },
+    { value: 'haiku', label: 'Haiku', efforts: [] },
+  ];
+  it('finds a model by its value, or a full id by the alias row it resolves to', () => {
+    expect(findModel(MODELS, 'sonnet')?.label).toBe('Sonnet');
+    expect(findModel(MODELS, 'claude-sonnet-5')?.label).toBe('Sonnet');
+    expect(findModel(MODELS, 'claude-opus-4-6')?.label).toBe('Opus 4.6');
+    expect(findModel(MODELS, 'nope')).toBeUndefined();
+    expect(findModel(undefined, 'sonnet')).toBeUndefined();
+  });
+  it("gives Default the configured model's levels, else Claude Code's default row's", () => {
+    expect(defaultEffortsFor(MODELS, undefined)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(defaultEffortsFor(MODELS, 'claude-sonnet-5')).toEqual(['low', 'high']);
+    expect(defaultEffortsFor(MODELS, 'haiku')).toEqual([]);
+    expect(defaultEffortsFor(MODELS, 'unknown')).toEqual([]);
+    expect(defaultEffortsFor([], undefined)).toEqual([]);
+  });
+  it("leaves Claude Code's own default row out of the menus: our Default stands for it", () => {
+    expect(menuModels(MODELS).map((m) => m.value)).toEqual(['sonnet', 'claude-opus-4-6', 'haiku']);
   });
 });

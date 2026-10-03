@@ -261,8 +261,11 @@ export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
 /** How hard the model thinks: the Claude Agent SDK's levels. */
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
-/** A model a provider offers. `efforts` is empty when the model has no effort levels; `unavailable` when the provider can't run it yet. */
-export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean };
+/**
+ * A model a provider offers. `efforts` is empty when the model has no effort levels; `unavailable` when the provider can't
+ * run it yet; `resolved` the full id an alias row stands for (sonnet → claude-sonnet-5).
+ */
+export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string };
 /** A model and effort choice; an absent field means Default. */
 export type ModelSelection = { model?: string; effort?: EffortLevel };
 
@@ -312,8 +315,11 @@ export type ServerMessage =
   | { type: 'chatOpened'; graphId: string; sessionId: string; chat: ChatEntry[]; busy: boolean; model?: string; effort?: EffortLevel }
   /** The conversation's model and effort choice changed (absent fields: Default). */
   | { type: 'plannerModel'; graphId: string; sessionId: string; model?: string; effort?: EffortLevel }
-  /** The models the current provider offers, for the chat's Model menu: sent on openChat and when the provider changes. */
-  | { type: 'models'; provider: ProviderId; models: ModelChoice[] }
+  /**
+   * The models the current provider offers, for the chat's Model menu: sent on openChat, when the provider changes and when
+   * the settings' defaults change. `defaultEfforts`: the levels the menu's Default offers (see defaultEffortsFor).
+   */
+  | { type: 'models'; provider: ProviderId; models: ModelChoice[]; defaultEfforts: EffortLevel[] }
   | { type: 'sessions'; sessions: SessionListItem[] }
   | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }

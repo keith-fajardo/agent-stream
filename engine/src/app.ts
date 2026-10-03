@@ -1,5 +1,7 @@
 import type { renameSync } from 'node:fs';
 import {
+  defaultEffortsFor,
+  findModel,
   isWriteCapable,
   refinable,
   validateRunnable,
@@ -112,14 +114,25 @@ export function createApp(d: AppDeps) {
     const m = d.modelDefaults?.() ?? {};
     return { ...(m.model && { model: m.model }), ...(m.effort && { effort: m.effort }) };
   };
-  /** The current provider's models; [] when it can't list them. */
-  const listModels = async (p: AgentProvider = provider): Promise<ModelChoice[]> => {
+  /** A provider's models; [] when it can't list them. `retry`: a failed list may be tried once more (a chat opening). */
+  const listModels = async (p: AgentProvider = provider, o?: { retry?: boolean }): Promise<ModelChoice[]> => {
     try {
-      return (await p.listModels?.()) ?? [];
+      return (await (o ? p.listModels?.(o) : p.listModels?.())) ?? [];
     } catch (e) {
       console.error('[agent-stream] could not list models', e);
       return [];
     }
+  };
+  /** Providers asked for their models in the background (a preview with nothing cached): once each per window. */
+  const prefetched = new WeakSet<AgentProvider>();
+  /** The models already listed, never waiting; the first miss starts one background fetch. */
+  const knownModels = (): ModelChoice[] | undefined => {
+    const known = provider.knownModels?.();
+    if (!known && provider.listModels && !prefetched.has(provider)) {
+      prefetched.add(provider);
+      void listModels(provider);
+    }
+    return known;
   };
   const paths = projectPaths(d.projectDir);
   const migrationWarnings = migrateProjectFolder(d.projectDir, d.rename);
@@ -347,11 +360,18 @@ export function createApp(d: AppDeps) {
     const { model, effort } = sessions.plannerState(sessionId, graphId);
     return { ...(model && { model }), ...(effort && { effort }) };
   }
-  /** Sends the provider's models to one client: after it opens a chat, and when the provider changes. A client that left gets nothing. */
-  function sendModels(client: Client, p: AgentProvider = provider): void {
-    void listModels(p).then((models) => {
-      if (clients.has(client) && p === provider) client.send({ type: 'models', provider: p.id, models });
+  /**
+   * Sends the provider's models to one client, with the levels the menu's Default offers: after it opens a chat (which may
+   * retry a failed list once), when the provider changes, and when the settings' defaults change. A client that left gets nothing.
+   */
+  function sendModels(client: Client, p: AgentProvider = provider, o?: { retry?: boolean }): void {
+    void listModels(p, o).then((models) => {
+      if (clients.has(client) && p === provider) client.send({ type: 'models', provider: p.id, models, defaultEfforts: defaultEffortsFor(models, modelDefaults().model) });
     });
+  }
+  /** The settings' default model or effort changed: the chats' Default menus follow. Runs and turns read them when they start. */
+  function modelDefaultsChanged(): void {
+    for (const c of chatSubscriptions.keys()) sendModels(c);
   }
 
   async function preview(
@@ -456,7 +476,7 @@ export function createApp(d: AppDeps) {
         chatSubscriptions.set(client, { graphId: msg.graphId, sessionId: msg.sessionId });
         const busy = planner.isBusy(msg.sessionId, msg.graphId);
         const choice = choiceOf(msg.sessionId, msg.graphId);
-        if (provider.listModels) sendModels(client);
+        if (provider.listModels) sendModels(client, provider, { retry: true });
         let chat: ChatEntry[];
         try {
           chat = sessions.chatLog(msg.sessionId).read(msg.graphId);
@@ -514,9 +534,9 @@ export function createApp(d: AppDeps) {
         if (!r.ok) return error(r.error);
         const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
-        // The dialog's Model line: what agent steps would get if the run started now.
+        // The dialog's Model line: what agent steps would get if the run started now. Never waits for the model list.
         const { model, effort } = modelDefaults();
-        const label = model && ((await listModels()).find((m) => m.value === model)?.label ?? model);
+        const label = model && (findModel(knownModels(), model)?.label ?? model);
         const shown = { ...p.outcome.preview, ...(model && label && { model: { value: model, label } }), ...(effort && { effort }) };
         client.send({ type: 'runPreview', preview: shown, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
@@ -680,6 +700,7 @@ export function createApp(d: AppDeps) {
     deleteSession,
     saveSessionTabs,
     setProvider,
+    modelDefaultsChanged,
     provider: () => provider,
     status: () => status,
     dispose,

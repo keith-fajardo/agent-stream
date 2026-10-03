@@ -3,6 +3,7 @@ import type {
   ApprovalRequest,
   ChatEntry,
   ChatTarget,
+  EffortLevel,
   CheckoutInfo,
   Graph,
   GraphListItem,
@@ -56,6 +57,8 @@ export type State = {
   chatTarget?: ChatTarget;
   /** The current provider's models, for the chat's Model menu. */
   models: ModelChoice[];
+  /** The levels the chat's Default offers: the settings' model's, else Claude Code's default row's. */
+  defaultEfforts: EffortLevel[];
   /** The shown conversation's own model and effort choice, as the engine last confirmed it (absent fields: Default). */
   plannerModel: ModelSelection;
   confirm?: ConfirmRequest;
@@ -71,7 +74,7 @@ export type State = {
   variablesDialog?: { focus?: string; addRow?: boolean };
 };
 
-export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -225,7 +228,7 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'plannerModel':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, plannerModel: selection(msg) } : state;
     case 'models':
-      return { ...state, models: msg.models };
+      return { ...state, models: msg.models, defaultEfforts: msg.defaultEfforts ?? [] };
     case 'chatEntry':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':

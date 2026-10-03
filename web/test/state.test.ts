@@ -24,8 +24,9 @@ describe('client state', () => {
   it("keeps the provider's models and the open conversation's model choice", () => {
     const target = { graphId: 'g', graphName: 'G', sessionId: 's', sessionName: 'S' };
     const models = [{ value: 'sonnet', label: 'Sonnet', efforts: ['high' as const] }];
-    let s = apply(server({ type: 'chatTarget', target }), server({ type: 'models', provider: 'claude', models }));
+    let s = apply(server({ type: 'chatTarget', target }), server({ type: 'models', provider: 'claude', models, defaultEfforts: ['low'] }));
     expect(s.models).toEqual(models);
+    expect(s.defaultEfforts).toEqual(['low']);
     expect(s.plannerModel).toEqual({});
     s = reduce(s, server({ type: 'chatOpened', graphId: 'g', sessionId: 's', chat: [], busy: false, model: 'sonnet', effort: 'high' }));
     expect(s.plannerModel).toEqual({ model: 'sonnet', effort: 'high' });

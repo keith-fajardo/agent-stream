@@ -166,6 +166,11 @@ export class EngineManager {
     return app;
   }
 
+  /** The settings' default model or effort changed: every engine's chats update their Default menus. */
+  modelDefaultsChanged(): void {
+    for (const e of this.engines.values()) e.app.modelDefaultsChanged();
+  }
+
   approvals(): FolderApproval[] {
     return [...this.engines.values()].flatMap((e) => e.app.broker.pending().map((request) => ({ folder: e.folder, request })));
   }

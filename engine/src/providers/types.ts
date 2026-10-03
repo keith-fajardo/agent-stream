@@ -31,6 +31,11 @@ export interface AgentProvider {
   folderProblem?(projectDir: string): string | undefined;
   runStep(ctx: NodeContext, gate: ToolGate): Promise<NodeOutcome>;
   planTurn(turn: PlannerTurn): Promise<PlannerTurnResult>;
-  /** The models this provider offers, for the Model menus; [] when they can't be listed (the menus then offer only Default). */
-  listModels?(): Promise<ModelChoice[]>;
+  /**
+   * The models this provider offers, for the Model menus; [] when they can't be listed (the menus then offer only Default).
+   * A failure stands for the provider's life, except that one call with `retry` may try again.
+   */
+  listModels?(o?: { retry?: boolean }): Promise<ModelChoice[]>;
+  /** The models already listed, without waiting or starting anything; undefined until a list succeeded. */
+  knownModels?(): ModelChoice[] | undefined;
 }
