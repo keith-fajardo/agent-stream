@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ApprovalBroker } from '../src/approvals';
-import { ChatModelError } from '../src/agentLoop/chatModel';
+import { ChatModelError, type ChatPart } from '../src/agentLoop/chatModel';
 import { toLoopTools } from '../src/agentLoop/graphLoopTools';
 import { lastAssistantText, runAgentLoop } from '../src/agentLoop/loop';
 import { builtinTools, type LoopTool } from '../src/agentLoop/tools';
@@ -16,7 +16,15 @@ import { allowAll, deferred, fakeChatModel, textPart, toolCallPart, untilAborted
 const noShell: RunShell = async () => ({ exitCode: 0, output: '' });
 const tmp = () => mkdtempSync(join(tmpdir(), 'loop-'));
 
-function loop(o: { replies: FakeReply[]; tools?: LoopTool[]; gate?: ToolGate; maxRequests?: number; signal?: AbortSignal; cwd?: string }) {
+function loop(o: {
+  replies: FakeReply[];
+  tools?: LoopTool[];
+  gate?: ToolGate;
+  maxRequests?: number;
+  signal?: AbortSignal;
+  cwd?: string;
+  onToolResult?: (callId: string, text: string, isError: boolean) => void;
+}) {
   const cwd = o.cwd ?? tmp();
   const { model, requests } = fakeChatModel(o.replies);
   const log: unknown[][] = [];
@@ -31,7 +39,10 @@ function loop(o: { replies: FakeReply[]; tools?: LoopTool[]; gate?: ToolGate; ma
     capMessage: 'Stopped: cap reached.',
     onText: (text) => log.push(['text', text]),
     onToolCall: (callId, name, input) => log.push(['call', callId, name, input]),
-    onToolResult: (callId, text, isError) => log.push(['result', callId, text, isError]),
+    onToolResult: (callId, text, isError) => {
+      log.push(['result', callId, text, isError]);
+      o.onToolResult?.(callId, text, isError);
+    },
   });
   return { result, requests, log, cwd };
 }
@@ -137,6 +148,10 @@ describe('runAgentLoop', () => {
     const { result, requests } = loop({ cwd, maxRequests: 3, replies: [read(), read(), read(), [textPart('never sent')]] });
     expect(await result).toMatchObject({ ok: false, capped: true, error: 'Stopped: cap reached.', requests: 3 });
     expect(requests).toHaveLength(3);
+    // The last request's tool results stay in the messages (R4): three rounds of call and result after the task.
+    const { messages } = await result;
+    expect(messages).toHaveLength(7);
+    expect(messages.at(-1)).toMatchObject({ role: 'user', content: [{ type: 'toolResult', callId: 'c', text: expect.stringContaining('x') }] });
   });
 
   it('is cancelled by a Stop during a request', async () => {
@@ -168,6 +183,133 @@ describe('runAgentLoop', () => {
     const message = 'Copilot refused the request (quota or policy): monthly limit';
     const { result } = loop({ replies: [new ChatModelError('blocked', message)] });
     expect(await result).toEqual({ ok: false, error: message, requests: 1, messages: [userText('Do the task.')] });
+  });
+
+  it('treats a cap that is not a number of at least 1 as 1', async () => {
+    for (const maxRequests of [Number.NaN, 0, -3, Number.POSITIVE_INFINITY]) {
+      const cwd = tmp();
+      writeFileSync(join(cwd, 'a.txt'), 'x');
+      const read = () => [toolCallPart('c', 'Read', { file_path: 'a.txt' })];
+      const { result, requests } = loop({ cwd, maxRequests, replies: [read(), read(), [textPart('never sent')]] });
+      expect(await result).toMatchObject({ ok: false, capped: true, requests: 1 });
+      expect(requests).toHaveLength(1);
+    }
+  });
+
+  it('answers every call of a round stopped mid-way with Cancelled., and runs no later call', async () => {
+    const ac = new AbortController();
+    const started = deferred<void>();
+    const slow: LoopTool = {
+      spec: { name: 'Slow', description: 'Waits.', inputSchema: { type: 'object' } },
+      gateName: 'Slow',
+      run: async (_input, signal) => {
+        started.resolve();
+        return untilAborted(signal);
+      },
+    };
+    const second = vi.fn(async () => ({ text: 'ran' }));
+    const decide = vi.fn(allowAll.decide);
+    const fast: LoopTool = { spec: { name: 'Fast', description: 'Returns.', inputSchema: { type: 'object' } }, gateName: 'Fast', run: second };
+    const { result } = loop({
+      signal: ac.signal,
+      gate: { ...allowAll, decide },
+      tools: [slow, fast],
+      replies: [[toolCallPart('c1', 'Slow', {}), toolCallPart('c2', 'Fast', {})]],
+    });
+    await started.promise;
+    ac.abort();
+    const r = await result;
+    expect(r).toMatchObject({ ok: false, cancelled: true });
+    expect(r.messages.at(-2)).toEqual({ role: 'assistant', content: [toolCallPart('c1', 'Slow', {}), toolCallPart('c2', 'Fast', {})] });
+    expect(r.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'toolResult', callId: 'c1', text: 'Cancelled.', isError: true },
+        { type: 'toolResult', callId: 'c2', text: 'Cancelled.', isError: true },
+      ],
+    });
+    expect(second).not.toHaveBeenCalled();
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not run a tool when Stop lands while the gate decides', async () => {
+    const ac = new AbortController();
+    const run = vi.fn(async () => ({ text: 'ran' }));
+    const tool: LoopTool = { spec: { name: 'Act', description: 'Acts.', inputSchema: { type: 'object' } }, gateName: 'Act', run };
+    const gate: ToolGate = {
+      ...allowAll,
+      decide: async () => {
+        ac.abort();
+        return { allow: true, by: 'user' };
+      },
+    };
+    const { result } = loop({ signal: ac.signal, gate, tools: [tool], replies: [[toolCallPart('c1', 'Act', {})]] });
+    const r = await result;
+    expect(r).toMatchObject({ ok: false, cancelled: true });
+    expect(run).not.toHaveBeenCalled();
+    expect(r.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'toolResult', callId: 'c1', text: 'Cancelled.', isError: true }] });
+  });
+
+  it('keeps the messages well-formed when a callback throws mid-round', async () => {
+    const cwd = tmp();
+    writeFileSync(join(cwd, 'a.txt'), 'x');
+    const { result } = loop({
+      cwd,
+      onToolResult: () => {
+        throw new Error('boom');
+      },
+      replies: [[toolCallPart('c1', 'Read', { file_path: 'a.txt' }), toolCallPart('c2', 'Read', { file_path: 'a.txt' })]],
+    });
+    const r = await result;
+    expect(r).toMatchObject({ ok: false, error: 'boom' });
+    expect(r.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'toolResult', callId: 'c1', text: expect.stringContaining('x') },
+        { type: 'toolResult', callId: 'c2', text: 'Cancelled.', isError: true },
+      ],
+    });
+  });
+
+  it('gives a missing, empty or repeated callId a unique generated one, in the call and its result', async () => {
+    const cwd = tmp();
+    writeFileSync(join(cwd, 'a.txt'), 'x');
+    const input = { file_path: 'a.txt' };
+    const noId = { type: 'toolCall', name: 'Read', input } as unknown as ChatPart;
+    const { result, requests, log } = loop({
+      cwd,
+      replies: [[toolCallPart('', 'Read', input), toolCallPart('call_1', 'Read', input), toolCallPart('call_1', 'Read', input), noId], [textPart('Done.')]],
+    });
+    expect(await result).toMatchObject({ ok: true, text: 'Done.' });
+    const ids = ['call_2', 'call_1', 'call_3', 'call_4'];
+    const [assistant, results] = requests[1].messages.slice(-2);
+    expect(assistant.content.map((p) => (p.type === 'toolCall' ? p.callId : null))).toEqual(ids);
+    expect(results.content.map((p) => (p.type === 'toolResult' ? p.callId : null))).toEqual(ids);
+    expect(log.filter((e) => e[0] === 'call').map((e) => e[1])).toEqual(ids);
+    expect(log.filter((e) => e[0] === 'result').map((e) => e[1])).toEqual(ids);
+  });
+
+  it('refuses two tools with the same name before sending anything', async () => {
+    const cwd = tmp();
+    const tools = builtinTools({ cwd, runShell: noShell, readOnly: true });
+    const { result, requests } = loop({ cwd, replies: [], tools: [...tools, { ...tools[0], gateName: 'Other' }] });
+    await expect(result).rejects.toThrow('Two tools are named Read.');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('records nothing for an empty reply and ends with empty text', async () => {
+    for (const parts of [[], [textPart('')]]) {
+      const { result, log } = loop({ replies: [parts] });
+      expect(await result).toEqual({ ok: true, text: '', requests: 1, messages: [userText('Do the task.')] });
+      expect(log).toEqual([]);
+    }
+  });
+
+  it('answers a tool call with undefined input or an empty name with an error, and carries on', async () => {
+    const { result, log } = loop({ replies: [[toolCallPart('c1', 'Read', undefined), toolCallPart('c2', '', {})], [textPart('OK.')]] });
+    expect(await result).toMatchObject({ ok: true, text: 'OK.' });
+    expect(log).toContainEqual(['result', 'c1', expect.stringContaining('file_path'), true]);
+    expect(log).toContainEqual(['result', 'c2', 'Unknown tool .', true]);
   });
 
   it('refuses Read, Grep and Glob on private files through a real step gate, without asking', async () => {
