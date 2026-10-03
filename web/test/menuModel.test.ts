@@ -91,6 +91,18 @@ describe('menus', () => {
     expect(rerun['Re-run from selected step…'].enabled).toBe(true);
   });
 
+  it('has Export Run Report… in Run, enabled when a run is selected, posting exportRunReport for that run', () => {
+    expect(items(base(), 'run')['Export Run Report…'].enabled).toBe(false);
+    const selected = items(base({ run: run('succeeded') }), 'run')['Export Run Report…'];
+    expect(selected.enabled).toBe(true);
+    // Running the item acts on the live store's selected run.
+    dispatch({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph, runs: [], variableValues: {} } });
+    dispatch({ kind: 'server', msg: { type: 'run', run: run('succeeded'), select: true } });
+    vi.mocked(post).mockClear();
+    selected.run();
+    expect(vi.mocked(post).mock.calls).toEqual([[{ type: 'exportRunReport', runId: 'r1' }]]);
+  });
+
   it("counts only this graph's approvals in Approve all", () => {
     const s = base({ approvals: [approval('a1', 'g'), approval('a2', 'other'), approval('a3', 'g')] });
     expect(items(s, 'run')['Approve all (2)'].enabled).toBe(true);

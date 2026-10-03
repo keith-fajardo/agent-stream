@@ -2,9 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type CheckoutInfo, type RunSummary } from '@agent-stream/shared';
+import { emptyGraph, type CheckoutInfo, type RunMeta, type RunSummary } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
+const { post } = await import('../src/bridge');
 const { dispatch } = await import('../src/store');
 const { TopBar } = await import('../src/components/TopBar');
 
@@ -81,5 +82,26 @@ describe('TopBar run picker', () => {
     const runs: RunSummary[] = [{ id: '20261003-130000-dddd', graphId: 'g', status: 'succeeded', startedAt: 't', provider: 'copilot', model: 'auto', effort: 'high' }];
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs } }));
     expect(container.querySelector('option')?.title).toBe('Model: auto · Effort: not supported');
+  });
+});
+
+describe('TopBar Report button', () => {
+  const report = () => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Report') as HTMLButtonElement | undefined;
+  const summary: RunSummary = { id: '20261003-140000-eeee', graphId: 'g', status: 'succeeded', startedAt: 't' };
+
+  it('sits next to the run picker, disabled until a run is selected', async () => {
+    expect(report()).toBeUndefined();
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs: [summary] } }));
+    expect(report()?.disabled).toBe(true);
+  });
+
+  it('posts exportRunReport for the selected run', async () => {
+    const run: RunMeta = { id: summary.id, graphId: 'g', status: 'succeeded', startedAt: 't', snapshot: emptyGraph('g', 'G', 't'), nodes: {} };
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runs', graphId: 'g', runs: [summary] } }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'run', run, select: true } }));
+    expect(report()?.disabled).toBe(false);
+    vi.mocked(post).mockClear();
+    await act(async () => report()!.click());
+    expect(vi.mocked(post).mock.calls).toEqual([[{ type: 'exportRunReport', runId: summary.id }]]);
   });
 });

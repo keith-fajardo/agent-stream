@@ -45,6 +45,11 @@ export function TopBar() {
           })}
         </select>
       )}
+      {runs.length > 0 && (
+        <button disabled={!run} title="Export Run Report: save the selected run's steps, approvals and outputs as Markdown" onClick={actions.exportRunReport}>
+          Report
+        </button>
+      )}
       {graph &&
         (running ? (
           <button className="danger" onClick={actions.stop}>

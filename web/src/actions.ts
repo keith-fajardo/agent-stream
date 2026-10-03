@@ -104,6 +104,11 @@ export const actions = {
   split(nodeId: string): void {
     post({ type: 'splitStep', nodeId });
   },
+  /** Export Run Report: the extension saves the selected run's Markdown report and opens it. */
+  exportRunReport(): void {
+    const { run } = getState();
+    if (run) post({ type: 'exportRunReport', runId: run.id });
+  },
   addVariable(): void {
     dispatch({ kind: 'openVariables', addRow: true });
   },

@@ -75,6 +75,8 @@ export function buildMenus(s: State): Menu[] {
         item('Re-run from selected step…', signedIn && !running && selected && s.runs.length > 0, actions.rerunFromSelected),
         SEPARATOR,
         item(`Approve all (${pending})`, pending > 0, actions.approveAll),
+        SEPARATOR,
+        item('Export Run Report…', !!s.run, actions.exportRunReport),
       ],
     },
     { id: 'variables', label: 'Variables', items: variableItems(s) },
