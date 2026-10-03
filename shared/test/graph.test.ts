@@ -57,6 +57,16 @@ describe('applyOp', () => {
     expectError(g, { type: 'addNode', node: { title: '   ', kind: 'agent' } }, 'needs a title');
   });
 
+  it('stores a description on add and update', () => {
+    let g = build([{ type: 'addNode', node: { title: 'Build', kind: 'agent', prompt: 'p', description: 'Builds the new model.' } }]);
+    expect(g.nodes[0].description).toBe('Builds the new model.');
+    const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { description: 'Builds orders_v2 in dev.' } }, 'user', T2);
+    if (!r.ok) throw new Error(r.error);
+    g = r.graph;
+    expect(g.nodes[0].description).toBe('Builds orders_v2 in dev.');
+    expect(g.nodes[0].title).toBe('Build');
+  });
+
   it('allows empty prompts while drafting', () => {
     const g = build([{ type: 'addNode', node: { title: 'draft', kind: 'agent', prompt: '' } }]);
     expect(g.nodes[0].prompt).toBe('');
@@ -159,6 +169,18 @@ describe('reusableNodeIds', () => {
     expect([...reusableNodeIds(r.graph, { snapshot: wide, nodes: allOk(wide) }, 'n2')]).toEqual(['n1']);
   });
 
+  it('re-runs an agent step whose own description changed, but not a command step', () => {
+    const before = build([agent('a'), cmd('b', 'echo hi')]);
+    const now: Graph = {
+      ...before,
+      nodes: before.nodes.map((n) => ({ ...n, description: 'changed' })),
+    };
+    const nodes: Record<string, NodeRunState> = { n1: { status: 'succeeded' }, n2: { status: 'succeeded' } };
+    const rendered: RenderedRun = { goal: '', instructions: '', nodes: { n1: 'do a', n2: 'echo hi' } };
+    const source = { snapshot: before, nodes, rendered };
+    expect(reusableNodeIds(now, source, undefined, rendered)).toEqual(new Set(['n2']));
+  });
+
   it('compares rendered text for reuse when both runs have it', () => {
     const g = build([cmd('build', 'dbt build -s {{ model }}'), agent('check'), link('n1', 'n2')]);
     const nodes: Record<string, NodeRunState> = { n1: { status: 'succeeded' }, n2: { status: 'succeeded' } };
@@ -173,6 +195,12 @@ describe('reusableNodeIds', () => {
 });
 
 describe('contentSignature', () => {
+  it('changes when a description changes', () => {
+    const a = build([agent('T')]);
+    const b = { ...a, nodes: [{ ...a.nodes[0], description: 'x' }] };
+    expect(contentSignature(a)).not.toBe(contentSignature(b));
+  });
+
   it('changes for edits but not for layout', () => {
     const g = build([agent('a'), cmd('b', 'echo hi'), link('n1', 'n2')]);
     const moved = applyOp(g, { type: 'moveNode', id: 'n1', position: { x: 5, y: 5 } }, 'user', T2);

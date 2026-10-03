@@ -67,6 +67,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .step { width: 220px; min-height: 70px; padding: 8px 10px; border-radius: 8px; border: 2px solid var(--border); background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
 .step.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
 .step-title { font-weight: 600; display: flex; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
+.step-desc { margin-top: 4px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .kind-icon { color: var(--muted); font-family: ui-monospace, monospace; }
 .step-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }
 .by-agent { color: var(--info); }

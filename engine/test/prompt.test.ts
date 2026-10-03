@@ -41,6 +41,25 @@ Full output: .agent-stream/runs/r/nodes/n2/output.md
 `);
   });
 
+  it('puts the step\u2019s description above its prompt, and earlier steps\u2019 descriptions in their headings', () => {
+    const g = graph('');
+    const n1 = node('n1', 'command', { title: 'Build old', command: 'dbt build -s orders', description: 'Builds the current orders model.' });
+    const n2 = node('n2', 'agent', { title: 'Compare', prompt: 'Compare row counts.', description: 'Checks the new model matches.' });
+    const text = buildNodePrompt(g, n2, [{ node: n1, state: { status: 'succeeded', exitCode: 0, durationMs: 3200 }, output: 'ok', outputPath: 'out.md' }]);
+    expect(text).toContain('# Your step: Compare\nIn short: Checks the new model matches.\nCompare row counts.');
+    expect(text).toContain('## n1 \u00b7 Build old: Builds the current orders model. (command `dbt build -s orders`, exit 0, 3.2 s)');
+  });
+
+  it('puts an agent step\u2019s description in its heading, and ignores a blank one', () => {
+    const text = buildNodePrompt(graph(''), node('n3', 'agent', { prompt: 'x' }), [
+      { node: node('n1', 'agent', { title: 'Plan', description: 'Plans the work.' }), state: { status: 'succeeded' }, output: 'o', outputPath: 'p1' },
+      { node: node('n2', 'agent', { title: 'Do', description: '   ' }), state: { status: 'succeeded' }, output: 'o', outputPath: 'p2' },
+    ]);
+    expect(text).toContain('## n1 \u00b7 Plan: Plans the work. (agent, succeeded)');
+    expect(text).toContain('## n2 \u00b7 Do (agent, succeeded)');
+    expect(buildNodePrompt(graph(''), node('n1', 'agent', { prompt: 'x', description: ' ' }), [])).not.toContain('In short');
+  });
+
   it('omits empty sections and marks missing output', () => {
     expect(buildNodePrompt(graph('  '), node('n1', 'agent', { prompt: 'Do it.' }), [])).toBe('# Your step: Title n1\nDo it.\n');
     const prompt = buildNodePrompt(graph(''), node('n2', 'agent', { prompt: 'x' }), [

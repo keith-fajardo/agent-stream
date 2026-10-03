@@ -57,6 +57,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         id,
         title,
         kind: op.node.kind,
+        description: op.node.description,
         prompt: op.node.prompt,
         command: op.node.command,
         timeoutSec: op.node.timeoutSec,
@@ -193,7 +194,7 @@ export function contentSignature(g: Graph): string {
   return JSON.stringify({
     goal: g.goal,
     instructions: g.instructions,
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]),
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]),
     edges: g.edges.map((e) => e.id).sort(),
   });
 }
@@ -218,7 +219,7 @@ function sameSet(a: string[], b: string[]): boolean {
 /**
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
  * `fromNodeId`, did not succeed last time, changed kind or rendered prompt/command (the template,
- * for runs recorded before rendering), or gained/lost an upstream edge — and so does everything
+ * for runs recorded before rendering), for an agent step changed its own description, or gained/lost an upstream edge — and so does everything
  * downstream of it. Everything else is reused.
  */
 export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun): Set<string> {
@@ -233,7 +234,8 @@ export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: st
       before !== undefined && now !== undefined
         ? before === now
         : (prev?.prompt ?? '') === (n.prompt ?? '') && (prev?.command ?? '') === (n.command ?? '');
-    const sameDefinition = !!prev && prev.kind === n.kind && sameText;
+    const sameDescription = n.kind !== 'agent' || (prev?.description ?? '') === (n.description ?? '');
+    const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     if (!succeeded || !sameDefinition || !sameInputs) seeds.add(n.id);
   }

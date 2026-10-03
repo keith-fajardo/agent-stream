@@ -7,11 +7,13 @@ const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
 const nodeKind = z.enum(['agent', 'command']);
 const timeoutSec = z.number().positive();
+const description = z.string().max(2000).optional();
 
 const graphNodeSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   title: z.string(),
   kind: nodeKind,
+  description,
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),
@@ -63,6 +65,7 @@ const newNode = z.object({
   id: z.string().optional(),
   title: z.string(),
   kind: nodeKind,
+  description,
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),
@@ -72,6 +75,7 @@ const newNode = z.object({
 const nodePatch = z.object({
   title: z.string().optional(),
   kind: nodeKind.optional(),
+  description,
   prompt: z.string().optional(),
   command: z.string().optional(),
   timeoutSec: timeoutSec.optional(),

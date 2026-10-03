@@ -6,6 +6,8 @@ export type GraphNode = {
   id: string;
   title: string;
   kind: NodeKind;
+  /** One plain-language sentence for people: what the step does and why. */
+  description?: string;
   prompt?: string;
   command?: string;
   timeoutSec?: number;
@@ -37,6 +39,7 @@ export type NewNodeInput = {
   id?: string;
   title: string;
   kind: NodeKind;
+  description?: string;
   prompt?: string;
   command?: string;
   timeoutSec?: number;
@@ -46,6 +49,7 @@ export type NewNodeInput = {
 export type NodePatch = {
   title?: string;
   kind?: NodeKind;
+  description?: string;
   prompt?: string;
   command?: string;
   timeoutSec?: number;
@@ -106,7 +110,7 @@ export type NodeRunState = {
 export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
 
 /** `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no value, or it has a problem). */
-export type PreviewStep = { id: string; title: string; kind: NodeKind; text?: string; reused: boolean };
+export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
 export type RunPreview = {

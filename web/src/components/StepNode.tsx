@@ -15,6 +15,11 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
         <span className="kind-icon">{node.kind === 'agent' ? '✦' : '$'}</span>
         {node.title}
       </div>
+      {node.description?.trim() && (
+        <div className="step-desc" title={node.description}>
+          {node.description}
+        </div>
+      )}
       <div className="step-meta">
         <span>{node.id}</span>
         {node.updatedBy === 'agent' && <span className="by-agent">by agent</span>}

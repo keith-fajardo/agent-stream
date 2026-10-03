@@ -100,6 +100,18 @@ describe('planner graph tools', () => {
     });
   });
 
+  it('stores a description from add_node, changes only it with update_node, and shows it in get_graph', async () => {
+    const s = setup();
+    await s.call('add_node', { kind: 'agent', title: 'Check', prompt: 'check', description: 'Checks the build.' });
+    expect(s.graphStore.get(s.graphId).nodes[0].description).toBe('Checks the build.');
+    expect(await s.call('update_node', { id: 'n1', description: 'Checks the new model matches.' })).toEqual({ text: 'Updated n1.', isError: false });
+    expect(s.graphStore.get(s.graphId).nodes[0]).toMatchObject({ title: 'Check', prompt: 'check', description: 'Checks the new model matches.' });
+    const text = (await s.call('get_graph')).text;
+    expect(text).toContain('"description"');
+    expect(JSON.parse(text).nodes[0].description).toBe('Checks the new model matches.');
+    expect(s.tools.find((t) => t.name === 'add_node')?.description).toContain('`description` is one plain-language sentence for people saying what the step does and why.');
+  });
+
   it('asks the user to start runs instead of starting them', async () => {
     const s = setup();
     expect((await s.call('request_run', { fromNodeId: 'n1' })).isError).toBe(false);

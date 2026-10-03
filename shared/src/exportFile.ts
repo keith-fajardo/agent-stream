@@ -8,7 +8,7 @@ const LEGACY_EXPORT_FORMAT = 'claude-stream/graph';
 export const EXPORT_VERSION = 1;
 export const MAX_IMPORT_CHARS = 1024 * 1024;
 
-export type ExportedNode = Pick<GraphNode, 'id' | 'title' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'position'>;
+export type ExportedNode = Pick<GraphNode, 'id' | 'title' | 'kind' | 'description' | 'prompt' | 'command' | 'timeoutSec' | 'position'>;
 export type ExportFile = {
   format: typeof EXPORT_FORMAT;
   version: typeof EXPORT_VERSION;
@@ -28,7 +28,7 @@ export function toExportFile(graph: Graph, now: string): ExportFile {
       instructions: graph.instructions,
       variables: graph.variables.map(({ name, description }) => ({ name, description })),
       // JSON round trip drops fields that are undefined.
-      nodes: graph.nodes.map(({ id, title, kind, prompt, command, timeoutSec, position }) => JSON.parse(JSON.stringify({ id, title, kind, prompt, command, timeoutSec, position })) as ExportedNode),
+      nodes: graph.nodes.map(({ id, title, kind, description, prompt, command, timeoutSec, position }) => JSON.parse(JSON.stringify({ id, title, kind, description, prompt, command, timeoutSec, position })) as ExportedNode),
       edges: graph.edges.map(({ from, to }) => ({ from, to })),
     },
   };

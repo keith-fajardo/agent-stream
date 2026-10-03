@@ -92,6 +92,10 @@ describe('Planner', () => {
     expect(PLANNER_APPEND).toContain('kind "agent" is a separate AI agent run');
   });
 
+  it('tells the planner to write a description for every step', () => {
+    expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people');
+  });
+
   it('resumes the session and tells the planner about user edits since its last turn', async () => {
     const s = setup([ran(), ran()]);
     await s.planner.send('a', s.graphId, 'first');

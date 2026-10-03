@@ -113,6 +113,20 @@ describe('format', () => {
     ).toEqual(['Queued', 'Running', 'Waiting approval', 'Succeeded', 'Failed', 'Not run', 'Cancelled', 'Reused', 'Interrupted']);
   });
 
+  it('loads graph files with and without step descriptions, and caps their length', () => {
+    const n = (extra: object) => ({ id: 'n1', title: 'T', kind: 'agent', ...extra });
+    const ok = parseGraph({ id: 'g', name: 'G', nodes: [n({}), { ...n({ description: 'Does a thing.' }), id: 'n2' }] });
+    expect(ok.ok && ok.graph.nodes.map((x) => x.description)).toEqual([undefined, 'Does a thing.']);
+    expect(parseGraph({ id: 'g', name: 'G', nodes: [n({ description: 'x'.repeat(2001) })] }).ok).toBe(false);
+  });
+
+  it('accepts a description in addNode and updateNode ops', () => {
+    const add = { type: 'op', graphId: 'g', op: { type: 'addNode', node: { title: 'T', kind: 'agent', description: 'd' } } };
+    const upd = { type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { description: 'd' } } };
+    expect(parseWebviewMessage(add)).toEqual({ ok: true, kind: 'engine', msg: add });
+    expect(parseWebviewMessage(upd)).toEqual({ ok: true, kind: 'engine', msg: upd });
+  });
+
   it('loads graph files written before instructions existed', () => {
     const r = parseGraph({ id: 'g', name: 'G' });
     expect(r.ok && r.graph.instructions).toBe('');

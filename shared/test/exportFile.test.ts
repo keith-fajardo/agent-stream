@@ -66,6 +66,17 @@ describe('export files', () => {
     expect(r.graph.edges).toEqual([{ id: 'n1->n2', from: 'n1', to: 'n2' }]);
   });
 
+  it('carries a step description through export and import', () => {
+    const r0 = applyOp(sample(), { type: 'updateNode', id: 'n2', patch: { description: 'Checks the new model matches.' } }, 'user', T);
+    if (!r0.ok) throw new Error(r0.error);
+    const file = toExportFile(r0.graph, T);
+    expect(file.graph.nodes[1].description).toBe('Checks the new model matches.');
+    expect(file.graph.nodes[0]).not.toHaveProperty('description');
+    const r = parseExportFile(JSON.stringify(file), 'copy', T);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.graph.nodes.map((n) => n.description)).toEqual([undefined, 'Checks the new model matches.']);
+  });
+
   it('refuses files that are too big, not JSON, not ours, a newer version, or invalid graphs', () => {
     const good = toExportFile(sample(), T);
     const parse = (content: string) => parseExportFile(content, 'x', T);

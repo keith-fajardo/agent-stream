@@ -37,8 +37,8 @@ export function summarizeGraph(graph: Graph) {
     goal: graph.goal,
     instructions: graph.instructions,
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
-    nodes: graph.nodes.map(({ id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy }) => ({
-      id, title, kind: k, prompt, command, timeoutSec, createdBy, updatedBy,
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, createdBy, updatedBy }) => ({
+      id, title, kind: k, description, prompt, command, timeoutSec, createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
   };
@@ -55,17 +55,18 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     tool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why.',
       {
         kind,
         title: z.string(),
+        description: z.string().optional(),
         prompt: z.string().optional(),
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),
         after: z.array(z.string()).optional(),
       },
       async (a) => {
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec } });
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -78,11 +79,12 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     tool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why.',
       {
         id: z.string(),
         title: z.string().optional(),
         kind: kind.optional(),
+        description: z.string().optional(),
         prompt: z.string().optional(),
         command: z.string().optional(),
         timeoutSec: z.number().positive().optional(),

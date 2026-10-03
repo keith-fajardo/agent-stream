@@ -61,6 +61,22 @@ describe('RunConfirmDialog', () => {
     expect(getState().confirm).toBeUndefined();
   });
 
+  it('shows each step\u2019s description as an In short line above its prompt or command', async () => {
+    const steps: RunPreview['steps'] = [
+      { id: 'n1', title: 'Build', kind: 'command', description: 'Builds the model.', text: 'dbt build', reused: false },
+      { id: 'n2', title: 'Check', kind: 'agent', description: 'Checks the new model matches.', text: 'Compare orders and orders_v2.', reused: false },
+      { id: 'n3', title: 'Plain', kind: 'agent', text: 'Do it.', reused: false },
+    ];
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ steps }), requestId: lastRequestId() } }));
+    const briefs = [...container.querySelectorAll('.step-brief')].map((p) => p.textContent);
+    expect(briefs).toEqual(['In short: Builds the model.', 'In short: Checks the new model matches.']);
+    const agentBlock = container.querySelectorAll('details')[0];
+    expect(agentBlock.querySelector('.step-brief')?.nextElementSibling?.tagName).toBe('PRE');
+    expect(agentBlock.querySelector('pre')?.textContent).toBe('Compare orders and orders_v2.');
+    expect(container.querySelectorAll('details')[1].querySelector('.step-brief')).toBeNull();
+  });
+
   it('says when a step will be shown instead of an empty box, but shows an empty command as one', async () => {
     const steps: RunPreview['steps'] = [
       { id: 'n1', title: 'Build', kind: 'command', reused: false },

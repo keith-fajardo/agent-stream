@@ -4,10 +4,11 @@ import { actions } from '../actions';
 import { post, send } from '../bridge';
 import { useStore } from '../store';
 
-type Draft = { title: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
+type Draft = { title: string; description: string; kind: NodeKind; prompt: string; command: string; timeoutSec: string };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
+  description: n.description ?? '',
   kind: n.kind,
   prompt: n.prompt ?? '',
   command: n.command ?? '',
@@ -56,6 +57,7 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
   const save = () => {
     const patch: NodePatch = {};
     if (draft.title !== base.draft.title) patch.title = draft.title;
+    if (draft.description !== base.draft.description) patch.description = draft.description;
     if (draft.kind !== base.draft.kind) patch.kind = draft.kind;
     if (draft.prompt !== base.draft.prompt) patch.prompt = draft.prompt;
     if (draft.command !== base.draft.command) patch.command = draft.command;
@@ -80,6 +82,16 @@ function NodeEditor({ graphId, node }: { graphId: string; node: GraphNode }) {
       <div className="field">
         <label>Title</label>
         <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+      </div>
+      <div className="field">
+        <label htmlFor="node-description">Description</label>
+        <textarea
+          id="node-description"
+          rows={3}
+          value={draft.description}
+          placeholder="In plain words: what this step does and why"
+          onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+        />
       </div>
       <div className="field">
         <label>Kind</label>

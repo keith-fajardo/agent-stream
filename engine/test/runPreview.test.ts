@@ -33,6 +33,18 @@ describe('previewRun', () => {
     expect(rendered).toEqual({ goal: '', instructions: '', nodes: { n1: "dbt build -s 'orders v2'", n2: 'Check orders v2 in dev' } });
   });
 
+  it('carries a step description into the preview only when it is not blank', () => {
+    const g = graphOf([
+      { type: 'addNode', node: { title: 'A', kind: 'agent', prompt: 'a', description: '  Does a.  ' } },
+      { type: 'addNode', node: { title: 'B', kind: 'command', command: 'ls', description: '   ' } },
+      cmd('C', 'ls'),
+    ]);
+    const { preview } = previewRun({ graph: g, values: {}, env: env() });
+    expect(preview.steps[0].description).toBe('Does a.');
+    expect(preview.steps[1]).not.toHaveProperty('description');
+    expect(preview.steps[2]).not.toHaveProperty('description');
+  });
+
   it('changes the signature when a value or an environment variable changes', () => {
     const g = graphOf([variable('model'), cmd('Build', `dbt build -s {{ model }} --target {{ env_var('T') }}`)]);
     const sig = (model: string, t: string) => previewRun({ graph: g, values: { model }, env: env({ T: t }) }).preview.signature;

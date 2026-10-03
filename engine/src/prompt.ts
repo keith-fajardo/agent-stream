@@ -12,12 +12,15 @@ export function truncateTail(text: string, max: number): string {
   return text.length <= max ? text : `…[truncated ${text.length - max} chars]\n${text.slice(text.length - max)}`;
 }
 
+const brief = (n: GraphNode): string => n.description?.trim() || '';
+
 function heading(u: UpstreamResult): string {
+  const about = brief(u.node) ? `: ${brief(u.node)}` : '';
   if (u.node.kind === 'command') {
     const secs = u.state.durationMs !== undefined ? `, ${(u.state.durationMs / 1000).toFixed(1)} s` : '';
-    return `## ${u.node.id} · ${u.node.title} (command \`${u.node.command ?? ''}\`, exit ${u.state.exitCode ?? '?'}${secs})`;
+    return `## ${u.node.id} · ${u.node.title}${about} (command \`${u.node.command ?? ''}\`, exit ${u.state.exitCode ?? '?'}${secs})`;
   }
-  return `## ${u.node.id} · ${u.node.title} (agent, ${u.state.status})`;
+  return `## ${u.node.id} · ${u.node.title}${about} (agent, ${u.state.status})`;
 }
 
 /** The prompt an agent node receives (spec §7.3). Commands keep their tail, agents their head. */
@@ -25,7 +28,7 @@ export function buildNodePrompt(graph: Graph, node: GraphNode, upstream: Upstrea
   const parts: string[] = [];
   if (graph.goal.trim()) parts.push(`# Workflow goal\n${graph.goal.trim()}`);
   if (graph.instructions?.trim()) parts.push(`# Instructions & context\n${graph.instructions.trim()}`);
-  parts.push(`# Your step: ${node.title}\n${(node.prompt ?? '').trim()}`);
+  parts.push(`# Your step: ${node.title}\n${brief(node) ? `In short: ${brief(node)}\n` : ''}${(node.prompt ?? '').trim()}`);
   if (upstream.length > 0) {
     const sections = upstream.map((u) => {
       const excerpt =

@@ -10,6 +10,10 @@ function StepText({ text, className }: { text?: string; className?: string }) {
   return <pre className={className}>{text}</pre>;
 }
 
+function StepBrief({ text }: { text?: string }) {
+  return text ? <p className="muted step-brief">In short: {text}</p> : null;
+}
+
 /** Shows exactly what will run, as the engine rendered it (spec §7.6); Start sends the preview's signature. */
 export function RunConfirmDialog() {
   const confirm = useStore((s) => s.confirm);
@@ -71,6 +75,7 @@ export function RunConfirmDialog() {
                     <div>
                       {s.id} · {s.title}
                     </div>
+                    <StepBrief text={s.description} />
                     <StepText className="mono" text={s.text} />
                   </div>
                 ))}
@@ -85,6 +90,7 @@ export function RunConfirmDialog() {
                     <summary>
                       {s.id} · {s.title}
                     </summary>
+                    <StepBrief text={s.description} />
                     <StepText text={s.text} />
                   </details>
                 ))}
