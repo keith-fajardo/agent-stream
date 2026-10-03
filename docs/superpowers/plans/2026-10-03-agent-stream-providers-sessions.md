@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Agent Stream provider-agnostic: Claude moves behind a provider interface, and GitHub Copilot becomes a selectable scaffold. Then add personal work sessions (graph tabs + their own planner chats) and move the planner chat into its own Copilot-style view.
+**Goal:** Make Agent Stream provider-agnostic: Claude moves behind a provider interface, and GitHub Copilot becomes a selectable scaffold. Then add personal work sessions (graph tabs + their own planner chats) and move the planner chat into its own Copilot-style view. Then add step descriptions and Refine with planner, and let agents change the graph (step agents mid-run, with approval) while the user can always tell agent changes apart from their original graph.
 
 **Architecture:**
 - **Providers and gate.** Each provider owns its agent loop behind `AgentProvider` (status, step, planner turn). Approvals and privacy run through a provider-neutral `ToolGate`.
@@ -12,9 +12,13 @@
 
 **Tech Stack:** TypeScript 7 (noEmit), npm workspaces (`shared`, `engine`, `web`, `extension`), Vitest 5, zod 4, React 19 + @xyflow/react 12, Vite 8, esbuild, `@anthropic-ai/claude-agent-sdk`, VS Code extension API (`vscode.lm`, `window.tabGroups`, `WebviewViewProvider`).
 
-**Specs:** `docs/superpowers/specs/2026-10-03-agent-stream-providers-design.md` and `docs/superpowers/specs/2026-10-03-agent-stream-sessions-chat-design.md`. The sessions spec §8 amends the provider spec's planner-state section.
+**Specs:**
+- `docs/superpowers/specs/2026-10-03-agent-stream-providers-design.md`
+- `docs/superpowers/specs/2026-10-03-agent-stream-sessions-chat-design.md` (its §8 amends the provider spec's planner-state section)
+- `docs/superpowers/specs/2026-10-03-agent-stream-step-descriptions-design.md`
+- `docs/superpowers/specs/2026-10-03-agent-stream-agent-changes-design.md`
 
-**Order:** Providers first (Tasks 1–4), then sessions and the chat view (Tasks 5–9), then the integration test (Task 10) and the docs (Task 11). Tasks 5 and 6 are split so that the planner never runs half-migrated: Task 5 builds the session store and migration without wiring them in, and Task 6 wires them in.
+**Order:** Providers first (Tasks 1–4), then sessions and the chat view (Tasks 5–9), then step descriptions and Refine (Tasks 10–11), then agent changes to the graph (Tasks 12–14), then the integration test (Task 15) and the docs (Task 16). Tasks 5 and 6 are split so that the planner never runs half-migrated: Task 5 builds the session store and migration without wiring them in, and Task 6 wires them in.
 
 **Planning rulings** (decided while writing this plan; each costs a small rework if wrong):
 - **P1. The VS Code floor rises from `^1.100.0` to `^1.106.0`.** Extensions can contribute a view container to the secondary side bar (`viewsContainers.secondarySidebar`) only from 1.106 (October 2025); it was a proposed API in 1.104. The spec allowed this ("where supported"). VS Code is at 1.140 today. Cost if wrong: users on VS Code older than about a year can't install.
@@ -63,6 +67,12 @@ These are five failure modes the specs imply but that no task's main tests would
 4. **A migration interrupted halfway, then run again.** The chat was moved but the graph rewrite didn't happen. A second run must finish the job without duplicating or losing chat lines. Pinned in Task 5: `sessionStore.test.ts` › "migration resumes after a partial run".
 5. **The chat view's graph is deleted or its tab closes.** The view falls back to the empty state and never sends a chat for a deleted graph. Pinned in Task 9: `chatView.test.ts` › "falls back to empty when its graph goes away".
 
+Three more, for the descriptions and agent-changes work:
+
+6. **The user edits a step an agent added or changed.** The step must stay marked as an agent change, with only the agent's fields listed, and must not quietly become "original". Pinned in Task 12: `graphStore.test.ts` › "keeps an agent-added step marked when the user edits it" and "creates the baseline on the first agent edit; user edits go to both".
+7. **A step agent asks to change a later step that starts while the approval is still open.** The change must not be applied, and the agent is told. Pinned in Task 13: `stepGraphTools.test.ts` › "tells the agent when the user denies, and when the target started meanwhile".
+8. **Refine on a step that has only a title.** The engine refuses with a clear message rather than sending the planner an empty request. Pinned in Task 11: `app.test.ts` › "refuses to refine unknown sessions, missing steps and title-only steps".
+
 ## File map
 
 | File | Responsibility | Task |
@@ -91,8 +101,13 @@ These are five failure modes the specs imply but that no task's main tests would
 | `extension/src/chatView.ts` | chat `WebviewViewProvider` following the active graph | 9 |
 | `web/src/main.tsx`, `web/src/ChatApp.tsx`, `web/src/chatBridge.ts` | chat view mode | 7 |
 | `web/src/components/RightPanel.tsx`, `NodePanel.tsx`, `menuModel.ts` | Node · Graph only, `draftState`, View › Chat | 7 |
-| `extension/test/integration/suite.cjs`, `extension/scripts/screenshots.mjs` | real VS Code checks, screenshots | 10 |
-| `README.md`, `extension/README.md`, `docs/windows-checklist.md`, `extension/package.json` `description` | provider-agnostic docs | 11 |
+| `shared/src/graph.ts`, `engine/src/prompt.ts`, `web/src/components/StepNode.tsx`, `NodePanel.tsx` | step descriptions | 10 |
+| `engine/src/refine.ts` | the Refine with planner request | 11 |
+| `shared/src/changes.ts`, `engine/src/graphStore.ts` (baseline) | agent changes vs. the user's baseline, attribution, accept/revert | 12 |
+| `engine/src/stepGraphTools.ts`, `engine/src/runner.ts` (`amend`) | step agents changing the graph mid-run, with approval | 13 |
+| `web/src/lineDiff.ts`, `web/src/components/ChangesPanel.tsx`, canvas styles | reviewing agent changes | 14 |
+| `extension/test/integration/suite.cjs`, `extension/scripts/screenshots.mjs` | real VS Code checks, screenshots | 15 |
+| `README.md`, `extension/README.md`, `docs/windows-checklist.md`, `extension/package.json` `description` | provider-agnostic docs | 16 |
 
 ---
 
@@ -3163,7 +3178,863 @@ git commit -m "feat(extension): planner chat view in the secondary side bar, fol
 
 ---
 
-### Task 10: Integration test and screenshots
+### Task 10: Step descriptions
+
+**Spec:** `docs/superpowers/specs/2026-10-03-agent-stream-step-descriptions-design.md` §3–§5 and §7 (not Refine).
+
+**Files:**
+- Modify: `shared/src/types.ts`, `shared/src/schemas.ts`, `shared/src/graph.ts`, `shared/src/exportFile.ts`, and the shared tests `graph.test.ts`, `exportFile.test.ts` and `schemas.test.ts`
+- Modify: `engine/src/prompt.ts`, `engine/src/plannerTools.ts`, `engine/src/planner.ts`, `engine/src/runPreview.ts`, and the engine tests `prompt.test.ts`, `plannerTools.test.ts`, `planner.test.ts` and `runPreview.test.ts`
+- Modify: `web/src/components/StepNode.tsx`, `web/src/components/NodePanel.tsx`, `web/src/components/RunConfirmDialog.tsx`, `web/src/styles.css`, and the web tests `StepNode.test.ts`, `RunConfirmDialog.test.ts` and `GraphPanel.test.ts` (Node panel)
+
+**Interfaces:**
+- Produces:
+  - `GraphNode.description?: string`; `NewNodeInput.description?`; `NodePatch.description?`; `PreviewStep.description?`;
+  - `ExportedNode` includes `description`;
+  - `contentSignature` includes descriptions;
+  - an agent step's own description is part of `reusableNodeIds`' "same definition" check.
+
+- [ ] **Step 1: Write the failing tests**
+
+`shared/test/graph.test.ts`:
+
+```ts
+it('stores a description on add and update, and keeps it out of the title rules', () => {
+  let g = applyOk(emptyGraph('g', 'G', 't'), { type: 'addNode', node: { title: 'Build', kind: 'agent', prompt: 'p', description: 'Builds the new model.' } });
+  expect(g.nodes[0].description).toBe('Builds the new model.');
+  g = applyOk(g, { type: 'updateNode', id: g.nodes[0].id, patch: { description: 'Builds orders_v2 in dev.' } });
+  expect(g.nodes[0].description).toBe('Builds orders_v2 in dev.');
+});
+it('changes the content signature when a description changes', () => {
+  const a = graphWith([{ id: 'n1', kind: 'agent', title: 'T', prompt: 'p' }]);
+  const b = { ...a, nodes: [{ ...a.nodes[0], description: 'x' }] };
+  expect(contentSignature(a)).not.toBe(contentSignature(b));
+});
+it('re-runs an agent step whose own description changed, but not a command step', () => {
+  // source run: n1 (agent) and n2 (command), both succeeded, with rendered text equal to now
+  // now: n1.description changed, n2.description changed
+  expect(reusableNodeIds(nowGraph, source, undefined, rendered)).toEqual(new Set(['n2']));
+});
+```
+
+`applyOk`/`graphWith` are small helpers; add them to the file if they're missing. Build `source` with `snapshot`, `nodes` (both `succeeded`) and `rendered` equal to the current rendered text, following the existing reuse tests in this file.
+
+In `shared/test/exportFile.test.ts`, a node with `description` survives `toExportFile` → `parseExportFile`.
+
+`engine/test/prompt.test.ts`:
+
+```ts
+it('puts the step’s description above its prompt, and earlier steps’ descriptions in their headings', () => {
+  const g = graphWith([
+    { id: 'n1', kind: 'command', title: 'Build old', command: 'dbt build -s orders', description: 'Builds the current orders model.' },
+    { id: 'n2', kind: 'agent', title: 'Compare', prompt: 'Compare row counts.', description: 'Checks the new model matches.' },
+  ]);
+  const text = buildNodePrompt(g, g.nodes[1], [{ node: g.nodes[0], state: { status: 'succeeded', exitCode: 0, durationMs: 3200 }, output: 'ok', outputPath: 'out.md' }]);
+  expect(text).toContain('# Your step: Compare\nIn short: Checks the new model matches.\nCompare row counts.');
+  expect(text).toContain('## n1 · Build old: Builds the current orders model. (command `dbt build -s orders`, exit 0, 3.2 s)');
+});
+it('is unchanged when there are no descriptions', () => {
+  // the existing "builds the prompt" expectations stay byte-for-byte
+});
+```
+
+The second case is the existing test, kept as is. Don't add a new body.
+
+- `engine/test/plannerTools.test.ts`: `add_node` with `description` stores it; `update_node` with only `description` changes only that; `get_graph` output contains `"description"`.
+- `engine/test/planner.test.ts`: `expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people')`.
+- `engine/test/runPreview.test.ts`: a step with a description has `steps[i].description`; one without has none.
+- `web/test/StepNode.test.ts`:
+  - a node with a description renders `.step-desc` with that text and a `title` attribute equal to it;
+  - a blank description renders no `.step-desc`.
+- `web/test/RunConfirmDialog.test.ts`: an agent step with a description shows `In short: <text>` above its prompt.
+- Node panel test (in `GraphPanel.test.ts`, which already renders the Node panel):
+  - the Description textarea (`#node-description`) shows the node's description;
+  - editing only it and pressing Save sends `{ type: 'op', graphId, op: { type: 'updateNode', id, patch: { description: '…' } } }`.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test`
+Expected: the new cases FAIL.
+
+- [ ] **Step 3: Implement**
+
+**Shared.**
+- Add `description?: string` to `GraphNode`, `NewNodeInput` and `NodePatch`.
+- Add `description: z.string().max(2000).optional()` to the node, new-node and patch schemas.
+- `applyOp`: `addNode` passes `description: op.node.description` into `definedOnly`, and `updateNode` patches it like the other fields. Don't trim it.
+- `contentSignature`: the node tuple becomes `[n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null]`.
+- `reusableNodeIds`:
+  ```ts
+  const sameDescription = n.kind !== 'agent' || (prev?.description ?? '') === (n.description ?? '');
+  const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription;
+  ```
+- `ExportedNode`/`toExportFile`/`parseExportFile` carry `description`.
+
+**Engine.**
+- `prompt.ts`:
+  ```ts
+  const brief = (n: GraphNode) => n.description?.trim() || '';
+  // heading(): `## ${u.node.id} · ${u.node.title}${brief(u.node) ? `: ${brief(u.node)}` : ''} (command …)` and the same for agents
+  // own block: `# Your step: ${node.title}\n${brief(node) ? `In short: ${brief(node)}\n` : ''}${(node.prompt ?? '').trim()}`
+  ```
+- `plannerTools.ts`:
+  - `add_node` gains `description: z.string().optional()`; its tool description adds "`description` is one plain-language sentence for people saying what the step does and why."
+  - `update_node` gains the same field.
+  - `summarizeGraph` includes `description`.
+- `planner.ts` `PLANNER_APPEND`: append the spec §5 sentence verbatim.
+- `runPreview.ts`: each `PreviewStep` gains `...(n.description?.trim() && { description: n.description.trim() })`.
+
+**Web.**
+- `StepNode`: after `.step-title`, add:
+  ```tsx
+  {node.description?.trim() && <div className="step-desc" title={node.description}>{node.description}</div>}
+  ```
+- `NodePanel`:
+  - `Draft` gains `description`, and `toDraft`/`sameDraft` include it;
+  - the field order is Title, then `<textarea id="node-description" rows={3} placeholder="In plain words: what this step does and why">`, then Kind…;
+  - the save patch includes `description` when it changed.
+- `RunConfirmDialog`: in each step block, before the prompt or command `<pre>`, render `{s.description && <p className="muted step-brief">In short: {s.description}</p>}`.
+- `styles.css`: `.step-desc` uses muted colour, a small font and a two-line clamp (`display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;`).
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS.
+
+```bash
+git add shared engine web
+git commit -m "feat: step descriptions for people, and as context for agents"
+```
+
+---
+
+### Task 11: Refine with planner
+
+**Spec:** step descriptions spec §6 and §8.
+
+**Files:**
+- Create: `engine/src/refine.ts`, `engine/test/refine.test.ts`
+- Modify: `shared/src/types.ts`, `shared/src/schemas.ts`, `engine/src/planner.ts`, `engine/src/app.ts`, `engine/test/app.test.ts`, `engine/test/planner.test.ts`
+- Modify: `extension/src/graphEditor.ts`, `extension/src/extension.ts`, `extension/test/graphEditor.test.ts`
+- Modify: `web/src/actions.ts`, `web/src/components/NodePanel.tsx`, `web/src/menuModel.ts`, `web/test/menuModel.test.ts`, `web/test/GraphPanel.test.ts`
+
+**Interfaces:**
+- Produces (shared):
+  - `ClientMessage` gains `{ type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }`;
+  - `WebviewHostMessage` gains `{ type: 'refineSteps'; nodeIds: string[] }`;
+  - `refinable(node: GraphNode): boolean`, true when the node has a non-blank description, prompt or command. It lives in `shared/src/graph.ts` because both the web and the engine use it.
+- Produces (engine):
+  - `refineRequest(nodeIds: string[]): { display: string; prompt: string }`;
+  - `Planner.send(sessionId, graphId, text, options?: { display?: string })`.
+- Produces (extension): `MessageHandlerDeps.activeSession(folder: Folder): string`.
+- **Ruling P7.** The graph tab doesn't know which session is active or whether the planner is busy in it, so Refine is disabled only for a provider that can't run or a step that can't be refined. A busy planner is reported by the engine's refusal, which shows as the chat error "The planner is still working on your previous message." in the chat view. The spec lists this refusal path in §8.
+
+- [ ] **Step 1: Write the failing tests**
+
+`engine/test/refine.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { refineRequest } from '../src/refine';
+
+describe('refineRequest', () => {
+  it('shows a short line in the chat and gives the planner the full instruction', () => {
+    const r = refineRequest(['n2', 'n4']);
+    expect(r.display).toBe('Refine n2, n4');
+    expect(r.prompt).toBe(
+      'Refine step(s) n2, n4. For each, read its title, description and prompt (or command) with get_graph; the user may have written them in plain language without technical detail. Investigate the repository as needed. Then use update_node to write (1) a precise, detailed prompt for an agent step — or the exact shell command for a command step — that carries out the user\'s intent, and (2) a one-sentence plain-language description a non-technical reader can review. Keep the user\'s intent; do not change any step\'s kind, its connections, or other steps. Reply with one line per step saying what you changed.',
+    );
+  });
+});
+```
+
+In `shared/test/graph.test.ts`, `refinable` is false for a title-only node and true with a description, a prompt or a command.
+
+`engine/test/app.test.ts`:
+
+```ts
+it('refines steps as a planner turn: short line in the chat, full instruction to the provider', async () => {
+  const seen: PlannerTurn[] = [];
+  const { app, graphId } = setupWithGraph({ provider: testProvider({ planTurn: async (t) => (seen.push(t), { ok: true }) }) });
+  app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'Compare', kind: 'agent', prompt: 'compare the two tables' } }, 'user');
+  const c = client(app);
+  await app.handle(c.client, { type: 'openChat', graphId, sessionId: 'default' });
+  await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n1'] });
+  await flush();
+  expect(c.all('chatEntry').map((m) => m.entry).find((e) => e.role === 'user')?.text).toBe('Refine n1');
+  expect(seen[0].prompt).toContain(refineRequest(['n1']).prompt);
+});
+it('refuses to refine unknown sessions, missing steps and title-only steps', async () => {
+  const { app, graphId } = setupWithGraph();
+  app.graphStore.apply(graphId, { type: 'addNode', node: { id: 'n1', title: 'Only a title', kind: 'agent' } }, 'user');
+  const c = client(app);
+  await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'nope', nodeIds: ['n1'] });
+  await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n9'] });
+  await app.handle(c.client, { type: 'refineSteps', graphId, sessionId: 'default', nodeIds: ['n1'] });
+  expect(c.all('error').map((m) => m.message)).toEqual(['session "nope" not found', 'node n9 does not exist', 'Write what the step should do first.']);
+});
+```
+
+`engine/test/planner.test.ts`: `send(sessionId, graphId, 'long text', { display: 'short' })` logs the user entry as `short`, while the provider's turn prompt ends with `long text`.
+
+`extension/test/graphEditor.test.ts`: a `{ type: 'refineSteps', nodeIds: ['n1'] }` message from the tab calls `app.handle` with `{ type: 'refineSteps', graphId: <panel graph>, sessionId: <activeSession(folder)>, nodeIds: ['n1'] }`.
+
+`web/test/menuModel.test.ts`:
+- Edit has `Refine selected step` and `Refine steps you changed (N)`;
+- the first is enabled only with a refinable selected step and a provider that can run;
+- N counts steps with `updatedBy === 'user'` that are refinable.
+
+`web/test/GraphPanel.test.ts` (Node panel):
+- **Refine with planner** posts `{ type: 'refineSteps', nodeIds: [id] }`;
+- with unsaved edits, the button reads **Save and refine** and posts the `op` first, then `refineSteps`;
+- it is disabled for a title-only step.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+`engine/src/refine.ts`:
+
+```ts
+/** What "Refine with planner" asks (step descriptions spec §6.2): a short chat line, and the planner's full instruction. */
+export function refineRequest(nodeIds: string[]): { display: string; prompt: string } {
+  const ids = nodeIds.join(', ');
+  return {
+    display: `Refine ${ids}`,
+    prompt: `Refine step(s) ${ids}. For each, read its title, description and prompt (or command) with get_graph; the user may have written them in plain language without technical detail. Investigate the repository as needed. Then use update_node to write (1) a precise, detailed prompt for an agent step — or the exact shell command for a command step — that carries out the user's intent, and (2) a one-sentence plain-language description a non-technical reader can review. Keep the user's intent; do not change any step's kind, its connections, or other steps. Reply with one line per step saying what you changed.`,
+  };
+}
+```
+
+`shared/src/graph.ts`:
+
+```ts
+export const refinable = (n: GraphNode): boolean => !!(n.description?.trim() || n.prompt?.trim() || n.command?.trim());
+```
+
+Planner: `send(sessionId, graphId, text, options = {})` adds the user entry with `options.display ?? text`, and the turn prompt uses `text`.
+
+App `handle`:
+
+```ts
+case 'refineSteps': {
+  if (!status.ok) return error(`Chat is disabled: ${status.error}`);
+  const g = graphStore.load(msg.graphId);
+  if (!g.ok) return error(g.error);
+  const s = sessions.load(msg.sessionId);
+  if (!s.ok) return error(s.error);
+  for (const id of msg.nodeIds) {
+    const node = g.graph.nodes.find((n) => n.id === id);
+    if (!node) return error(`node ${id} does not exist`);
+    if (!refinable(node)) return error('Write what the step should do first.');
+  }
+  const r = refineRequest(msg.nodeIds);
+  planner.send(msg.sessionId, msg.graphId, r.prompt, { display: r.display }).catch((e: unknown) => console.error('[agent-stream] planner error', e));
+  return;
+}
+```
+
+The schema is `z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: z.array(z.string()).min(1).max(50) })` in `clientMessageSchema`. The host variant `{ type: 'refineSteps', nodeIds }` (same `nodeIds` rule) goes in `webviewHostSchema`. Both parse; `parseWebviewMessage` tries the engine schema first, and the host variant has no `graphId`, so the two never collide.
+
+Extension, `graphEditor.ts` `createMessageHandler`:
+```ts
+case 'refineSteps': {
+  void d.app.handle(d.client, { type: 'refineSteps', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeIds: msg.nodeIds });
+  return;
+}
+```
+`extension.ts` passes `activeSession: (folder) => sessions.active(folder).id`.
+
+Web:
+- `actions.refine(nodeIds)` posts the host message.
+- `NodePanel`:
+  - the button follows Save: `dirty ? 'Save and refine' : 'Refine with planner'`;
+  - it is disabled when `!status?.ok || !refinable(draftAsNode)`;
+  - Save and refine calls the existing save, then `actions.refine([node.id])`.
+- Edit menu:
+  - `item('Refine selected step', canRefineSelected, () => actions.refine([selectedId]))`;
+  - `item(`Refine steps you changed (${n})`, n > 0 && signedIn, () => actions.refine(ids))`, where `ids` are the graph's nodes with `updatedBy === 'user' && refinable(node)`.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS.
+
+```bash
+git add shared engine extension web
+git commit -m "feat: Refine with planner turns plain-language steps into precise ones"
+```
+
+---
+
+### Task 12: Baseline and attribution of agent changes
+
+**Spec:** `docs/superpowers/specs/2026-10-03-agent-stream-agent-changes-design.md` §3 and §4.4.
+
+**Files:**
+- Create: `shared/src/changes.ts`, `shared/test/changes.test.ts`
+- Modify: `shared/src/types.ts`, `shared/src/schemas.ts`, `shared/src/index.ts`
+- Modify: `engine/src/graphStore.ts`, `engine/src/plannerTools.ts`, `engine/src/planner.ts`, `engine/src/app.ts`, and the engine tests `graphStore.test.ts`, `plannerTools.test.ts` and `app.test.ts`
+
+**Interfaces:**
+- Produces (shared):
+  ```ts
+  export type ChangeSource = { kind: 'planner'; sessionId?: string } | { kind: 'step'; runId: string; nodeId: string };
+  export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource };
+  export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
+  // Op gains: | { type: 'acceptChange'; target: ChangeTarget } | { type: 'revertChange'; target: ChangeTarget }
+  export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec';
+  export type AgentChange =
+    | { kind: 'node'; change: 'added' | 'changed' | 'removed'; id: string; title: string; fields?: ChangedField[]; by?: ChangeSource; at?: string }
+    | { kind: 'edge'; change: 'added' | 'removed'; id: string; from: string; to: string; by?: ChangeSource; at?: string };
+  export function diffGraphs(baseline: Graph, graph: Graph): AgentChange[];   // changes.ts
+  // GraphListItem gains agentChanges?: number
+  // ServerMessage 'graphOpened' and 'graph' gain: baseline?: Graph; changes: AgentChange[]
+  ```
+- Produces (engine):
+  - `GraphStore.apply(graphId, op, by, source?)`;
+  - `GraphStore.baseline(id): { ok: true; graph?: Graph } | { ok: false; error: string }`;
+  - `GraphStore.agentChanges(id): AgentChange[]`, attributed;
+  - `GraphStore.reviewOp(graphId, op: acceptChange | revertChange)`, called through `apply`;
+  - `PlannerToolDeps.source: ChangeSource`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`shared/test/changes.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { diffGraphs } from '../src/changes';
+import { emptyGraph, type Graph, type GraphNode } from '../src';
+
+const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({ id, title: id, kind: 'agent', prompt: 'p', createdBy: 'user', updatedBy: 'user', updatedAt: 't', ...over });
+const graph = (nodes: GraphNode[], edges: [string, string][] = []): Graph => ({ ...emptyGraph('g', 'G', 't'), nodes, edges: edges.map(([from, to]) => ({ id: `${from}->${to}`, from, to })) });
+
+describe('diffGraphs', () => {
+  it('finds added, changed and removed steps, with the changed fields', () => {
+    const base = graph([node('n1'), node('n2'), node('n3')]);
+    const now = graph([node('n1', { prompt: 'better', description: 'd' }), node('n3'), node('n4')]);
+    expect(diffGraphs(base, now)).toEqual([
+      { kind: 'node', change: 'changed', id: 'n1', title: 'n1', fields: ['description', 'prompt'] },
+      { kind: 'node', change: 'removed', id: 'n2', title: 'n2' },
+      { kind: 'node', change: 'added', id: 'n4', title: 'n4' },
+    ]);
+  });
+  it('finds added and removed connections', () => {
+    const base = graph([node('n1'), node('n2'), node('n3')], [['n1', 'n2']]);
+    const now = graph([node('n1'), node('n2'), node('n3')], [['n1', 'n3']]);
+    expect(diffGraphs(base, now)).toEqual([
+      { kind: 'edge', change: 'removed', id: 'n1->n2', from: 'n1', to: 'n2' },
+      { kind: 'edge', change: 'added', id: 'n1->n3', from: 'n1', to: 'n3' },
+    ]);
+  });
+  it('ignores moves and authorship bookkeeping', () => {
+    const base = graph([node('n1', { position: { x: 0, y: 0 } })]);
+    const now = graph([node('n1', { position: { x: 50, y: 9 }, updatedBy: 'agent', updatedAt: 'later' })]);
+    expect(diffGraphs(base, now)).toEqual([]);
+  });
+});
+```
+
+Order the output like this: node changes (changed and removed in baseline order, then added in graph order), then edge changes (removed, then added). Fields come in the fixed order `title, description, kind, prompt, command, timeoutSec`.
+
+`engine/test/graphStore.test.ts`:
+
+```ts
+describe('agent changes against the baseline', () => {
+  it('creates the baseline on the first agent edit; user edits go to both', () => {
+    const { store, id } = withGraph([{ id: 'n1', title: 'One', kind: 'agent', prompt: 'p' }]);
+    expect(store.baseline(id)).toEqual({ ok: true });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'agent prompt' } }, 'agent', { kind: 'planner', sessionId: 'default' });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Renamed by me' } }, 'user');
+    const changes = store.agentChanges(id);
+    expect(changes).toEqual([{ kind: 'node', change: 'changed', id: 'n1', title: 'Renamed by me', fields: ['prompt'], by: { kind: 'planner', sessionId: 'default' }, at: expect.any(String) }]);
+  });
+  it('keeps an agent-added step marked when the user edits it', () => {
+    const { store, id } = withGraph([]);
+    store.apply(id, { type: 'addNode', node: { id: 'n1', title: 'Install deps', kind: 'command', command: 'npm ci' } }, 'agent', { kind: 'step', runId: 'r1', nodeId: 'n2' });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Install' } }, 'user');
+    expect(store.agentChanges(id)).toMatchObject([{ kind: 'node', change: 'added', id: 'n1', by: { kind: 'step', runId: 'r1', nodeId: 'n2' } }]);
+  });
+  it('accepts and reverts per change and in full, and drops the baseline once they match', () => {
+    const { store, id, paths } = withGraph([{ id: 'n1', title: 'One', kind: 'agent', prompt: 'p' }]);
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'addNode', node: { id: 'n2', title: 'Two', kind: 'agent', prompt: 'q' } }, 'agent', { kind: 'planner' });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user').ok).toBe(true);
+    expect(store.get(id).nodes.find((n) => n.id === 'n1')?.prompt).toBe('p');
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
+    expect(store.agentChanges(id)).toEqual([]);
+    expect(existsSync(join(paths.graphsDir, `${id}.baseline.json`))).toBe(false);
+  });
+  it('treats an unreadable baseline as no changes and lets Accept all rewrite it', () => {
+    // write '{ nope' to <id>.baseline.json → baseline(id) is { ok: false, error: /baseline/ }, agentChanges(id) is [];
+    // apply acceptChange all → ok, and the file is gone (graph and baseline match)
+  });
+  it('deletes the baseline with its graph', () => {
+    // agent edit → baseline exists → delete(id) → file gone
+  });
+});
+```
+
+Write out the last two tests the same way. `withGraph` creates a store with one graph holding the given nodes, made by the user.
+
+- `engine/test/plannerTools.test.ts`: tool edits are recorded with `source: { kind: 'planner', sessionId: 's' }` when the deps carry that source.
+- `engine/test/app.test.ts`:
+  - `graphOpened` carries `changes` and the `baseline`;
+  - a `graph` broadcast after an agent edit carries the new `changes`;
+  - `listGraphs()` reports `agentChanges: 1`;
+  - reverting a node that a running run includes (queued or running) returns `Stop the run first.` through `opRejected`.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test -w shared -- changes && npm test -w engine -- graphStore plannerTools app`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement `shared/src/changes.ts`**
+
+```ts
+import type { AgentChange, ChangedField, Graph, GraphNode } from './types';
+
+const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec'];
+const norm = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+
+export function changedFields(before: GraphNode, after: GraphNode): ChangedField[] {
+  return FIELDS.filter((f) => norm(before[f]) !== norm(after[f]));
+}
+
+/** What agents changed since the user's accepted baseline (agent changes spec §3.3). Positions and authorship are not content. */
+export function diffGraphs(baseline: Graph, graph: Graph): AgentChange[] {
+  const out: AgentChange[] = [];
+  const now = new Map(graph.nodes.map((n) => [n.id, n]));
+  const before = new Map(baseline.nodes.map((n) => [n.id, n]));
+  for (const b of baseline.nodes) {
+    const n = now.get(b.id);
+    if (!n) out.push({ kind: 'node', change: 'removed', id: b.id, title: b.title });
+    else {
+      const fields = changedFields(b, n);
+      if (fields.length) out.push({ kind: 'node', change: 'changed', id: n.id, title: n.title, fields });
+    }
+  }
+  for (const n of graph.nodes) if (!before.has(n.id)) out.push({ kind: 'node', change: 'added', id: n.id, title: n.title });
+  const edgeKey = (e: { from: string; to: string }) => `${e.from}->${e.to}`;
+  const nowEdges = new Set(graph.edges.map(edgeKey));
+  const beforeEdges = new Set(baseline.edges.map(edgeKey));
+  for (const e of baseline.edges) if (!nowEdges.has(edgeKey(e))) out.push({ kind: 'edge', change: 'removed', id: e.id, from: e.from, to: e.to });
+  for (const e of graph.edges) if (!beforeEdges.has(edgeKey(e))) out.push({ kind: 'edge', change: 'added', id: e.id, from: e.from, to: e.to });
+  return out;
+}
+```
+
+Edges are compared by their endpoints, not their IDs. That way an edge that was removed and re-added between the same steps isn't a change. Export `diffGraphs` and `changedFields` from `shared/src/index.ts`. Add the types from **Interfaces** and the two ops, both to `Op` and to `opSchema`:
+
+```ts
+const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
+// opSchema gains:
+z.object({ type: z.literal('acceptChange'), target: changeTarget }),
+z.object({ type: z.literal('revertChange'), target: changeTarget }),
+```
+
+`applyOp` returns `fail('acceptChange and revertChange are applied by the graph store')` for these two, because they need the baseline.
+
+- [ ] **Step 4: Implement the baseline in `GraphStore`**
+
+- `baselineFile(id)` is `join(graphsDir, `${id}.baseline.json`)`.
+- `baseline(id)` reads and `parseGraph`s it. A missing file returns `{ ok: true }`; an unreadable or invalid one returns `{ ok: false, error: `The agent-change baseline ${file} could not be read (${reason}).` }`.
+
+`apply(graphId, op, by, source?)`:
+
+```ts
+if (op.type === 'acceptChange' || op.type === 'revertChange') return this.review(graphId, op);
+// …current apply (applyOp) produces r.graph…
+const base = this.baseline(graphId);
+if (by === 'agent' && base.ok && !base.graph) this.writeBaseline(current.graph);   // the pre-change graph
+if (by === 'user' && base.ok && base.graph) {
+  const mirrored = applyOp(base.graph, resolved, 'user', at, { rewriteReferences: renameReferences });
+  if (mirrored.ok) this.writeBaseline(mirrored.graph);
+}
+this.save(r.graph);
+this.dropBaselineIfSame(graphId);
+const record: OpRecord = { at, by, op: resolved, ...(source && { source }) };
+```
+
+- `writeBaseline` uses `writeFileAtomic`.
+- `dropBaselineIfSame` deletes the file when `diffGraphs(baseline, graph)` is empty.
+- `moveNode` is never mirrored or diffed, because positions aren't content. It keeps its current path.
+
+`review(graphId, op)`:
+- With no readable baseline:
+  - `acceptChange all` writes nothing and deletes any unreadable baseline file; this is how "Accept all rewrites it" plays out;
+  - any other target fails with `There are no agent changes to review.`
+- **Accept node** copies the graph's node, or its absence, into the baseline; **accept edge** copies the edge, or its absence; **accept all** makes the baseline the graph.
+- **Revert node:**
+  - `changed`: the graph node takes the baseline node's fields (title, description, kind, prompt, command, timeoutSec), keeping its position and setting `updatedBy: 'user'`;
+  - `removed`: re-add the baseline node, plus the baseline edges whose endpoints both exist;
+  - `added`: delete the node and its edges.
+- **Revert edge** removes an added edge, or re-adds a removed one if both endpoints exist. **Revert all** makes the graph the baseline, keeping current positions for steps in both.
+- Validate the result with `parseGraph`. A cycle or other problem fails with the parse error.
+- Save, append the op as a user record, call `dropBaselineIfSame`, and emit `changed`/`op` as `apply` does.
+
+`agentChanges(id)` runs `diffGraphs(baseline, graph)`, then attributes each change. Walking `readOps(id)` newest first, the first record with `by === 'agent'` whose op touches the change gives `by = record.source` and `at = record.at`:
+- for a node change, the op touches the change when it is `addNode` with that ID, or `updateNode` or `deleteNode` of it;
+- for an edge change, the op touches the change when it is `addEdge`/`deleteEdge` with the same endpoints, or `deleteNode` of an endpoint.
+
+`list()` sets `agentChanges` when it is greater than 0. `delete(id)` also removes the baseline file.
+
+- [ ] **Step 5: Wire attribution and the messages**
+
+- `PlannerToolDeps` gains `source: ChangeSource`, and tool edits call `graphStore.apply(graphId, op, 'agent', d.source)`. The Planner passes `{ kind: 'planner', sessionId }`.
+- App:
+  - `opened(graph)` adds `baseline` (when there is one) and `changes: graphStore.agentChanges(graph.id)`;
+  - the `graphStore.on('changed')` broadcast becomes `{ type: 'graph', graph, changes, baseline? }`.
+- Before applying a `revertChange` op from a client, the App checks the active run (`runner.activeFor(graphId)`). If the target node, the `all` target, or either endpoint of a target edge is `queued` or `running` there, it sends `opRejected` with `Stop the run first.`.
+- When `baseline()` fails for a graph, `startupWarnings` includes that error once.
+
+- [ ] **Step 6: Verify and commit**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS. The web compiles as it is, because `changes` is only an added field. Task 14 uses it.
+
+```bash
+git add shared engine
+git commit -m "feat(engine): baseline of the user's graph and attributed agent changes"
+```
+
+---
+
+### Task 13: Step agents can change the graph during a run (with approval)
+
+**Spec:** agent changes spec §4 and §6.
+
+**Files:**
+- Create: `engine/src/stepGraphTools.ts`, `engine/test/stepGraphTools.test.ts`
+- Modify: `shared/src/types.ts` (`ApprovalRequest.graphChange`, `RunMeta.amendments`), `shared/src/format.ts` (`approvalSummary`/`approvalSentence` use `graphChange.summary`), `shared/test/format.test.ts`
+- Modify: `engine/src/executors.ts` (`NodeContext.graphTools?`), `engine/src/approvals.ts` (request accepts `graphChange`), `engine/src/runner.ts` (`amend`), `engine/src/providers/toolGate.ts` (`selfApproving`), `engine/src/providers/claude/sdkGate.ts`, `engine/src/providers/claude/runStep.ts`, `engine/src/app.ts`
+- Tests: `engine/test/runner.test.ts`, `engine/test/sdkGate.test.ts`, `engine/test/claudeRunStep.test.ts`, `engine/test/app.test.ts`
+
+**Interfaces:**
+- Produces:
+  ```ts
+  // shared
+  export type GraphChangeRequest = { summary: string; detail: string };
+  // ApprovalRequest gains graphChange?: GraphChangeRequest
+  export type RunAmendment = { at: string; byNodeId: string; summary: string };
+  // RunMeta gains amendments?: RunAmendment[]
+  // engine
+  export type RunChange =
+    | { kind: 'add'; node: GraphNode; text: string; after: string[]; before: string[] }
+    | { kind: 'change'; node: GraphNode; text: string };
+  Runner.amend(runId: string, change: RunChange, byNodeId: string, summary: string): { ok: true } | { ok: false; error: string };
+  export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[];   // add_step, change_step
+  export type StepGraphToolDeps = {
+    ctx: NodeContext; graphStore: GraphStore; runner: Runner; broker: ApprovalBroker;
+    render(graph: Graph, node: GraphNode): { ok: true; text: string } | { ok: false; error: string };
+    signal: AbortSignal;
+  };
+  // ToolGate: createStepGate options gain selfApproving?: ReadonlySet<string>; ToolGate gains isSelfApproving(toolName): boolean
+  ```
+
+- [ ] **Step 1: Write the failing tests**
+
+`engine/test/stepGraphTools.test.ts` builds a real `GraphStore`, `Runner`, `ApprovalBroker` and `RunStore` on a temp project:
+- the graph is n1 (agent, the calling step, `running`) → n2 (agent) → n3 (command);
+- a run is started with fake executors that hold n1 open;
+- `render` is a stub returning `{ ok: true, text: node.prompt ?? node.command ?? '' }`, except it fails for text containing `{{ bad }}`.
+
+```ts
+it('asks before adding a step, then runs it after its "after" steps and before its "before" steps', async () => {
+  const s = await setup();
+  const add = s.tool('add_step');
+  const pending = add.run({ title: 'Install deps', kind: 'command', command: 'npm ci', description: 'Installs packages.', after: ['n1'], before: ['n2'] });
+  const [request] = s.broker.pending();
+  expect(request).toMatchObject({ toolName: 'Change graph', nodeId: 'n1', graphChange: { summary: 'n1 wants to add step "Install deps" after n1, before n2' } });
+  expect(request.graphChange!.detail).toContain('npm ci');
+  s.broker.decide(request.id, { decision: 'approve' });
+  expect(await pending).toEqual({ text: 'Applied: n1 wants to add step "Install deps" after n1, before n2' });
+  const g = s.graphStore.get(s.graphId);
+  const added = g.nodes.find((n) => n.title === 'Install deps')!;
+  expect(s.graphStore.agentChanges(s.graphId)).toContainEqual(expect.objectContaining({ kind: 'node', change: 'added', id: added.id, by: { kind: 'step', runId: s.runId, nodeId: 'n1' } }));
+  s.finish('n1');
+  await s.until(added.id, 'succeeded');
+  expect(s.order()).toEqual(['n1', added.id, 'n2', 'n3']);
+  expect(s.runner.get(s.runId)!.amendments).toEqual([{ at: expect.any(String), byNodeId: 'n1', summary: 'n1 wants to add step "Install deps" after n1, before n2' }]);
+});
+
+it('changes a step that has not started, and the run uses the new text', async () => {
+  // change_step({ id: 'n3', command: 'echo new' }) → approve → when n3 runs its executor receives 'echo new'
+});
+
+it('rejects without asking: unknown ids, started steps, its own step, cycles and fill-in problems', async () => {
+  const s = await setup();
+  const add = s.tool('add_step'), change = s.tool('change_step');
+  expect(await change.run({ id: 'n9', prompt: 'x' })).toEqual({ text: 'node n9 does not exist', isError: true });
+  expect(await change.run({ id: 'n1', prompt: 'x' })).toEqual({ text: 'n1 already started; the change was not applied.', isError: true });
+  expect(await add.run({ title: 'Loop', kind: 'agent', prompt: 'p', after: ['n2'], before: ['n1'] })).toEqual({ text: 'n1 already started; the change was not applied.', isError: true });
+  expect(await add.run({ title: 'Cycle', kind: 'agent', prompt: 'p', after: ['n3'], before: ['n2'] })).toMatchObject({ isError: true, text: expect.stringMatching(/cycle/i) });
+  expect(await change.run({ id: 'n2', prompt: '{{ bad }}' })).toMatchObject({ isError: true });
+  expect(s.broker.pending()).toEqual([]);
+});
+
+it('tells the agent when the user denies, and when the target started meanwhile', async () => {
+  // deny with note 'not this' → { text: 'Denied by the user: not this', isError: true }, graph unchanged
+  // change_step on n2 → while pending, mark n2 running (finish n1 so n2 starts) → approve →
+  //   { text: 'n2 already started; the change was not applied.', isError: true }, graph unchanged
+});
+```
+
+Write the two sketched cases out fully, with the same helpers. `setup()` returns:
+- `tool(name)` (finds the tool in `createStepGraphTools(...)` for n1's context);
+- `finish(id)` (releases a held executor);
+- `until(id, status)` (awaits a node state);
+- `order()` (node IDs in the order their executors started);
+- `runId` and `graphId`.
+
+- `engine/test/runner.test.ts`: the `amend` unit cases are covered above. Add a refusal case: `amend` of a finished run returns `{ ok: false, error: 'The run was stopped.' }`.
+- `engine/test/sdkGate.test.ts`: a gate with `selfApproving: new Set(['mcp__run_graph__add_step'])` returns `{}` from PreToolUse for that tool without creating an approval.
+- `engine/test/claudeRunStep.test.ts`: when `ctx.graphTools` is given, the options have `mcpServers.run_graph`, and `allowedTools` contains `mcp__run_graph__*`.
+- `shared/test/format.test.ts`: `approvalSentence` for a request with `graphChange` returns its `summary`.
+- `engine/test/app.test.ts`: agent steps receive `ctx.graphTools` named `add_step` and `change_step` (assert from a `testProvider` `runStep` spy).
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test -w engine -- stepGraphTools runner sdkGate claudeRunStep app && npm test -w shared -- format`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement `Runner.amend`**
+
+```ts
+amend(runId: string, change: RunChange, byNodeId: string, summary: string): { ok: true } | { ok: false; error: string } {
+  const run = this.runs.get(runId);
+  if (!run || run.finished || run.stopping) return { ok: false, error: 'The run was stopped.' };
+  const meta = run.meta;
+  const notStarted = (id: string) => meta.nodes[id]?.status === 'queued';
+  if (change.kind === 'change') {
+    if (!notStarted(change.node.id)) return { ok: false, error: `${change.node.id} already started; the change was not applied.` };
+    meta.snapshot = { ...meta.snapshot, nodes: meta.snapshot.nodes.map((n) => (n.id === change.node.id ? change.node : n)) };
+  } else {
+    for (const id of change.before) if (!notStarted(id)) return { ok: false, error: `${id} already started; the change was not applied.` };
+    const edges = [
+      ...change.after.map((from) => ({ id: `${from}->${change.node.id}`, from, to: change.node.id })),
+      ...change.before.map((to) => ({ id: `${change.node.id}->${to}`, from: change.node.id, to })),
+    ];
+    const next = { ...meta.snapshot, nodes: [...meta.snapshot.nodes, change.node], edges: [...meta.snapshot.edges, ...edges] };
+    const problems = validateRunnable(next);
+    if (problems.length) return { ok: false, error: problems.join('\n') };
+    meta.snapshot = next;
+    meta.nodes[change.node.id] = { status: 'queued' };
+    run.order = topoOrder(next);
+  }
+  meta.rendered = { ...meta.rendered!, nodes: { ...meta.rendered!.nodes, [change.node.id]: change.text } };
+  meta.amendments = [...(meta.amendments ?? []), { at: this.clock(), byNodeId, summary }];
+  this.persist(meta);
+  this.safeEmit('run', meta);
+  this.schedule(run);
+  return { ok: true };
+}
+```
+
+Edge IDs must match what `applyOp`'s `addEdge` produces. Check `shared/src/graph.ts` and use the same ID scheme, through its helper if there is one.
+
+- [ ] **Step 4: Implement the step tools** — `engine/src/stepGraphTools.ts`
+
+Use the Task 3 `tool` helper from `plannerTools.ts`, exported from there as `defineTool`:
+- **Schemas.**
+  - `add_step`: `{ title: z.string(), kind, prompt: z.string().optional(), command: z.string().optional(), description: z.string().optional(), after: z.array(z.string()), before: z.array(z.string()) }`.
+  - `change_step`: `{ id: z.string(), title: z.string().optional(), description: z.string().optional(), prompt: z.string().optional(), command: z.string().optional() }`.
+  - The tool descriptions say plainly: "Every change waits for the user's approval; only steps that haven't started can be changed."
+- **Steps (each handler).**
+  1. Check against `graphStore.get(graphId)` and the active run `runner.get(ctx.runId)`:
+     - unknown IDs → `node <id> does not exist`;
+     - the caller's own step, or a step that isn't `queued` → `<id> already started; the change was not applied.`;
+     - kind/field mismatch → `a command step needs a command` or `an agent step needs a prompt`.
+  2. Build the candidate node:
+     - `add` → `nextNodeId(graph)` with `createdBy/updatedBy: 'agent'`;
+     - `change` → the existing node with the patch.
+  3. Check for cycles with `validateRunnable` on the graph plus the change.
+  4. Render with `d.render(graph, candidate)`.
+  5. Form the summary:
+     - `` `${ctx.node.id} wants to add step "${title}" after ${after.join(', ') || 'nothing'}, before ${before.join(', ') || 'nothing'}` ``, or
+     - `` `${ctx.node.id} wants to change ${id}'s ${changedNames}` ``, where `changedNames` comes from `changedFields`, e.g. "command" or "prompt and description".
+  6. Form the detail: `` `${kind === 'command' ? 'Command' : 'Prompt'}:\n${text}${description ? `\n\nDescription: ${description}` : ''}` ``.
+  7. Request approval: `const { decision } = d.broker.request({ runId, graphId, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName: 'Change graph', input: args, graphChange: { summary, detail } }, d.signal)`. Emit `approval_requested`/`approval_decided` node events as `createStepGate` does.
+- **On approve.**
+  1. Re-check "not started".
+  2. Apply the ops through `graphStore.apply(graphId, op, 'agent', { kind: 'step', runId, nodeId: ctx.node.id })`: `addNode` plus `addEdge`s for `after`/`before`, or `updateNode`.
+  3. Call `runner.amend(...)` with the rendered text.
+  4. Return `Applied: <summary>`.
+- **On deny or cancel.** Use the same reason text as `createStepGate`, with `isError: true`.
+
+`ApprovalBroker.request` accepts and stores `graphChange`. In `shared/src/format.ts`, `approvalSummary`/`approvalSentence` return `request.graphChange.summary` when it is present.
+
+- [ ] **Step 5: Wire them in**
+
+- `NodeContext` gains `graphTools?: GraphTool[]`.
+- `createStepGate` options gain `selfApproving`, and `ToolGate` gains `isSelfApproving(name)`. `toSdkGate`'s PreToolUse returns `{}` for self-approving names, as it does for read-only ones.
+- Claude `runStep`: when `ctx.graphTools?.length`, add `mcpServers: { run_graph: graphServer('run_graph', ctx.graphTools) }`; generalise Task 3's `graphServer` to take a server name. Append `'mcp__run_graph__*'` to `allowedTools`, and pass `selfApproving` for those names to the step gate.
+- In the App's `agentFor(p)`, build the tools per step and pass them on:
+  ```ts
+  (ctx) => {
+    const graphTools = createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
+    return p.runStep({ ...ctx, graphTools }, createStepGate({ …, selfApproving: new Set(graphTools.map((t) => `mcp__run_graph__${t.name}`)) }));
+  }
+  ```
+  `renderNode(graph, node)` runs `previewRun({ graph: { ...graph, nodes: [node], edges: [] }, values: values.get(graph.id), env, commandShellProblem })`. It returns `steps[0].text`, or the first problem as the error.
+
+- [ ] **Step 6: Verify and commit**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS.
+
+```bash
+git add shared engine
+git commit -m "feat(engine): step agents can change the graph mid-run, with approval"
+```
+
+---
+
+### Task 14: Review UI for agent changes
+
+**Spec:** agent changes spec §5 and §6.
+
+**Files:**
+- Create: `web/src/lineDiff.ts`, `web/src/components/ChangesPanel.tsx`, `web/test/lineDiff.test.ts`, `web/test/ChangesPanel.test.ts`
+- Modify: `web/src/state.ts` (`baseline`, `changes`; `Tab` gains `'changes'`), `web/src/components/RightPanel.tsx`, `Canvas.tsx`/`flowNodes.ts` (classes, ghosts), `StepNode.tsx` (badge), `NodePanel.tsx` (banner), `ApprovalCard.tsx` (graph change), `web/src/menuModel.ts`, `web/src/styles.css`, and the web tests (`flowNodes.test.ts`, `StepNode.test.ts`, `menuModel.test.ts`, `ApprovalCard.test.ts`, `state.test.ts`)
+- Modify: `extension/src/graphsView.ts`, `extension/test/graphsView.test.ts`
+
+**Interfaces:**
+- Consumes: `AgentChange`, `ChangeSource`, `baseline`/`changes` on `graphOpened`/`graph` (Task 12); `ApprovalRequest.graphChange` (Task 13).
+- Produces:
+  - `lineDiff(before: string, after: string): { kind: 'same' | 'removed' | 'added'; text: string }[]`;
+  - `sourceLabel(by?: ChangeSource): string`, which gives `planner` or `n2 · run <runId>`;
+  - `<ChangesPanel />`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`web/test/lineDiff.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { lineDiff } from '../src/lineDiff';
+
+describe('lineDiff', () => {
+  it('marks removed and added lines around the common ones', () => {
+    expect(lineDiff('a\nb\nc', 'a\nB\nc\nd')).toEqual([
+      { kind: 'same', text: 'a' },
+      { kind: 'removed', text: 'b' },
+      { kind: 'added', text: 'B' },
+      { kind: 'same', text: 'c' },
+      { kind: 'added', text: 'd' },
+    ]);
+  });
+  it('handles empty sides', () => {
+    expect(lineDiff('', 'x')).toEqual([{ kind: 'added', text: 'x' }]);
+    expect(lineDiff('x', '')).toEqual([{ kind: 'removed', text: 'x' }]);
+  });
+});
+```
+
+`web/test/flowNodes.test.ts`:
+- with `changes` and `baseline` in state, an added node has class `change-added` and badge text `＋ planner`;
+- a changed node has `change-changed` and badge `✎ n2 · run r1`;
+- a removed node appears as a ghost node with `change-removed`, at its baseline position, and is not selectable;
+- an added edge has class `edge-added`; a removed edge appears as a ghost edge with `edge-removed`.
+
+`web/test/ChangesPanel.test.ts`:
+- it lists the changes newest first, each with its fields and who made it;
+- **Accept** posts `{ type: 'op', graphId, op: { type: 'acceptChange', target: { kind: 'node', id } } }`, and **Revert** posts the same with `revertChange`;
+- **Accept all** / **Revert all** first open the in-app confirmation, then post the `all` target;
+- clicking a changed step shows a before/after where a removed line has class `diff-removed` and an added line `diff-added`.
+
+Other tests:
+- `menuModel.test.ts`: Edit has `Review agent changes…`, `Accept all agent changes` and `Revert all agent changes`; the last two are disabled when there are no changes.
+- `ApprovalCard.test.ts`: a request with `graphChange` shows its `summary`, and expands to `detail` in a `<pre>`.
+- `state.test.ts`: `graphOpened`/`graph` store `baseline` and `changes`; the `changes` tab falls back to `node` when the count drops to 0.
+- `extension/test/graphsView.test.ts`: a graph item with `agentChanges: 3` has a description ending ` · 3 agent changes`.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test -w web && npm test -w extension -- graphsView`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+`web/src/lineDiff.ts` (LCS over lines; inputs are prompt-sized, so O(n·m) is fine):
+
+```ts
+export type DiffLine = { kind: 'same' | 'removed' | 'added'; text: string };
+
+export function lineDiff(before: string, after: string): DiffLine[] {
+  const a = before === '' ? [] : before.split('\n');
+  const b = after === '' ? [] : after.split('\n');
+  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ kind: 'same', text: a[i] });
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ kind: 'removed', text: a[i++] });
+    else out.push({ kind: 'added', text: b[j++] });
+  }
+  while (i < a.length) out.push({ kind: 'removed', text: a[i++] });
+  while (j < b.length) out.push({ kind: 'added', text: b[j++] });
+  return out;
+}
+```
+
+**State.** `State` gains `baseline?: Graph` and `changes: AgentChange[]`, set from `graphOpened`/`graph`. `Tab` becomes `'node' | 'graph' | 'changes'`; when `changes` becomes empty and `tab === 'changes'`, the tab becomes `'node'`.
+
+**Canvas and flow nodes.**
+- Build per-ID lookups of the changes.
+- Real nodes get `data.change` (`'added' | 'changed'`) and `data.changeBy`.
+- For each `removed` node change, add a ghost flow node from `baseline` (ID `ghost:<id>`, `selectable: false`, `draggable: false`, `data.ghost: true`). Do the same for removed edges, which become ghost edges between the existing or ghost endpoints.
+- Clicking a ghost dispatches `setTab('changes')` and selects that change.
+
+**`StepNode`.**
+- `change-added`/`change-changed`/`change-removed` classes.
+- A badge `` `${change === 'added' ? '＋' : change === 'changed' ? '✎' : ''} ${sourceLabel(by)}` ``; ghosts read `removed by ${sourceLabel(by)}`.
+- The badge's `title` lists the changed fields.
+- It replaces the old "by agent" marker when the node is in `changes`. Otherwise keep today's marker.
+
+**`ChangesPanel`.**
+- Rows, newest first (`at` descending): icon, name (`title`, or `from → to` for edges), fields, `sourceLabel(by)`, relative time (`relativeTime`), **Accept** and **Revert**.
+- The footer has **Accept all** and **Revert all**, each behind an in-app confirm: "Accept all N agent changes into your graph?" / "Revert all N agent changes?".
+- The selected row shows a before/after for each changed field from `baseline` versus `graph`, rendered with `lineDiff` (`diff-removed`: struck through; `diff-added`: highlighted).
+
+**`RightPanel`.** The tabs are Node, Graph and `Changes (N)` (the last only when N > 0).
+
+**`NodePanel`.** When the selected node has a `changed` entry, show the banner `` `Changed by ${sourceLabel(by)}: ${fields.join(', ')}` `` with **Show before/after** (switches to the Changes tab with that row selected), **Accept** and **Revert**.
+
+**`ApprovalCard`.** When `request.graphChange` is present, show `graphChange.summary` as the title line and a collapsible `<pre>` with `detail`, in place of the generic tool summary.
+
+**`menuModel` Edit menu.** Add `Review agent changes…` (enabled when N > 0; switches to the Changes tab), `Accept all agent changes` and `Revert all agent changes` (same confirmations).
+
+**`styles.css`.**
+- `--agent-accent: var(--vscode-charts-purple, var(--vscode-focusBorder))`.
+- `.change-added` uses a dashed accent border; `.change-changed` a solid accent border; `.change-removed` has opacity 0.45 and a struck-through title.
+- `.edge-added` uses accent dashed strokes; `.edge-removed` faded dashed strokes.
+- `.diff-removed` is struck through with a red-ish background (`--vscode-diffEditor-removedTextBackground`); `.diff-added` uses `--vscode-diffEditor-insertedTextBackground`.
+
+**`extension/src/graphsView.ts`.** The item description appends `` ` · ${n} agent ${n === 1 ? 'change' : 'changes'}` `` when `agentChanges > 0`.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `npm test && npm run typecheck && npm run build`
+Expected: PASS.
+
+```bash
+git add web extension
+git commit -m "feat(web): see agent changes on the canvas and review them against your original"
+```
+
+---
+
+### Task 15: Integration test and screenshots
 
 **Files:**
 - Modify: `extension/test/integration/runTest.mjs`, `extension/test/integration/suite.cjs`, `extension/scripts/screenshots.mjs`
@@ -3247,16 +4118,50 @@ Take all of them and Read each PNG. Check them against the specs:
 
 Fix real defects (with a test where testable) in separate `fix(…)` commits.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Descriptions, Refine and agent changes**
+
+In `runTest.mjs`:
+- give `demo.json`'s step a `description: 'Says hello with the greeting value.'`;
+- write `second.baseline.json`: a copy of `second.json` whose step command is `echo original`, so `second`'s `echo second` reads as an agent change.
+
+In `suite.cjs`:
+
+```js
+// Step descriptions reach the run preview.
+const shown = [];
+const previewClient = { send: (m) => shown.push(m) };
+const detachPreview = app.connect(previewClient);
+await app.handle(previewClient, { type: 'previewRun', graphId: 'demo' });
+assert.equal(shown.find((m) => m.type === 'runPreview').preview.steps[0].description, 'Says hello with the greeting value.');
+// Refine refuses a step with only a title (no planner turn runs in CI).
+app.graphStore.apply('demo', { type: 'addNode', node: { id: 'n9', title: 'Only a title', kind: 'agent' } }, 'user');
+await app.handle(previewClient, { type: 'refineSteps', graphId: 'demo', sessionId: 'default', nodeIds: ['n9'] });
+assert.equal(shown.filter((m) => m.type === 'error').at(-1).message, 'Write what the step should do first.');
+app.graphStore.apply('demo', { type: 'deleteNode', id: 'n9' }, 'user');
+detachPreview();
+// Agent changes against the baseline are reported, and the Graphs list counts them.
+assert.deepEqual(app.graphStore.agentChanges('second').map((c) => [c.kind, c.change, c.id]), [['node', 'changed', 'n1']]);
+assert.equal(app.listGraphs().find((g) => g.id === 'second').agentChanges, 1);
+```
+
+The `deleteNode` cleans up so the earlier `listGraphs` assertion and the run checks stay as they were. Put this block after the sessions check.
+
+Screenshots: add these shots per theme.
+- `descriptions`: the demo graph tab, with the step card showing its description, and the Node panel open on it showing Description and **Refine with planner**.
+- `agent-changes`: the `second` graph, with its step marked `✎` and the **Changes (1)** tab open, showing the before/after of the command.
+
+Read each one and check it against the descriptions and agent-changes specs.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add extension/test/integration extension/scripts/screenshots.mjs
-git commit -m "test(extension): integration and screenshots for providers, sessions and the chat view"
+git commit -m "test(extension): integration and screenshots for providers, sessions, the chat view, descriptions and agent changes"
 ```
 
 ---
 
-### Task 11: Provider-agnostic documentation
+### Task 16: Provider-agnostic documentation
 
 **Files:**
 - Modify: `README.md`, `extension/README.md`, `docs/windows-checklist.md`, `extension/package.json` (`description`, `keywords`)
@@ -3294,6 +4199,9 @@ A VS Code extension where you and an AI planner co-create a workflow as a graph,
   - Switching a session closes the current graph tabs and brings back the other session's tabs, splits and chats.
   - Sessions are personal: they stay in `.agent-stream/sessions/`, which git ignores.
 - **Status bar:** the provider your steps run on (for example `Claude Max` or `Copilot (preview)`) and the current session (`Default`). Click either one to change it.
+- **Step descriptions.** Each step has a plain-language description for people. It shows on the canvas card, and agents get it as context: a step sees its own description as "In short", and later steps see earlier steps' descriptions next to their results. The planner writes one for every step it adds or changes, and you can write or edit it in the Node panel.
+- **Refine with planner.** Write a step in plain words, then press **Refine with planner** (Node panel, or **Edit › Refine selected step / Refine steps you changed**). The planner reads your repository and writes the precise prompt or command, plus a one-line description, for you to review.
+- **Agent changes.** The planner, and agent steps during a run, can change the graph. A step agent asks your approval first, showing the exact text that would run. Approved changes apply to the running run and stay marked on the canvas (`＋` added, `✎` changed, faded ghosts for removed steps) until you **Accept** them into your original graph or **Revert** them in the **Changes** tab. The tab shows each change's before and after and who made it.
 - Keep the existing **Variables**, **Run** and **Export / Import** bullets unchanged.
 
 **Providers.** This section replaces "Your Claude subscription":
@@ -3326,6 +4234,8 @@ Agent Stream finds your Copilot models through VS Code's Language Model API and 
   - "Run **Agent Stream: Select Provider** and choose GitHub Copilot. The status bar shows `Copilot (preview)` or `Copilot not available`, Run is refused with the Copilot message, and Chat is disabled with it. Switch back to Claude; the status bar shows your plan again."
   - "Create a second session from the Sessions view with one graph open in a split, switch back and forth: the right tabs and splits come back each time."
   - "Open the Agent Stream Chat view: it follows the active graph tab; New chat asks first, then clears that conversation only."
+  - "Write a step in plain words and press **Refine with planner**: the planner writes a detailed prompt and a one-line description, and the step shows `✎ planner`; **Accept** it in the Changes tab and the mark goes away."
+  - "In a run, ask an agent step to add a workaround step: the approval shows the exact command; approve it and the new step runs in this run, marked `＋ n… · run …` on the canvas."
 - **`extension/package.json`:**
   - `"description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude today, GitHub Copilot in preview."`
   - `"keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot"]`
