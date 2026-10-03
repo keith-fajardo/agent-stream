@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelChoice } from '@agent-stream/shared';
 import { ChatApp } from '../src/ChatApp';
 import { dispatch, resetStoreForTests } from '../src/store';
@@ -23,6 +23,9 @@ async function render() {
 }
 
 describe('ChatApp', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
   beforeEach(() => {
     posted.length = 0;
     resetStoreForTests();
@@ -106,16 +109,6 @@ describe('ChatApp', () => {
       expect(box.value).toBe('next idea');
     });
 
-    it('moves focus to Stop when the planner becomes busy and back to the message box when it stops', async () => {
-      const el = await open(false);
-      const box = await type(el, 'plan it');
-      await act(async () => sendButton(el)!.focus());
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: true } }));
-      expect(document.activeElement).toBe(stopButton(el));
-      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy: false } }));
-      expect(document.activeElement).toBe(box);
-    });
-
     const busyMsg = (busy: boolean) => ({ kind: 'server', msg: { type: 'chatBusy', graphId: 'g1', sessionId: 'default', busy } }) as const;
     const outsideInput = () => {
       const other = document.createElement('input');
@@ -124,31 +117,79 @@ describe('ChatApp', () => {
       return other;
     };
 
+    const sendViaClick = async (el: HTMLElement) => {
+      const box = await type(el, 'plan it');
+      await act(async () => sendButton(el)!.focus());
+      await act(async () => sendButton(el)!.click());
+      expect(box.value).toBe('');
+      expect(sendButton(el)!.disabled).toBe(true);
+      return box;
+    };
+
+    it('after a clicked Send (which empties the box and disables Send), busy hands focus to Stop and idle back to the box', async () => {
+      const el = await open(false);
+      const box = await sendViaClick(el);
+      await act(async () => dispatch(busyMsg(true)));
+      expect(document.activeElement).toBe(stopButton(el));
+      await act(async () => dispatch(busyMsg(false)));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it('does the same after Enter-to-send', async () => {
+      const el = await open(false);
+      const box = await type(el, 'plan it');
+      await act(async () => box.focus());
+      await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      await act(async () => dispatch(busyMsg(true)));
+      expect(document.activeElement).toBe(stopButton(el));
+      await act(async () => dispatch(busyMsg(false)));
+      expect(document.activeElement).toBe(box);
+    });
+
     it('does not move focus when mounting with an already-busy session', async () => {
       const other = outsideInput();
       await open(true);
       expect(document.activeElement).toBe(other);
     });
 
-    it('does not steal focus when busy flips while focus is outside the chat', async () => {
+    it('does not move focus when busy changes without a send, even with focus in the box', async () => {
       const el = await open(false);
+      const box = el.querySelector('textarea')!;
+      await act(async () => box.focus());
+      await act(async () => dispatch(busyMsg(true)));
+      expect(document.activeElement).toBe(box);
+      await act(async () => dispatch(busyMsg(false)));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it('does not move focus on a session switch delivered as separate chatTarget and chatOpened messages', async () => {
+      const el = await open(false);
+      const box = el.querySelector('textarea')!;
+      await act(async () => box.focus());
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatTarget', target: { ...target, sessionId: 's2', sessionName: 'Two' } } }));
+      await act(async () => dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 's2', chat: [], busy: true } }));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it('does not move focus after a send if focus then goes to an outside input', async () => {
+      const el = await open(false);
+      await sendViaClick(el);
       const other = outsideInput();
       await act(async () => dispatch(busyMsg(true)));
-      expect(stopButton(el)).not.toBeNull();
       expect(document.activeElement).toBe(other);
       await act(async () => dispatch(busyMsg(false)));
       expect(document.activeElement).toBe(other);
     });
 
-    it('does not move focus from the message box when the planner starts without a send, or on a session switch', async () => {
+    it('does not move focus back when the window lost focus during the turn', async () => {
       const el = await open(false);
-      const box = el.querySelector('textarea')!;
-      await act(async () => box.focus());
-      await act(async () => {
-        dispatch({ kind: 'server', msg: { type: 'chatTarget', target: { ...target, sessionId: 's2', sessionName: 'Two' } } });
-        dispatch({ kind: 'server', msg: { type: 'chatOpened', graphId: 'g1', sessionId: 's2', chat: [], busy: true } });
-      });
-      expect(document.activeElement).toBe(box);
+      await sendViaClick(el);
+      await act(async () => dispatch(busyMsg(true)));
+      expect(document.activeElement).toBe(stopButton(el));
+      await act(async () => void window.dispatchEvent(new Event('blur')));
+      (document.activeElement as HTMLElement).blur();
+      await act(async () => dispatch(busyMsg(false)));
+      expect(document.activeElement).toBe(document.body);
     });
 
     it('does not send on Enter during an IME composition', async () => {
