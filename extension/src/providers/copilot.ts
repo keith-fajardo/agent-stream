@@ -23,7 +23,10 @@ export const AUTO_MODEL = 'auto';
 export const stepPreamble = (cwd: string) =>
   `You are an agent running one step of a workflow in ${cwd}. Use the tools to do the work; when finished, reply with a summary of what you did.`;
 export const copilotCapMessage = (n: number, setting: 'maxRequestsPerStep' | 'maxRequestsPerTurn') =>
-  `Stopped after ${n} Copilot requests (agentStream.copilot.${setting}). Raise the setting to let steps run longer.`;
+  `Stopped after ${n} Copilot requests (agentStream.copilot.${setting}). ` +
+  (setting === 'maxRequestsPerTurn'
+    ? 'Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.'
+    : 'Raise the setting to let steps run longer.');
 export const requestLine = (n: number, cap: number) => `Copilot requests: ${n} of ${cap}`;
 
 /** The slice of vscode.lm the provider uses. */

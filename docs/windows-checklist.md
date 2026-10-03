@@ -52,7 +52,7 @@ Run on a Windows machine with Claude Code installed and signed in, and Git for W
 
 23. **Consent.** The status bar tooltip says `Copilot will ask for permission the first time a run or chat uses it.` When you start the run in step 24, VS Code asks whether Agent Stream may use Copilot. Choose Allow.
 24. **Two-step graph.** Make a graph with an agent step "Add a line `hello` to notes.txt" (Can edit files), followed by an agent step "Run `git status` with Bash and report what it says". Run it.
-    - The run dialog shows `Copilot requests per step: up to 25`.
+    - The run dialog shows `Copilot requests per step: up to 100`.
     - The first step asks for approval before its Edit or Write. Approve it, and `notes.txt` changes.
     - The second step asks before its Bash call. Approve it. Its log shows the tool call, the result ending with `exit code 0`, and the model's summary.
     - Each step's log ends with `Copilot requests: <n> of 25`.

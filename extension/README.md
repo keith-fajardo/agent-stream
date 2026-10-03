@@ -134,8 +134,8 @@ Recommended workflow:
 - `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): the provider's default (Claude Code's default; Auto on Copilot).
 - `agentStream.effort` — the effort level for the same: `low`, `medium`, `high`, `xhigh` or `max`. Empty (default): the model's own level.
 - `agentStream.maxParallel` — how many steps of a run may run at once (default 3). Steps that can change files still take turns within each workspace.
-- `agentStream.copilot.maxRequestsPerStep` — GitHub Copilot: the most model requests one agent step may make (default 25, 1–200). A step that reaches it stops with a message naming this setting.
-- `agentStream.copilot.maxRequestsPerTurn` — GitHub Copilot: the most model requests one planner chat message may make (default 10, 1–100).
+- `agentStream.copilot.maxRequestsPerStep` — GitHub Copilot: the most model requests one agent step may make (default 100, 1–200). A step that reaches it stops with a message naming this setting.
+- `agentStream.copilot.maxRequestsPerTurn` — GitHub Copilot: the most model requests one planner chat message may make (default 100, 1–100). A planner message that reaches it stops with a message naming this setting; type continue to pick up where it stopped.
 
 ## Providers
 
@@ -156,7 +156,7 @@ How Copilot behaves:
 - **Models:** the Model menus list the Copilot models that can call tools, with **Auto** first. Copilot's internal models (ids starting with `copilot-`) and models that can't call tools are hidden. **Default** means Auto. A model that is no longer available falls back to Auto, and the step's log says so. Copilot has no effort levels, so the Effort menu hides.
 - **Permission:** the first run or chat on Copilot shows VS Code's dialog asking whether Agent Stream may use Copilot. If you decline, the step fails and says how to allow it later (**Accounts › Manage Language Model Access**).
 - **Request cap:**
-  - Each agent step may make up to `agentStream.copilot.maxRequestsPerStep` model requests (default 25), and each planner message up to `agentStream.copilot.maxRequestsPerTurn` (default 10).
+  - Each agent step may make up to `agentStream.copilot.maxRequestsPerStep` model requests (default 100), and each planner message up to `agentStream.copilot.maxRequestsPerTurn` (default 100).
   - The run dialog shows `Copilot requests per step: up to <n>`, and each step's log ends with `Copilot requests: <n> of <cap>`.
   - Whether these requests count against your premium-request quota is not verified, and Agent Stream doesn't track it. Check your Copilot usage page. Each step's log shows how many Copilot requests it used.
 - **Long conversations:** when a conversation nears the model's input limit, older turns are summarised in one extra request, which counts toward the cap. If that isn't possible, they are dropped with a note.

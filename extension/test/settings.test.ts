@@ -7,7 +7,7 @@ describe('readSettings', () => {
   it('trims paths and keeps maxParallel within 1–16', () => {
     const values: Record<string, unknown> = { claudePath: ' /opt/claude ', gitBashPath: '', maxParallel: 40, provider: ' copilot ' };
     vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: (key: string, fallback: unknown) => values[key] ?? fallback } as never);
-    expect(readSettings()).toEqual({ claudePath: '/opt/claude', gitBashPath: '', maxParallel: 16, provider: 'copilot', model: '', effort: '', copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 });
+    expect(readSettings()).toEqual({ claudePath: '/opt/claude', gitBashPath: '', maxParallel: 16, provider: 'copilot', model: '', effort: '', copilotMaxRequestsPerStep: 100, copilotMaxRequestsPerTurn: 100 });
     values.maxParallel = 'many';
     expect(readSettings().maxParallel).toBe(3);
   });
@@ -30,10 +30,10 @@ describe('readSettings', () => {
     expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 200, copilotMaxRequestsPerTurn: 1 });
     values['copilot.maxRequestsPerStep'] = 40;
     values['copilot.maxRequestsPerTurn'] = 'lots';
-    expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 40, copilotMaxRequestsPerTurn: 10 });
+    expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 40, copilotMaxRequestsPerTurn: 100 });
     values['copilot.maxRequestsPerStep'] = 2.5;
     delete values['copilot.maxRequestsPerTurn'];
-    expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 });
+    expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 100, copilotMaxRequestsPerTurn: 100 });
   });
 
   it('uses the default, not the minimum, for a value that is not a number', () => {
@@ -43,7 +43,7 @@ describe('readSettings', () => {
       values['copilot.maxRequestsPerStep'] = bad;
       values['copilot.maxRequestsPerTurn'] = bad;
       values.maxParallel = bad;
-      expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10, maxParallel: 3 });
+      expect(readSettings()).toMatchObject({ copilotMaxRequestsPerStep: 100, copilotMaxRequestsPerTurn: 100, maxParallel: 3 });
     }
     values['copilot.maxRequestsPerStep'] = '40';
     expect(readSettings().copilotMaxRequestsPerStep).toBe(40);
@@ -52,8 +52,8 @@ describe('readSettings', () => {
   it('declares the Copilot request caps in the manifest with their ranges', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     const props = manifest.contributes.configuration.properties;
-    expect(props['agentStream.copilot.maxRequestsPerStep']).toMatchObject({ type: 'integer', default: 25, minimum: 1, maximum: 200 });
-    expect(props['agentStream.copilot.maxRequestsPerTurn']).toMatchObject({ type: 'integer', default: 10, minimum: 1, maximum: 100 });
+    expect(props['agentStream.copilot.maxRequestsPerStep']).toMatchObject({ type: 'integer', default: 100, minimum: 1, maximum: 200 });
+    expect(props['agentStream.copilot.maxRequestsPerTurn']).toMatchObject({ type: 'integer', default: 100, minimum: 1, maximum: 100 });
     expect(JSON.stringify(props['agentStream.provider'])).not.toContain('preview');
   });
 });

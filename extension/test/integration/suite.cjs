@@ -81,8 +81,8 @@ exports.run = async function run() {
   // Providers: GitHub Copilot is selectable. This fresh profile normally has no signed-in Copilot, so its status
   // can't run, and a run is refused with the provider's own reason. Nothing here sends a Copilot request.
   const config = () => vscode.workspace.getConfiguration('agentStream');
-  assert.equal(config().get('copilot.maxRequestsPerStep'), 25);
-  assert.equal(config().get('copilot.maxRequestsPerTurn'), 10);
+  assert.equal(config().get('copilot.maxRequestsPerStep'), 100);
+  assert.equal(config().get('copilot.maxRequestsPerTurn'), 100);
   await config().update('provider', 'copilot', vscode.ConfigurationTarget.Global);
   await waitFor(() => api.engines.status.provider === 'copilot' && api.engines.status.label !== 'checking', 'the Copilot status');
   assert.ok(['Copilot', 'Copilot not available', 'Copilot not allowed'].includes(api.engines.status.label), api.engines.status.label);

@@ -73,14 +73,14 @@
         },
         "agentStream.copilot.maxRequestsPerStep": {
           "type": "integer",
-          "default": 25,
+          "default": 100,
           "minimum": 1,
           "maximum": 200,
           "description": "GitHub Copilot: the most model requests one agent step may make. A step that reaches it stops and says so."
         },
         "agentStream.copilot.maxRequestsPerTurn": {
           "type": "integer",
-          "default": 10,
+          "default": 100,
           "minimum": 1,
           "maximum": 100,
           "description": "GitHub Copilot: the most model requests one planner chat message may make."

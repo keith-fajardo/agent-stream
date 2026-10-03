@@ -44,7 +44,7 @@ Success:
 | Tools | Our own `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, with Claude's tool names and input shapes, so the approval cards, read-only rules and privacy checks apply unchanged |
 | Models | Models with `supportsToolCalling`, excluding ids that start with `copilot-`. **Default** means `auto` |
 | Effort | Not offered for Copilot (`efforts: []`); the Effort menu hides |
-| Request cap | `agentStream.copilot.maxRequestsPerStep` (default 25, range 1–200) and `agentStream.copilot.maxRequestsPerTurn` (default 10, range 1–100) |
+| Request cap | `agentStream.copilot.maxRequestsPerStep` (default 100, range 1–200) and `agentStream.copilot.maxRequestsPerTurn` (default 100, range 1–100). Amended 2026-10-04: the first defaults (25 and 10) were too low, because a planner turn that builds a graph makes one request per tool call |
 | Planner history | A per-conversation transcript file owned by the planner, offered to providers that have no server-side session |
 | Long history | Compacted with one summary request when it nears the model's input limit |
 

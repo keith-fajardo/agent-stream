@@ -9,9 +9,9 @@ export type Settings = {
   provider: string;
   model: string;
   effort: EffortLevel | '';
-  /** agentStream.copilot.maxRequestsPerStep: 1–200, default 25. */
+  /** agentStream.copilot.maxRequestsPerStep: 1–200, default 100. */
   copilotMaxRequestsPerStep: number;
-  /** agentStream.copilot.maxRequestsPerTurn: 1–100, default 10. */
+  /** agentStream.copilot.maxRequestsPerTurn: 1–100, default 100. */
   copilotMaxRequestsPerTurn: number;
 };
 
@@ -33,7 +33,7 @@ export function readSettings(): Settings {
     maxParallel: intSetting(config.get('maxParallel', 3), 1, 16, 3),
     model: typeof model === 'string' ? model.trim() : '',
     effort: isEffortLevel(effort) ? effort : '',
-    copilotMaxRequestsPerStep: intSetting(config.get('copilot.maxRequestsPerStep', 25), 1, 200, 25),
-    copilotMaxRequestsPerTurn: intSetting(config.get('copilot.maxRequestsPerTurn', 10), 1, 100, 10),
+    copilotMaxRequestsPerStep: intSetting(config.get('copilot.maxRequestsPerStep', 100), 1, 200, 100),
+    copilotMaxRequestsPerTurn: intSetting(config.get('copilot.maxRequestsPerTurn', 100), 1, 100, 100),
   };
 }

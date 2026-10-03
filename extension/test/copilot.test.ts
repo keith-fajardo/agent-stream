@@ -352,6 +352,6 @@ describe('Copilot planTurn', () => {
   it('stops at agentStream.copilot.maxRequestsPerTurn', async () => {
     const m = fakeLmModel({ id: 'auto', replies: [[call('c1', 'add_node', {})]] });
     const r = await provider({ lm: models(m.model), limits: { maxRequestsPerTurn: 1 } }).planTurn(turn().t);
-    expect(r).toEqual({ ok: true, sessionId: expect.any(String), error: 'Stopped after 1 Copilot requests (agentStream.copilot.maxRequestsPerTurn). Raise the setting to let steps run longer.' });
+    expect(r).toEqual({ ok: true, sessionId: expect.any(String), error: 'Stopped after 1 Copilot requests (agentStream.copilot.maxRequestsPerTurn). Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.' });
   });
 });
