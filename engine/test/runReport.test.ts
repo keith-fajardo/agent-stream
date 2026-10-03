@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Graph, NodeEvent, RunMeta } from '@agent-stream/shared';
 import { buildRunReport, fenced, type RunReportInput } from '../src/runReport';
 
@@ -72,8 +72,14 @@ const n1Events: NodeEvent[] = [
 ];
 
 /** A project folder on disk with the run's files and a values file holding a secret, as a real export would see it. */
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 function fixture(): { input: RunReportInput; root: string } {
   const root = mkdtempSync(join(tmpdir(), 'run-report-'));
+  roots.push(root);
   writeFileSync(join(root, 'values.json'), JSON.stringify({ parity: { schema: SECRET } }));
   return {
     root,
@@ -93,6 +99,7 @@ function fixture(): { input: RunReportInput; root: string } {
 const parser = new MarkdownIt({ html: true });
 const tokens = (md: string) => parser.parse(md, {});
 const headings = (md: string) => tokens(md).flatMap((t, i, all) => (t.type === 'heading_open' ? [`${t.markup} ${all[i + 1].content}`] : []));
+const blockTypes = (md: string) => tokens(md).map((t) => t.type);
 const codeBlocks = (md: string) => tokens(md).filter((t) => t.type === 'fence').map((t) => t.content);
 
 describe('buildRunReport', () => {
@@ -125,9 +132,11 @@ describe('buildRunReport', () => {
     expect(head).toContain('- Commit: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678');
     expect(head).toContain('- Folder: /work/app');
     expect(head).toContain('- Variant workspaces:\n  - wh_small → /home/me/.agent-stream/worktrees/app-abcd-wh_small');
-    expect(head).toContain('Prompts and commands appear exactly as they ran, including filled-in variable values. Saved variable values and environment variables are never included.');
-    expect(md).toContain('## Goal\n\n> Prove the new model matches the old one.');
-    expect(md).toContain('## Instructions\n\n> Use the dev schema.');
+    expect(head).toContain(
+      'Prompts, commands and step output appear exactly as they ran, including filled-in variable and environment values and anything an agent printed. The saved variable values file is never included.',
+    );
+    expect(md).toContain('## Goal\n\n```\nProve the new model matches the old one.\n```');
+    expect(md).toContain('## Instructions\n\n```\nUse the dev schema.\n```');
   });
 
   it('numbers the plan in run order with kind, access, workspace and what each step follows', () => {
@@ -138,7 +147,7 @@ describe('buildRunReport', () => {
   it('shows each step with its description, the prompt or command as it ran, tool calls and usage', () => {
     const md = buildRunReport(fixture().input);
     const n1 = md.slice(md.indexOf('### n1'), md.indexOf('### n2'));
-    expect(n1).toContain('Reads the models and reports.');
+    expect(n1).toContain('_Description:_ Reads the models and reports.');
     expect(n1).toContain('<details><summary>Prompt</summary>\n\n```\nRead dev models.\n```\n\n</details>');
     expect(codeBlocks(md)).toContain('Read dev models.\n');
     expect(n1).toContain('**Tool calls**');
@@ -167,14 +176,29 @@ describe('buildRunReport', () => {
     expect(md).toContain('**Approvals**\n\n- 2026-10-03T10:00:05.000Z Bash: approved\n- 2026-10-03T10:00:09.000Z Write: denied — read-only step, no writes\n');
   });
 
-  it('shows pending and cancelled approvals as such', () => {
+  it('shows cancelled approvals as such, and an undecided one as pending only while its step still runs', () => {
     const { input } = fixture();
     input.steps.n1.events = [
       { at: 'a', type: 'approval_requested', approvalId: 'p', toolName: 'Edit', input: {} },
       { at: 'b', type: 'approval_requested', approvalId: 'c', toolName: 'Bash', input: {} },
       { at: 'c', type: 'approval_decided', approvalId: 'c', decision: 'cancelled' },
     ];
-    expect(buildRunReport(input)).toContain('**Approvals**\n\n- a Edit: pending\n- b Bash: cancelled\n');
+    expect(buildRunReport(input)).toContain('**Approvals**\n\n- a Edit: never decided\n- b Bash: cancelled\n');
+    for (const status of ['running', 'waiting_approval'] as const) {
+      input.run = { ...run, status: 'running', nodes: { ...run.nodes, n1: { status } } };
+      expect(buildRunReport(input)).toContain('- a Edit: pending\n');
+    }
+  });
+
+  it('pairs each approval with its own decision by id', () => {
+    const { input } = fixture();
+    input.steps.n1.events = [
+      { at: 't1', type: 'approval_requested', approvalId: 'first', toolName: 'Bash', input: { command: 'ls' } },
+      { at: 't2', type: 'approval_requested', approvalId: 'second', toolName: 'Bash', input: { command: 'rm -rf x' } },
+      { at: 't3', type: 'approval_decided', approvalId: 'second', decision: 'deny', note: 'no deleting' },
+      { at: 't4', type: 'approval_decided', approvalId: 'first', decision: 'approve' },
+    ];
+    expect(buildRunReport(input)).toContain('**Approvals**\n\n- t1 Bash: approved\n- t2 Bash: denied — no deleting\n');
   });
 
   it('cuts long output to 2,000 characters and points at the full output file', () => {
@@ -186,6 +210,14 @@ describe('buildRunReport', () => {
     const n1 = md.slice(md.indexOf('### n1'), md.indexOf('### n2'));
     expect(n1).toContain('**Output**\n\n```\nAll models read.\n```');
     expect(n1).not.toContain('[full output');
+  });
+
+  it('leaves out the full output pointer when there is no output path', () => {
+    const { input } = fixture();
+    delete input.steps.n2.outputPath;
+    const md = buildRunReport(input);
+    expect(md).toContain('x'.repeat(1990));
+    expect(md).not.toContain('[full output');
   });
 
   it('uses a fence longer than any backtick run in the content, so content cannot break out', () => {
@@ -202,7 +234,7 @@ describe('buildRunReport', () => {
 
   it('leaves out empty sections', () => {
     const { input } = fixture();
-    input.run = { ...run, snapshot: { ...snapshot, goal: '', instructions: '  ' }, amendments: undefined, checkout: undefined, workspaces: undefined };
+    input.run = { ...run, snapshot: { ...snapshot, goal: '', instructions: '  ' }, rendered: { ...run.rendered!, goal: '', instructions: '  ' }, amendments: undefined, checkout: undefined, workspaces: undefined };
     const md = buildRunReport(input);
     expect(md).not.toContain('## Goal');
     expect(md).not.toContain('## Instructions');
@@ -215,6 +247,69 @@ describe('buildRunReport', () => {
   it('lists the changes agents made during the run', () => {
     const md = buildRunReport(fixture().input);
     expect(md).toContain("## Agent changes during the run\n\n- 2026-10-03T10:00:30.000Z · by n1 · n1 wants to change n2's command\n");
+  });
+
+  it('writes the model as recorded, even when it contains the separator', () => {
+    const { input } = fixture();
+    input.run = { ...run, model: 'claude-opus · 1m', effort: 'max' };
+    expect(buildRunReport(input)).toContain('- Model: claude-opus · 1m\n- Effort: max\n');
+  });
+
+  it('shows the goal and instructions as they ran, so their markup cannot add headings, images, links or definitions', () => {
+    const { input } = fixture();
+    const goal = '# h\n![](http://x)\n[a]: http://x\nSee [a] for {{ schema }}.';
+    input.run = { ...run, snapshot: { ...snapshot, goal, instructions: '## inst {{ schema }}' }, rendered: { ...run.rendered!, goal: goal.replace('{{ schema }}', 'dev'), instructions: '## inst dev' } };
+    const md = buildRunReport(input);
+    expect(md).toContain('See [a] for dev.');
+    expect(md).toContain('## inst dev');
+    expect(md).not.toContain('{{ schema }}');
+    expect(headings(md)).not.toContain('# h');
+    expect(headings(md)).not.toContain('## inst dev');
+    expect(tokens(md).flatMap((t) => t.children ?? []).filter((t) => t.type === 'image' || t.type === 'link_open')).toEqual([]);
+    const env: Record<string, unknown> = {};
+    parser.parse(md, env);
+    expect(env.references).toBeUndefined();
+    // Falls back to the snapshot for runs without rendered text.
+    input.run = { ...input.run, rendered: undefined };
+    expect(buildRunReport(input)).toContain('See [a] for {{ schema }}.');
+  });
+
+  it('keeps line-start markup in a description from becoming headings, lists, quotes or rules', () => {
+    const { input } = fixture();
+    const clean = blockTypes(buildRunReport(input));
+    for (const description of ['# x', '- x', '+ x', '1. x', '1) x', '> x', '---', '***', '___', '===', '~~~', '# x\n- y\n---\n> z']) {
+      input.run = { ...run, snapshot: { ...snapshot, nodes: snapshot.nodes.map((n) => (n.id === 'n1' ? { ...n, description } : n)) } };
+      const md = buildRunReport(input);
+      const count = (types: string[], type: string) => types.filter((t) => t === type).length;
+      const types = blockTypes(md);
+      for (const type of ['heading_open', 'bullet_list_open', 'ordered_list_open', 'blockquote_open', 'hr', 'fence', 'list_item_open']) expect([description, type, count(types, type)]).toEqual([description, type, count(clean, type)]);
+    }
+  });
+
+  it('keeps line-start markup in tool names and workspace names inside their list items', () => {
+    const { input } = fixture();
+    const clean = blockTypes(buildRunReport(input));
+    input.run = { ...run, workspaces: { '# ws': { path: '/w', head: 'h' } } };
+    input.steps.n1.events = [...n1Events, { at: 'z', type: 'tool_call', toolUseId: 'tx', name: '# Tool', input: {} }];
+    const types = blockTypes(buildRunReport(input));
+    expect(types.filter((t) => t === 'heading_open').length).toBe(clean.filter((t) => t === 'heading_open').length);
+  });
+
+  it('shows a step an agent added during the run in the plan and the steps', () => {
+    const { input } = fixture();
+    const added = node('n3', { title: 'Compare results', kind: 'agent', prompt: 'Compare.', createdBy: 'agent', updatedBy: 'agent' });
+    input.run = {
+      ...run,
+      snapshot: { ...snapshot, nodes: [...snapshot.nodes, added], edges: [...snapshot.edges, { id: 'n1->n3', from: 'n1', to: 'n3' }] },
+      rendered: { ...run.rendered!, nodes: { ...run.rendered!.nodes, n3: 'Compare the results.' } },
+      nodes: { ...run.nodes, n3: { status: 'succeeded', durationMs: 1500 } },
+      amendments: [...run.amendments!, { at: '2026-10-03T10:00:40.000Z', byNodeId: 'n1', nodeId: 'n3', summary: 'n1 wants to add n3 Compare results' }],
+    };
+    const md = buildRunReport(input);
+    expect(md).toMatch(/\n3\. n3 · Compare results \(agent\) — after n1\n/);
+    expect(headings(md)).toContain('### n3 · Compare results — Succeeded, 1.5 s');
+    expect(md).toContain('Compare the results.');
+    expect(md).toContain('- 2026-10-03T10:00:40.000Z · by n1 · n1 wants to add n3 Compare results');
   });
 
   it('says Default for an unset model and effort, and that Copilot has no effort', () => {

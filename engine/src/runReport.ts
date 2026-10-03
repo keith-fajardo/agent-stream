@@ -1,4 +1,4 @@
-import { fmtDuration, modelLine, PROVIDER_NAMES, statusLabel, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { fmtDuration, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -13,7 +13,8 @@ const MAX_OUTPUT = 2_000;
 const MAX_RESULT = 300;
 const MAX_TARGET = 120;
 
-export const RUN_REPORT_NOTE = 'Prompts and commands appear exactly as they ran, including filled-in variable values. Saved variable values and environment variables are never included.';
+export const RUN_REPORT_NOTE =
+  'Prompts, commands and step output appear exactly as they ran, including filled-in variable and environment values and anything an agent printed. The saved variable values file is never included.';
 
 /** At most `max` characters, never splitting a surrogate pair; `…` marks a cut. */
 function cut(text: string, max: number): { text: string; cut: boolean } {
@@ -49,6 +50,17 @@ function inline(text: string): string {
     .replace(/(^|[^A-Za-z0-9])_|_(?=[^A-Za-z0-9]|$)/g, (m) => m.replace('_', '\\_'));
 }
 
+/**
+ * Text that begins a line, or a list item's content: markers that only count there (headings, list items, quotes,
+ * rules, setext underlines, fences, tables) are escaped. Use it on top of `inline`.
+ */
+function lineStart(text: string): string {
+  return text.replace(/^(\d{1,9})([.)])/, '$1\\$2').replace(/^[#>+\-=~|]/, (c) => `\\${c}`);
+}
+
+/** `inline` for text that starts a line or a list item. */
+const inlineStart = (text: string): string => lineStart(inline(text));
+
 const firstLine = (text: string): string => text.split(/\r\n|\n|\r/).find((l) => l.trim())?.trim() ?? '';
 const fieldsOf = (input: unknown): Record<string, unknown> => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {});
 
@@ -82,7 +94,9 @@ function stepOrder(run: RunMeta): GraphNode[] {
 
 function header(input: RunReportInput): string[] {
   const { run } = input;
-  const [model, effort] = modelLine({ model: run.model, effort: run.effort, provider: run.provider }).split(' · ');
+  // The run dialog's Model line wording: an unset model or effort is Default, and Copilot has no effort levels.
+  const model = run.model ?? 'Default';
+  const effort = run.provider && !supportsEffort(run.provider) ? 'not supported' : (run.effort ?? 'Default');
   const lines = [
     `# Run report: ${inline(input.graphName)}`,
     '',
@@ -91,8 +105,8 @@ function header(input: RunReportInput): string[] {
     `- Started: ${run.startedAt}`,
     `- Duration: ${durationOf(run) ?? (run.status === 'running' ? 'still running' : 'unknown')}`,
     `- Provider: ${run.provider ? PROVIDER_NAMES[run.provider] : 'not recorded'}`,
-    `- ${inline(model)}`,
-    `- ${inline(effort)}`,
+    `- Model: ${inline(model)}`,
+    `- Effort: ${inline(effort)}`,
   ];
   const c = run.checkout;
   if (c) {
@@ -103,20 +117,14 @@ function header(input: RunReportInput): string[] {
   const workspaces = Object.entries(run.workspaces ?? {});
   if (workspaces.length) {
     lines.push('- Variant workspaces:');
-    for (const [name, w] of workspaces) lines.push(`  - ${inline(name)} → ${inline(w.path)}${w.removed ? ' (removed)' : ''}`);
+    for (const [name, w] of workspaces) lines.push(`  - ${inlineStart(name)} → ${inline(w.path)}${w.removed ? ' (removed)' : ''}`);
   }
   return [...lines, '', RUN_REPORT_NOTE];
 }
 
-/** The goal or instructions as written, quoted so headings or HTML inside can't change the report's structure. */
+/** The goal or instructions as they ran, fenced so nothing in them (headings, images, links, definitions, HTML) is markup. */
 function textSection(title: string, text: string): string[] {
-  if (!text.trim()) return [];
-  const quoted = text
-    .trim()
-    .replace(/\r\n?/g, '\n')
-    .split('\n')
-    .map((line) => (line.trim() ? `> ${line.replace(/</g, '\\<')}` : '>'));
-  return [`## ${title}`, '', ...quoted];
+  return text.trim() ? [`## ${title}`, '', fenced(text.trim())] : [];
 }
 
 function plan(run: RunMeta, order: GraphNode[]): string[] {
@@ -136,14 +144,16 @@ function toolCalls(events: NodeEvent[]): string[] {
     if (e.type !== 'tool_call') continue;
     const target = toolTarget(e.input);
     const result = results.get(e.toolUseId);
-    lines.push(`- ${inline(e.name)}${target ? ` ${code(target)}` : ''}${result?.isError ? ' (error)' : ''}${result ? '' : ' (no result)'}`);
+    lines.push(`- ${inlineStart(e.name)}${target ? ` ${code(target)}` : ''}${result?.isError ? ' (error)' : ''}${result ? '' : ' (no result)'}`);
     if (result && result.content.trim()) lines.push('', fenced(cut(result.content, MAX_RESULT).text, '  '), '');
   }
   while (lines.at(-1) === '') lines.pop();
   return lines.length ? ['**Tool calls**', '', ...lines] : [];
 }
 
-function approvals(events: NodeEvent[]): string[] {
+/** Approvals in request order, each paired with its own decision by id. Undecided reads pending only while the step can still decide. */
+function approvals(events: NodeEvent[], status: NodeRunState['status']): string[] {
+  const undecided = status === 'running' || status === 'waiting_approval' ? 'pending' : 'never decided';
   const decisions = new Map<string, Extract<NodeEvent, { type: 'approval_decided' }>>();
   for (const e of events) if (e.type === 'approval_decided') decisions.set(e.approvalId, e);
   const words = { approve: 'approved', deny: 'denied', cancelled: 'cancelled' } as const;
@@ -151,7 +161,7 @@ function approvals(events: NodeEvent[]): string[] {
     if (e.type !== 'approval_requested') return [];
     const d = decisions.get(e.approvalId);
     const note = d?.note?.trim() ? ` — ${inline(d.note)}` : '';
-    return [`- ${e.at} ${inline(e.toolName)}: ${d ? words[d.decision] : 'pending'}${note}`];
+    return [`- ${e.at} ${inline(e.toolName)}: ${d ? words[d.decision] : undecided}${note}`];
   });
   return lines.length ? ['**Approvals**', '', ...lines] : [];
 }
@@ -161,7 +171,8 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   const duration = durationOf(state);
   const out: string[] = [`### ${n.id} · ${inline(n.title)} — ${statusLabel(state.status)}${duration ? `, ${duration}` : ''}`];
   const block = (lines: string[]) => lines.length && out.push('', ...lines);
-  if (n.description?.trim()) block([inline(n.description)]);
+  // After a label on the same line, so line-start markup in it (an agent can write descriptions) stays text.
+  if (n.description?.trim()) block([`_Description:_ ${inline(n.description)}`]);
   // As it ran: the rendered text, which has the variable values filled in.
   const text = run.rendered?.nodes[n.id] ?? (n.kind === 'command' ? n.command : n.prompt) ?? '';
   if (text.trim()) {
@@ -170,11 +181,11 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   }
   const events = step?.events ?? [];
   block(toolCalls(events));
-  block(approvals(events));
+  block(approvals(events, state.status));
   const output = step?.output ?? '';
   if (output.trim()) {
     const shown = cut(output, MAX_OUTPUT);
-    block(['**Output**', '', fenced(shown.text), ...(shown.cut ? ['', `[full output: ${(step?.outputPath ?? '').replace(/\\/g, '/')}]`] : [])]);
+    block(['**Output**', '', fenced(shown.text), ...(shown.cut && step?.outputPath ? ['', `[full output: ${inline(step.outputPath.replace(/\\/g, '/'))}]`] : [])]);
   }
   if (state.exitCode !== undefined && state.exitCode !== null) block([`**Exit code:** ${state.exitCode}`]);
   if (state.error?.trim()) block(['**Error**', '', fenced(cut(state.error, MAX_OUTPUT).text)]);
@@ -194,8 +205,8 @@ export function buildRunReport(input: RunReportInput): string {
   const order = stepOrder(run);
   const sections: string[][] = [
     header(input),
-    textSection('Goal', run.snapshot.goal),
-    textSection('Instructions', run.snapshot.instructions),
+    textSection('Goal', run.rendered?.goal ?? run.snapshot.goal),
+    textSection('Instructions', run.rendered?.instructions ?? run.snapshot.instructions),
     plan(run, order),
     ['## Steps', ...order.flatMap((n) => ['', ...stepSection(run, n, input.steps[n.id])])],
     amendments(run),
