@@ -179,7 +179,8 @@ export class Planner extends EventEmitter {
         requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
       });
       const r = await provider.planTurn({
-        prompt: userEditsPreamble(ops.slice(state.opCursor ?? 0)) + text,
+        // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.
+        prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + text,
         systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
         tools,

@@ -132,12 +132,31 @@ describe('Planner', () => {
     const s = setup([ran(), ran(), ran()]);
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'before' }, 'user');
     await s.planner.send('a', s.graphId, 'first');
-    expect(s.seen[0].prompt).toBe('[Since your last turn, the user edited the graph:\n- set the goal to "before"\nCall get_graph for the full current state.]\n\nfirst');
+    // A fresh conversation has no last turn, so it gets no list; its cursor still moves past the edits.
+    expect(s.seen[0].prompt).toBe('first');
+    expect(s.state().opCursor).toBe(1);
     await s.planner.send('a', s.graphId, 'second');
     expect(s.seen[1].prompt).toBe('second');
     s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'after' }, 'user');
     await s.planner.send('a', s.graphId, 'third');
     expect(s.seen[2].prompt).toBe('[Since your last turn, the user edited the graph:\n- set the goal to "after"\nCall get_graph for the full current state.]\n\nthird');
+  });
+
+  it('lists no user edits in a fresh conversation after New chat or a provider switch, and saves its cursor', async () => {
+    const s = setup([ran(), ran()]);
+    await s.planner.send('a', s.graphId, 'first');
+    s.graphStore.apply(s.graphId, { type: 'setGoal', goal: 'ship' }, 'user');
+    expect(s.planner.newChat('a', s.graphId)).toEqual({ ok: true });
+    await s.planner.send('a', s.graphId, 'again');
+    expect(s.seen[1]).toMatchObject({ prompt: 'again', resume: undefined });
+    expect(s.state().opCursor).toBe(1);
+
+    const other = setup([ok('new')], { id: 'copilot', name: 'GitHub Copilot' });
+    other.graphStore.apply(other.graphId, { type: 'setGoal', goal: 'ship' }, 'user');
+    other.sessions.setPlannerState('a', other.graphId, { sessionId: 'claude-sess', provider: 'claude', opCursor: 0 });
+    await other.planner.send('a', other.graphId, 'hi');
+    expect(other.seen[0]).toMatchObject({ prompt: 'hi', resume: undefined });
+    expect(other.state()).toMatchObject({ sessionId: 'new', provider: 'copilot', opCursor: 1 });
   });
 
   it('rejects a second message while the planner is busy', async () => {
@@ -303,7 +322,7 @@ describe('Planner', () => {
     await s.planner.send('a', s.graphId, 'second in a');
     expect(s.sessions.chatLog('a').read(s.graphId).filter((e) => e.role === 'user').map((e) => e.text)).toEqual(['first in a', 'second in a']);
     expect(s.sessions.chatLog('b').read(s.graphId).filter((e) => e.role === 'user').map((e) => e.text)).toEqual(['first in b']);
-    expect(s.provider.seen[1].prompt).toMatch(/set the goal to "g"/); // b has never seen the edit
+    expect(s.provider.seen[1].prompt).toBe('first in b'); // b's conversation is fresh: no last turn to compare with
     expect(s.provider.seen[2].prompt).toMatch(/set the goal to "g"/); // a's cursor predates it
     expect(s.provider.seen[2].resume).toBe('s-a');
   });
