@@ -47,7 +47,7 @@ function readLock(file: string): LockRead {
   }
   try {
     const j = JSON.parse(content) as Record<string, unknown>;
-    if (j.version !== 1 || typeof j.runId !== 'string' || typeof j.graphId !== 'string' || typeof j.folder !== 'string' || typeof j.pid !== 'number') return { kind: 'unreadable' };
+    if (j.version !== 1 || typeof j.runId !== 'string' || typeof j.graphId !== 'string' || typeof j.folder !== 'string' || typeof j.pid !== 'number' || !Number.isInteger(j.pid) || j.pid <= 0) return { kind: 'unreadable' };
     return { kind: 'held', holder: { runId: j.runId, graphId: j.graphId, folder: j.folder, pid: j.pid, startedAt: typeof j.startedAt === 'string' ? j.startedAt : '' } };
   } catch {
     return { kind: 'unreadable' };

@@ -69,6 +69,16 @@ describe('write leases', () => {
     expect(readFileSync(leaseFile(dir, ROOT), 'utf8')).toBe('not json');
   });
 
+  it.each([0, -1, 1.5])('treats a lock file with pid %s as unreadable, naming the file, and keeps it', (badPid) => {
+    const dir = locks();
+    const content = JSON.stringify({ version: 1, ...holder('old'), pid: badPid, checkout: ROOT });
+    writeFileSync(leaseFile(dir, ROOT), content);
+    const leases = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true });
+    expect(leases.acquire(ROOT, holder('r1'))).toEqual({ ok: false, holder: UNKNOWN_HOLDER, otherWindow: true, lockFile: leaseFile(dir, ROOT) });
+    expect(leases.holder(ROOT)).toEqual(UNKNOWN_HOLDER);
+    expect(readFileSync(leaseFile(dir, ROOT), 'utf8')).toBe(content);
+  });
+
   it('releases only for the run that holds the lease', () => {
     const dir = locks();
     const leases = createWriteLeases({ locksDir: dir, pid: 100, isAlive: () => true });
