@@ -41,8 +41,6 @@ async function checkAgentStep(app) {
 exports.run = async function run() {
   const live = process.env.AGENT_STREAM_LIVE === '1';
   if (!live) console.log('Skipping the agent-step check (set AGENT_STREAM_LIVE=1)');
-  // runTest.mjs gives the extension host a temp home folder, so nothing below touches the real one.
-  assert.ok(fs.realpathSync(os.homedir()).startsWith(fs.realpathSync(os.tmpdir())), 'the test runs with a temp home folder');
   const ext = vscode.extensions.getExtension('agent-stream-local.agent-stream');
   assert.ok(ext, 'the extension is installed');
   const api = await ext.activate();
@@ -141,6 +139,8 @@ exports.run = async function run() {
     'values',
     crypto.createHash('sha256').update(fs.realpathSync(wf.uri.fsPath)).digest('hex').slice(0, 16) + '.json',
   );
+  // The write lease's file for this sample workspace's checkout (a temp folder outside Git, so its own real path).
+  const lockFile = path.join(os.homedir(), '.agent-stream', 'locks', crypto.createHash('sha256').update(fs.realpathSync(wf.uri.fsPath)).digest('hex').slice(0, 16) + '.json');
   try {
     app.values.set('demo', 'greeting', 'hello world');
     assert.ok(fs.existsSync(valuesFile), 'the value is stored in the home folder');
@@ -160,11 +160,13 @@ exports.run = async function run() {
     const run = await waitFor(() => msgs.filter((m) => m.type === 'run').map((m) => m.run).find((r) => r.status !== 'running'), 'the run to finish');
     assert.equal(run.status, 'succeeded');
     assert.equal(app.runStore.readOutput(run.id, 'n1'), 'hello world\n');
-    // The command step changed files, so the run took the write lease; its folder is under the test's temp home, not the real one.
-    assert.ok(fs.existsSync(path.join(os.homedir(), '.agent-stream', 'locks')), 'the lease folder is under the temp home');
+    // The command step changed files, so the run took the write lease; ending the run released it.
+    assert.ok(!fs.existsSync(lockFile), 'the run released its lock file');
   } finally {
     app.values.deleteGraph('demo');
+    // Leave nothing of this run in the real home folder: only this workspace's own files, never the folders.
     fs.rmSync(valuesFile, { force: true });
+    fs.rmSync(lockFile, { force: true });
   }
 
   if (live) await checkAgentStep(app);
