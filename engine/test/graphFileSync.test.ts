@@ -165,6 +165,40 @@ describe('graphFileChanged', () => {
     expect(readFileSync(join(paths.graphsDir, 'notes.md'), 'utf8')).toContain('## n1 · Say hi');
     expect(store.list().map((g) => g.id)).toContain('notes');
   });
+
+  it('gives id-less steps ids above those a later step in the same edit names', () => {
+    const { store, id, text, md } = setup();
+    writeFileSync(md, `${text()}\n## Clean up\n\n\`\`\`prompt\nTidy.\n\`\`\`\n\n## n3 · Report\n\n\`\`\`prompt\nSum up.\n\`\`\`\n`);
+    expect(store.graphFileChanged(id)).toBe('applied');
+    expect(store.get(id).nodes.map((n) => [n.id, n.title])).toEqual([['n1', 'Plan'], ['n2', 'Build'], ['n4', 'Clean up'], ['n3', 'Report']]);
+    expect(text()).toContain('## n4 · Clean up');
+  });
+
+  it('takes a changed side file while the Markdown has errors, so a move keeps the outside positions', () => {
+    const { store, id, meta, edit } = setup();
+    edit('- kind: command', '- kind: robot');
+    expect(store.graphFileChanged(id)).toBe('errors');
+    const file = JSON.parse(readFileSync(meta, 'utf8'));
+    file.nodes.n2.position = { x: 70, y: 90 };
+    writeFileSync(meta, JSON.stringify(file));
+    expect(store.graphFileChanged(id)).toBe('errors');
+    expect(store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 1, y: 1 } }, 'user').ok).toBe(true);
+    expect(JSON.parse(readFileSync(meta, 'utf8')).nodes.n2.position).toEqual({ x: 70, y: 90 });
+    expect(store.get(id).nodes[1].position).toEqual({ x: 70, y: 90 });
+  });
+
+  it('refuses reverts and agent edits while the file has errors; accept and duplicate still work', () => {
+    const { store, id, edit } = setup();
+    store.apply(id, { type: 'updateNode', id: 'n2', patch: { command: 'make all' } }, 'agent', { kind: 'planner' });
+    edit('Plan it.', 'Plan it by hand.');
+    edit('- kind: command', '- kind: robot');
+    expect(store.graphFileChanged(id)).toBe('errors');
+    const refused = expect.objectContaining({ ok: false, error: expect.stringContaining('has errors') });
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'all' } }, 'user')).toEqual(refused);
+    expect(store.apply(id, { type: 'addNode', node: { title: 'X', kind: 'agent', prompt: 'x' } }, 'agent')).toEqual(refused);
+    expect(store.duplicate(id).ok).toBe(true);
+    expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
+  });
 });
 
 describe('graphFileDeleted', () => {

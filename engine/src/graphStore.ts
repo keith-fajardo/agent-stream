@@ -13,6 +13,7 @@ import {
   legacyGraphForMarkdown,
   MAX_IMPORT_CHARS,
   nextNodeId,
+  seqOf,
   opLine,
   parseExportFile,
   parseGraph,
@@ -91,6 +92,7 @@ export class GraphStore extends EventEmitter {
   /** The problems in each graph's Markdown file. */
   private errors = new Map<string, GraphFileError[]>();
   /** The exact text this store last wrote to each graph's Markdown file: its own saves, which the file watcher reports too. */
+  // Duplicates cached.text on purpose: a safety net so a watcher report of our own save is never read as an outside edit.
   private written = new Map<string, string>();
 
   constructor(
@@ -223,22 +225,26 @@ export class GraphStore extends EventEmitter {
       return 'meta';
     }
     const parsed = parseGraphMarkdown(text);
-    if (!parsed.ok) return this.refuseFile(id, cached, md, meta, parsed.errors);
+    if (!parsed.ok) return this.refuseFile(id, cached, md, meta, metaText, parsed.errors);
     const at = this.clock();
     // A branch switch changes both files: the side file's bookkeeping first, then the edit on top of it.
     const current = metaText === cached.metaText ? cached.graph : withMeta(cached.graph, parseGraphMeta(metaText), at);
-    const ops = diffToOps(current, parsed.doc);
+    // New steps without an id get ids above every id the document names, so none takes a later step's id.
+    let seq = Math.max(...parsed.doc.steps.map((s) => (s.id ? seqOf(s.id) : 0)), ...current.nodes.map((n) => seqOf(n.id)), current.nodeSeq);
+    const fromDoc = diffToOps(current, parsed.doc);
+    const ops = fromDoc.map((op): Op => (op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: `n${++seq}` } } : op));
     let draft = current;
-    for (const op of ops) {
+    for (const [i, op] of ops.entries()) {
       const r = applyOp(draft, op, 'user', at, { rewriteReferences: renameReferences });
-      if (!r.ok) return this.refuseFile(id, cached, md, meta, [{ line: opLine(parsed.doc, op), message: `${r.error}. Nothing from this edit was applied.` }]);
+      if (!r.ok) return this.refuseFile(id, cached, md, meta, metaText, [{ line: opLine(parsed.doc, fromDoc[i]), message: `${r.error}. Nothing from this edit was applied.` }]);
       draft = r.graph;
     }
     let graph = current;
     const applied: Op[] = [];
     for (const op of ops) {
       const r = this.applyOne(graph, op, 'user', at);
-      if (!r.ok) throw new Error(r.error); // the same operations just succeeded on a copy
+      // The same operations just succeeded on a copy; only I/O (writeBaseline) can fail here, and then nothing is saved.
+      if (!r.ok) throw new Error(r.error);
       graph = r.graph;
       applied.push(r.op);
     }
@@ -267,8 +273,10 @@ export class GraphStore extends EventEmitter {
   }
 
   /** Keeps the last good graph and changes no file; the problems wait in fileErrors() until the file reads again. */
-  private refuseFile(id: string, cached: Cached, md: Stamp, meta: Stamp | undefined, errors: GraphFileError[]): FileSync {
-    this.cache.set(id, { ...cached, meta, broken: md });
+  private refuseFile(id: string, cached: Cached, md: Stamp, meta: Stamp | undefined, metaText: string | undefined, errors: GraphFileError[]): FileSync {
+    // A changed side file still counts (a branch switch), so a move doesn't rewrite it from stale positions.
+    const graph = metaText === cached.metaText ? cached.graph : withMeta(cached.graph, parseGraphMeta(metaText), this.clock());
+    this.cache.set(id, { ...cached, graph, metaText, meta, broken: md });
     this.setErrors(id, errors);
     return 'errors';
   }
