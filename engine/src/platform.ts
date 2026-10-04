@@ -21,13 +21,13 @@ export const CLAUDE_MISSING =
   'Could not find Claude Code (claude). Install it from https://code.claude.com and sign in with your Claude account, or set agentStream.claudePath.';
 
 /** An environment variable, matched without case on Windows (`Path`, `ProgramFiles`). */
-function envValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string | undefined {
+export function envValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string | undefined {
   if (platform !== 'win32') return env[name];
   const key = Object.keys(env).find((k) => k.toUpperCase() === name.toUpperCase());
   return key === undefined ? undefined : env[key];
 }
 
-function pathDirs(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+export function pathDirs(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
   return (envValue(env, 'PATH', platform) ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean);
 }
 
