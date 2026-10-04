@@ -31,7 +31,12 @@ export async function fetchCodexModels(conn: CodexConnection, timeoutMs = MODELS
   return out;
 }
 
-export type ModelList = { list(o?: { retry?: boolean }): Promise<ModelChoice[]>; known(): ModelChoice[] | undefined };
+export type ModelList = {
+  list(o?: { retry?: boolean }): Promise<ModelChoice[]>;
+  known(): ModelChoice[] | undefined;
+  /** Forgets the list and any failure (a sign-in just succeeded); a load still in flight is ignored (M3). */
+  reset(): void;
+};
 
 /**
  * The model list, cached like Claude's (spec §4.4): one load at a time, kept once it succeeds; a failure stands for the
@@ -42,8 +47,16 @@ export function createModelList(load: () => Promise<ModelChoice[]>, log: (messag
   let pending: Promise<ModelChoice[]> | undefined;
   let failed = false;
   let retried = false;
+  let generation = 0;
   return {
     known: () => models,
+    reset() {
+      generation++;
+      models = undefined;
+      pending = undefined;
+      failed = false;
+      retried = false;
+    },
     async list(o) {
       if (models) return models;
       if (pending) return pending;
@@ -51,17 +64,25 @@ export function createModelList(load: () => Promise<ModelChoice[]>, log: (messag
         if (!o?.retry || retried) return [];
         retried = true;
       }
-      pending = load()
+      const current = generation;
+      const loading = load()
         .then(
-          (list) => (models = list),
+          (list) => {
+            if (current === generation) models = list;
+            return list;
+          },
           (e: unknown) => {
+            if (current !== generation) return [];
             if (!failed) log(`[agent-stream] Could not list Codex models; the menus offer only Default (${errorMessage(e)}).`);
             failed = true;
             return [];
           },
         )
-        .finally(() => (pending = undefined));
-      return pending;
+        .finally(() => {
+          if (pending === loading) pending = undefined;
+        });
+      pending = loading;
+      return loading;
     },
   };
 }

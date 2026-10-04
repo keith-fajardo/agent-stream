@@ -42,6 +42,13 @@ export function createCodexProvider(d: CodexProviderDeps): AgentProvider {
       conn.close();
     }
   }, log);
+  /** Whether the last check was ok: models are listed only then, and listed afresh when a check turns ok (M3). */
+  let ready = false;
+  const settle = (status: ProviderStatus): ProviderStatus => {
+    if (status.ok && !ready) models.reset();
+    ready = status.ok;
+    return status;
+  };
   /** Checked again on every call (startup, a setting change, Check again, Select Provider); callers at once share one check (R5). */
   let checking: Promise<ProviderStatus> | undefined;
   async function check(): Promise<ProviderStatus> {
@@ -49,10 +56,10 @@ export function createCodexProvider(d: CodexProviderDeps): AgentProvider {
     if (!found.ok) {
       path = undefined;
       missing = found.error;
-      return { provider: 'codex', ok: false, label: 'Codex: not found', error: found.error };
+      return settle({ provider: 'codex', ok: false, label: 'Codex: not found', error: found.error });
     }
     path = found.path;
-    return { provider: 'codex', ...(await readCodexStatus({ codexPath: found.path, spawn: d.spawn, env: d.env })) };
+    return settle({ provider: 'codex', ...(await readCodexStatus({ codexPath: found.path, spawn: d.spawn, env: d.env })) });
   }
   const shared: CodexRunDeps = {
     codexPath: () => path,
@@ -75,6 +82,6 @@ export function createCodexProvider(d: CodexProviderDeps): AgentProvider {
     runStep: codexRunStep(shared),
     planTurn: codexPlanTurn(shared),
     knownModels: () => models.known(),
-    listModels: (o) => (path ? models.list(o) : Promise.resolve([])),
+    listModels: (o) => (ready && path ? models.list(o) : Promise.resolve([])),
   };
 }

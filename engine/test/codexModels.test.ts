@@ -56,6 +56,26 @@ describe('fetchCodexModels', () => {
 describe('createModelList', () => {
   const list: ModelChoice[] = [{ value: 'gpt-a', label: 'A', efforts: ['low'] }];
 
+  it('starts over after reset(): a failure and the cache are forgotten, and a load in flight is ignored (M3)', async () => {
+    const load = vi.fn<() => Promise<ModelChoice[]>>().mockRejectedValueOnce(new Error('not signed in')).mockResolvedValue(list);
+    const models = createModelList(load, () => {});
+    expect(await models.list()).toEqual([]);
+    expect(await models.list({ retry: false })).toEqual([]);
+    models.reset();
+    expect(await models.list()).toEqual(list);
+    expect(models.known()).toEqual(list);
+    models.reset();
+    expect(models.known()).toBeUndefined();
+    const stale = deferred<ModelChoice[]>();
+    load.mockReturnValueOnce(stale.promise);
+    const first = models.list();
+    models.reset();
+    stale.resolve([{ value: 'old', label: 'Old', efforts: [] }]);
+    await first;
+    expect(models.known()).toBeUndefined();
+    expect(await models.list()).toEqual(list);
+  });
+
   it('loads once for concurrent callers, then answers from the cache', async () => {
     const d = deferred<ModelChoice[]>();
     const load = vi.fn(() => d.promise);

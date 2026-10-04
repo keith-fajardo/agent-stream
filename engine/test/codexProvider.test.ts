@@ -5,7 +5,7 @@ import type { Found } from '../src/platform';
 import { createCodexProvider } from '../src/providers/codex';
 import { CODEX_MISSING } from '../src/providers/codex/auth';
 import type { Model } from '../src/providers/codex/protocol';
-import { agentMessage, fakeCodex, turnHandlers, type FakeHandler } from './codexFake';
+import { agentMessage, fakeCodex, FakeRpcError, turnHandlers, type FakeHandler } from './codexFake';
 import { allowAll } from './helpers';
 
 const gptA: Model = {
@@ -81,6 +81,40 @@ describe('createCodexProvider', () => {
     expect(await p.listModels?.()).toEqual(models);
     expect(p.knownModels?.()).toEqual(models);
     expect(fake.procs).toHaveLength(2);
+  });
+
+  it('lists models only after a check that was ok, and loads them once a sign-in succeeds (M3)', async () => {
+    let account: unknown = null;
+    const { p, fake } = provider({ ok: true, path: '/bin/codex' }, { ...signedIn, 'account/read': () => ({ account, requiresOpenaiAuth: true }) });
+    expect((await p.status()).ok).toBe(false);
+    expect(await p.listModels?.()).toEqual([]);
+    expect(await p.listModels?.({ retry: true })).toEqual([]);
+    expect(fake.procs.some((proc) => proc.methods().includes('model/list'))).toBe(false);
+    account = { type: 'chatgpt', email: null, planType: 'plus' };
+    expect((await p.status()).ok).toBe(true);
+    expect(await p.listModels?.()).toEqual([{ value: 'gpt-a', label: 'GPT A', efforts: ['low'], isDefault: true }]);
+  });
+
+  it('forgets a failed model list when a check goes from not ok to ok (M3)', async () => {
+    let account: unknown = { type: 'chatgpt', email: null, planType: 'plus' };
+    let listed = false;
+    const { p } = provider({ ok: true, path: '/bin/codex' }, {
+      ...signedIn,
+      'account/read': () => ({ account, requiresOpenaiAuth: true }),
+      'model/list': () => {
+        if (!listed) throw new FakeRpcError(-32000, 'not signed in');
+        return { data: [gptA], nextCursor: null };
+      },
+    });
+    await p.status();
+    expect(await p.listModels?.()).toEqual([]);
+    listed = true;
+    expect(await p.listModels?.()).toEqual([]);
+    account = null;
+    await p.status();
+    account = { type: 'chatgpt', email: null, planType: 'plus' };
+    await p.status();
+    expect(await p.listModels?.()).toEqual([{ value: 'gpt-a', label: 'GPT A', efforts: ['low'], isDefault: true }]);
   });
 
   it('runs steps on the found Codex, dropping an effort the listed model lacks with one warning', async () => {
