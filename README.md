@@ -35,7 +35,7 @@ Get `agent-stream-<version>.vsix` (or build it: `npm install && npm run package`
 ## Use
 
 - **Agent Stream sidebar:**
-  - **Graphs:** New, Import, and right-click for Open, Rename, Duplicate, Export, Delete.
+  - **Graphs:** New, Import, and right-click for Open, Open Graph as Markdown, Rename, Duplicate, Export, Delete. A graph whose file has errors shows **Can't be read**: click it to open the file, with its problems in the Problems panel.
   - **Sessions:** New Session, click to switch, right-click for Rename, Duplicate, Delete.
   - **Approvals:** Approve, Deny, Approve all.
 - **Chat view:** the **Agent Stream Chat** view on the right, next to VS Code's own Chat. It shows the planner conversation for the graph tab you're on, in the current session. Describe a goal; the planner reads your repo (read-only) and draws the plan. **New chat** starts over; the session button switches session.
@@ -57,7 +57,11 @@ Get `agent-stream-<version>.vsix` (or build it: `npm install && npm run package`
 - **Variables:** use `{{ name }}` (Jinja) in steps, the goal and the instructions. Values stay on this machine, outside the project, in `~/.agent-stream/values/` (`%USERPROFILE%\.agent-stream\values\` on Windows): they are never committed or exported, and Claude's Read, Grep and Glob tools are refused access to them (a shell command an agent attempts still needs your approval first). A value can read an environment variable: `{{ env_var('DBT_SCHEMA', 'dev') }}`. In commands every value is shell-quoted; `{{ flags | unquoted }}` opts out. A value inside `'…'` or `"…"` is escaped for those quotes. Places where a value can't be quoted safely (after a backtick, `$((`, `${`, `$'`, `$"` or a heredoc, inside a `#` comment or nested quotes, or right after a `\`) are refused with a message that says how to fix the step. Wrap dbt's own Jinja in `{% raw %}…{% endraw %}`.
 - **Run:** the dialog shows every command and prompt with values filled in, plus any problem that blocks the run. Start runs exactly what you reviewed.
 - **Run report:** **Run › Export Run Report…**, the **Report** button next to the run picker, or **Agent Stream: Export Run Report** saves one Markdown audit trail of a run (`<graph-id>-run-<run-id>.md`, in the project folder by default) and opens it: where and how it ran (branch, commit, provider, model, effort), the goal, instructions and plan, then each step's prompt or command as it ran, its tool calls, every approval with its decision and note, its output (long output is cut, with the path to the full file), exit code and usage, and the changes agents made during the run. Prompts, commands and step output appear exactly as they ran, including filled-in variable and environment values and anything an agent printed. The saved variable values file is never included.
-- **Export / Import:** share a graph's definition (steps, goal, instructions, variable names) as `<name>.agent-stream.json`.
+- **Export / Import:** share a graph as its Markdown file, `<id>.md` (the same text as the stored file, so never a variable value). Import takes a graph Markdown file, or an older `<name>.agent-stream.json` export.
+
+## Graph files
+
+Each graph is a Markdown file, `.agent-stream/graphs/<id>.md`: a Mermaid diagram of the connections and one section per step with its fields, description and prompt or command. It renders on GitHub, diffs cleanly in pull requests, and can be edited by hand or by another AI or script. Save it and the open graph tab follows; a file with errors shows them in the Problems panel and the last good version stays. Open it with **File › Open as Markdown** in the graph tab, the same item on a graph's right-click menu, or **Agent Stream: Open Graph as Markdown**. Positions and bookkeeping live next to it in `<id>.meta.json`. The format, every rule and a full example: [docs/graph-format.md](https://github.com/keith-fajardo/agent-stream/blob/main/docs/graph-format.md).
 
 ## Parallel tickets and A/B tests
 
@@ -209,14 +213,15 @@ Agent Stream runs agent steps and the planner on your ChatGPT subscription throu
 
 ```
 <folder>/.agent-stream/
-  graphs/<id>.json            the graph (safe to commit)
+  graphs/<id>.md              the graph, as Markdown (safe to commit)
+  graphs/<id>.meta.json       where each step sits on the canvas, who made and changed it (safe to commit; optional)
   graphs/<id>.ops.jsonl       who changed what, and when
   graphs/<id>.baseline.json   your version of the graph while agent changes wait for review
   runs/<run-id>/              run snapshot, per-step events and outputs (git-ignored)
   sessions/<id>/              your work sessions: open tabs, planner chats and Copilot planner transcripts (git-ignored)
 ```
 
-Older `.claude-stream` folders and values are moved to the new names automatically the first time a folder is opened. Older planner chats move into a session called Default the first time a folder is opened.
+Older `.claude-stream` folders and values are moved to the new names automatically the first time a folder is opened. Graphs saved as `<id>.json` by earlier versions are converted to `<id>.md` and `<id>.meta.json` the first time a folder is opened; the old file is kept as `<id>.json.bak`, and the Agent Stream output channel lists each conversion. Older planner chats move into a session called Default the first time a folder is opened.
 
 Variable values are kept outside the project, in `~/.agent-stream/values/<hash>.json`, one file per project folder (named after a hash of the folder's path).
 

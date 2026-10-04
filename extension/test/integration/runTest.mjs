@@ -21,6 +21,7 @@ const graph = (id, name, node) => ({
   nodeSeq: 1,
   updatedAt: at,
 });
+// Written in the format from before Markdown graph files: the engine converts them to <id>.md when it starts.
 const write = (file, value) => writeFileSync(join(dataDir, 'graphs', file), JSON.stringify(value, null, 2));
 write('demo.json', {
   ...graph('demo', 'Demo', { id: 'n1', title: 'Say hello', kind: 'command', command: 'echo {{ greeting }}', description: 'Says hello with the greeting value.' }),

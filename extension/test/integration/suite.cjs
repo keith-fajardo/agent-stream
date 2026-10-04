@@ -48,17 +48,26 @@ exports.run = async function run() {
   const folder = { key: wf.uri.toString(), name: wf.name, path: wf.uri.fsPath };
   const app = api.engines.get(folder);
   assert.deepEqual(app.listGraphs().map((g) => g.id).sort(), ['demo', 'second']);
+  // The JSON graphs were converted to Markdown on start, keeping the old files as .json.bak (Markdown graph files spec §5.2).
+  const mdUri = (id) => vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', `${id}.md`);
+  const graphsDir = path.join(wf.uri.fsPath, '.agent-stream', 'graphs');
+  for (const f of ['demo.md', 'demo.meta.json', 'demo.json.bak', 'second.md', 'second.baseline.json']) assert.ok(fs.existsSync(path.join(graphsDir, f)), `${f} exists`);
+  assert.ok(!fs.existsSync(path.join(graphsDir, 'demo.json')), 'demo.json was renamed');
 
   // The graph tab's page runs under the CSP, connects, and loads its graph.
-  await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', 'demo.json'), 'agentStream.graph');
+  await vscode.commands.executeCommand('vscode.openWith', mdUri('demo'), 'agentStream.graph');
   const panel = await waitFor(() => api.panels.get(folder.key, 'demo'), 'the graph tab');
   await waitFor(() => panel.isLoaded, 'the tab to load its graph');
 
-  // A plain open (Explorer click, Quick Open) uses the graph tab too: the custom editor is the default.
+  // A plain open (Explorer click, Quick Open) shows the graph's Markdown as text: the graph tab opens only when asked.
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await waitFor(() => !api.panels.get(folder.key, 'demo'), 'the graph tab to close');
-  await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', 'demo.json'));
-  const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'a plain open to show the graph tab');
+  await vscode.commands.executeCommand('vscode.open', mdUri('demo'));
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === mdUri('demo').fsPath, 'a plain open to show the Markdown');
+  assert.equal(api.panels.get(folder.key, 'demo'), undefined);
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await vscode.commands.executeCommand('vscode.openWith', mdUri('demo'), 'agentStream.graph');
+  const reopened = await waitFor(() => api.panels.get(folder.key, 'demo'), 'the graph tab again');
   await waitFor(() => reopened.isLoaded, 'the reopened tab to load its graph');
 
   // Where the graph works (spec §7): the tab's engine sends the checkout after hello and on request. The sample
@@ -118,8 +127,7 @@ exports.run = async function run() {
   await waitFor(() => api.engines.status.provider === 'claude' && api.engines.status.label !== 'checking', 'the Claude status after Codex');
 
   // Work sessions: the tab set comes back per session, and conversations stay apart.
-  const uriOf = (id) => vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', `${id}.json`);
-  await vscode.commands.executeCommand('vscode.openWith', uriOf('second'), 'agentStream.graph', { viewColumn: vscode.ViewColumn.Two, preview: false });
+  await vscode.commands.executeCommand('vscode.openWith', mdUri('second'), 'agentStream.graph', { viewColumn: vscode.ViewColumn.Two, preview: false });
   await waitFor(() => api.panels.get(folder.key, 'second')?.isLoaded, 'the second graph tab');
   api.sessions.captureNow();
   const sessionB = app.createSession('Integration B');
@@ -153,6 +161,25 @@ exports.run = async function run() {
   // Agent changes against the baseline are reported, and the Graphs list counts them.
   assert.deepEqual(app.graphStore.agentChanges('second').map((c) => [c.kind, c.change, c.id]), [['node', 'changed', 'n1']]);
   assert.equal(app.listGraphs().find((g) => g.id === 'second').agentChanges, 1);
+
+  // Markdown graph files (spec §6, §7): Open as Markdown shows the file; the file watcher brings a saved edit into the
+  // graph (no store call here, so only the watcher can deliver it); a broken file shows in the Problems panel.
+  await vscode.commands.executeCommand('agentStream.openGraphMarkdown', { folder, graphId: 'demo' });
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === mdUri('demo').fsPath, 'Open as Markdown');
+  const seen = [];
+  const detachSeen = app.connect({ send: (m) => seen.push(m) });
+  const demoFile = mdUri('demo').fsPath;
+  const original = fs.readFileSync(demoFile, 'utf8');
+  fs.writeFileSync(demoFile, original.replace('# Demo\n', '# Demo\n\n## Goal\n\nEdited outside Agent Stream.\n'));
+  await waitFor(() => seen.some((m) => m.type === 'graph' && m.graph.id === 'demo' && m.graph.goal === 'Edited outside Agent Stream.'), 'the outside edit to reach the graph');
+  assert.equal(app.graphStore.readOps('demo').at(-1).via, 'file');
+  fs.writeFileSync(demoFile, '# Demo\n\nstray text\n');
+  await waitFor(() => vscode.languages.getDiagnostics(mdUri('demo')).length > 0, 'the file problem in the Problems panel');
+  assert.equal(app.graphStore.get('demo').goal, 'Edited outside Agent Stream.');
+  fs.writeFileSync(demoFile, original);
+  await waitFor(() => vscode.languages.getDiagnostics(mdUri('demo')).length === 0, 'the problem to clear');
+  await waitFor(() => seen.some((m) => m.type === 'graph' && m.graph.id === 'demo' && m.graph.goal === ''), 'the restored file to reach the graph');
+  detachSeen();
 
   if (!api.engines.status.ok) {
     console.warn(`Skipping the run check: ${api.engines.status.error}`);
