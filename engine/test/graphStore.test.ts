@@ -33,7 +33,7 @@ describe('GraphStore', () => {
     const paths = tmpProject();
     const store = new GraphStore(paths, fixedClock());
     const { id } = store.create('G');
-    const file = join(paths.graphsDir, `${id}.json`);
+    const file = join(paths.graphsDir, `${id}.md`);
     const before = readFileSync(file, 'utf8');
     expect(store.apply(id, { type: 'connect', from: 'n1', to: 'n2' }, 'user')).toEqual({ ok: false, error: 'node n1 does not exist' });
     expect(readFileSync(file, 'utf8')).toBe(before);
@@ -42,23 +42,18 @@ describe('GraphStore', () => {
 
   it('lists unreadable graph files with their error and never overwrites them', () => {
     const paths = tmpProject();
-    const broken = join(paths.graphsDir, 'broken.json');
-    writeFileSync(broken, '{ "id": "broken", "name": ');
-    writeFileSync(
-      join(paths.graphsDir, 'cyclic.json'),
-      JSON.stringify({
-        id: 'cyclic',
-        name: 'C',
-        nodes: [{ id: 'n1', title: 'a', kind: 'agent' }, { id: 'n2', title: 'b', kind: 'agent' }],
-        edges: [{ id: 'n1->n2', from: 'n1', to: 'n2' }, { id: 'n2->n1', from: 'n2', to: 'n1' }],
-      }),
-    );
+    const broken = join(paths.graphsDir, 'broken.md');
+    writeFileSync(broken, 'no name here\n');
+    writeFileSync(join(paths.graphsDir, 'cyclic.md'), ['# C', '## Flow', '```mermaid', 'flowchart LR', 'n1 --> n2 --> n1', '```', '## n1 · a', '```prompt', '```', '## n2 · b', '```prompt', '```', ''].join('\n'));
+    writeFileSync(join(paths.graphsDir, 'Bad Name.md'), '# Fine\n');
     const store = new GraphStore(paths, fixedClock());
     const list = store.list();
-    expect(list.find((g) => g.id === 'broken')?.error).toContain('invalid JSON');
-    expect(list.find((g) => g.id === 'cyclic')?.error).toContain('cycle');
+    expect(list.find((g) => g.id === 'broken')?.error).toBe('line 1: the file must start with the graph\'s name, as "# Name".');
+    expect(list.find((g) => g.id === 'cyclic')?.error).toContain('line 5: n2 --> n1 would make a cycle');
+    expect(list.find((g) => g.id === 'Bad Name')?.error).toBe('invalid graph id "Bad Name"');
+    expect(store.fileErrors('broken')).toEqual([{ line: 1, message: 'the file must start with the graph\'s name, as "# Name".' }]);
     expect(store.apply('broken', { type: 'setGoal', goal: 'x' }, 'user').ok).toBe(false);
-    expect(readFileSync(broken, 'utf8')).toBe('{ "id": "broken", "name": ');
+    expect(readFileSync(broken, 'utf8')).toBe('no name here\n');
   });
 
   it('sees external edits to a graph file after it was loaded', () => {
@@ -66,9 +61,8 @@ describe('GraphStore', () => {
     const store = new GraphStore(paths, fixedClock());
     const { id } = store.create('G');
     expect(store.get(id).goal).toBe('');
-    const file = join(paths.graphsDir, `${id}.json`);
-    const edited = { ...JSON.parse(readFileSync(file, 'utf8')), goal: 'edited by hand outside agent-stream' };
-    writeFileSync(file, `${JSON.stringify(edited, null, 2)}\n`);
+    const file = join(paths.graphsDir, `${id}.md`);
+    writeFileSync(file, readFileSync(file, 'utf8').replace('# G\n', '# G\n\n## Goal\n\nedited by hand outside agent-stream\n'));
     expect(store.get(id).goal).toBe('edited by hand outside agent-stream');
   });
 
@@ -77,10 +71,11 @@ describe('GraphStore', () => {
     const store = new GraphStore(paths, fixedClock());
     const { id } = store.create('G');
     expect(store.load(id).ok).toBe(true);
-    const file = join(paths.graphsDir, `${id}.json`);
-    const conflicted = '<<<<<<< HEAD\n{ "id": "g" }\n=======\n';
+    const file = join(paths.graphsDir, `${id}.md`);
+    const conflicted = '<<<<<<< HEAD\n# G\n=======\n';
     writeFileSync(file, conflicted);
-    expect(store.list().find((g) => g.id === id)?.error).toContain('invalid JSON');
+    store.list();
+    expect(store.fileErrors(id)[0]).toMatchObject({ line: 1 });
     expect(store.apply(id, { type: 'setGoal', goal: 'x' }, 'user').ok).toBe(false);
     expect(readFileSync(file, 'utf8')).toBe(conflicted);
   });
@@ -155,9 +150,6 @@ describe('ChatLog', () => {
       const store = new GraphStore(paths, fixedClock());
       const { id } = store.create('G');
       store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
-      // A graph file from before work sessions still carries planner state.
-      const file = join(paths.graphsDir, `${id}.json`);
-      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), plannerSessionId: 's', plannerOpCursor: 1 }));
       const first = store.duplicate(id);
       const second = store.duplicate(id);
       if (!first.ok || !second.ok) throw new Error('duplicate failed');
@@ -185,10 +177,11 @@ describe('ChatLog', () => {
       const { id } = store.create('Parity');
       const exported = store.exportGraph(id);
       if (!exported.ok) throw new Error(exported.error);
-      expect(exported.fileName).toBe('parity.agent-stream.json');
+      expect(exported.fileName).toBe('parity.md');
       const imported = store.importGraph(exported.content);
       expect(imported.ok && imported.graph.id).toBe('parity-2');
-      expect(store.importGraph('nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });
+      expect(store.importGraph('nope')).toEqual({ ok: false, error: 'The file is not a valid Agent Stream graph: line 1: the file must start with the graph\'s name, as "# Name".' });
+      expect(store.importGraph('{ nope')).toEqual({ ok: false, error: 'The file is not valid JSON.' });
     });
   });
 });
@@ -344,12 +337,12 @@ describe('agent changes against the baseline', () => {
 
   it('accepts one step into the baseline and leaves the rest marked', () => {
     const { store, id } = withGraph([step('n1'), step('n2')]);
-    store.apply(id, { type: 'updateNode', id: 'n1', patch: { command: 'x' } }, 'agent', { kind: 'planner' });
+    store.apply(id, { type: 'updateNode', id: 'n1', patch: { prompt: 'x' } }, 'agent', { kind: 'planner' });
     store.apply(id, { type: 'deleteNode', id: 'n2' }, 'agent', { kind: 'planner' });
     store.apply(id, { type: 'addNode', node: step('n3') }, 'agent', { kind: 'planner' });
     expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n2' } }, 'user').ok).toBe(true);
     expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n3' } }, 'user').ok).toBe(true);
-    expect(store.agentChanges(id)).toMatchObject([{ id: 'n1', change: 'changed', fields: ['command'] }]);
+    expect(store.agentChanges(id)).toMatchObject([{ id: 'n1', change: 'changed', fields: ['prompt'] }]);
     expect(store.apply(id, { type: 'acceptChange', target: { kind: 'node', id: 'n9' } }, 'user')).toEqual({ ok: false, error: 'node n9 does not exist' });
   });
 
@@ -420,7 +413,7 @@ describe('agent changes against the baseline', () => {
     const changed = vi.fn();
     store.on('changed', changed);
     const ops = () => store.readOps(id).length;
-    const graphFile = join(paths.graphsDir, `${id}.json`);
+    const graphFile = join(paths.graphsDir, `${id}.md`);
     const noChanges = { ok: false, error: 'There are no agent changes to review.' };
     // Nothing differs: no baseline at all.
     let logged = ops();

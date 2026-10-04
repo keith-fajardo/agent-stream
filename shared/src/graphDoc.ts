@@ -1,4 +1,4 @@
-import { edgeId, seqOf } from './graph';
+import { edgeId, nodeIdProblem, seqOf } from './graph';
 import type { FlowEdge } from './graphFlow';
 import type { Graph, GraphFileError, GraphNode, NodeKind } from './types';
 
@@ -76,5 +76,54 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(timeoutSec !== undefined && { timeoutSec: timeoutValue(timeoutSec) }),
     ...(node.kind === 'agent' && access === 'read' && { access: 'read' as const }),
     ...(workspace && { workspace }),
+  };
+}
+
+/** A step id changed so the Markdown can hold it. */
+export type StepRename = { from: string; to: string };
+const UNTITLED_STEP = 'Untitled step';
+
+/**
+ * A graph from the old JSON format as the Markdown can hold it, so the written file reads back: an empty name becomes
+ * the graph's id, an empty step title `Untitled step`, and a step id the strict rule refuses ("--", a trailing "-") is
+ * renamed, its edges with it: runs of "-" collapsed and a trailing "-" dropped, or the next free n<number> when that
+ * is empty, invalid or already used. `renames` are applied first (a baseline follows its graph); `reserved` ids are
+ * never given.
+ */
+export function legacyGraphForMarkdown(
+  graph: Graph,
+  renames: ReadonlyMap<string, string> = new Map(),
+  reserved: Iterable<string> = [],
+): { graph: Graph; renamed: StepRename[] } {
+  const taken = new Set([...reserved, ...renames.values(), ...graph.nodes.filter((n) => !renames.has(n.id) && !nodeIdProblem(n.id)).map((n) => n.id)]);
+  let seq = Math.max(graph.nodeSeq, ...[...taken, ...graph.nodes.map((n) => n.id)].map(seqOf));
+  const nextFree = () => {
+    while (taken.has(`n${++seq}`));
+    return `n${seq}`;
+  };
+  const to = new Map<string, string>();
+  for (const { id } of graph.nodes) {
+    const given = renames.get(id);
+    if (given !== undefined) to.set(id, given);
+    else if (nodeIdProblem(id)) {
+      const short = id.replace(/-+/g, '-').replace(/-$/, '');
+      const next = short && !nodeIdProblem(short) && !taken.has(short) ? short : nextFree();
+      taken.add(next);
+      to.set(id, next);
+    }
+  }
+  const idOf = (id: string) => to.get(id) ?? id;
+  const name = oneLine(graph.name) ? graph.name : graph.id;
+  const untitled = graph.nodes.some((n) => !oneLine(n.title));
+  if (!to.size && name === graph.name && !untitled) return { graph, renamed: [] };
+  return {
+    graph: {
+      ...graph,
+      name,
+      nodes: graph.nodes.map((n) => ({ ...n, id: idOf(n.id), title: oneLine(n.title) ? n.title : UNTITLED_STEP })),
+      edges: graph.edges.map((e) => ({ id: edgeId(idOf(e.from), idOf(e.to)), from: idOf(e.from), to: idOf(e.to) })),
+      nodeSeq: Math.max(graph.nodeSeq, seq),
+    },
+    renamed: [...to].filter(([from, next]) => from !== next).map(([from, next]) => ({ from, to: next })),
   };
 }

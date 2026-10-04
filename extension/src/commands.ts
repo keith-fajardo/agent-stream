@@ -109,7 +109,7 @@ export function graphCommands(d: CommandDeps) {
       if (!t) return;
       const r = app(t.folder).exportGraph(t.graphId);
       if (!r.ok) return d.ui.error(r.error);
-      const file = await d.ui.saveFile(join(t.folder.path, r.fileName));
+      const file = await d.ui.saveFile(join(t.folder.path, r.fileName), 'markdown');
       if (!file) return;
       await file.write(r.content);
       d.ui.info(`Exported ${r.fileName}. Variable values were left out.`);

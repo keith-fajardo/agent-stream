@@ -120,7 +120,7 @@ describe('graph commands', () => {
     expect(s.ui.error).toHaveBeenLastCalledWith("Couldn't import: The file is larger than 1 MB.");
     s.ui.openFile.mockResolvedValueOnce({ size: 4, read: async () => 'nope' });
     await s.commands.importGraph();
-    expect(s.ui.error).toHaveBeenLastCalledWith("Couldn't import: The file is not valid JSON.");
+    expect(s.ui.error).toHaveBeenLastCalledWith('Couldn\'t import: The file is not a valid Agent Stream graph: line 1: the file must start with the graph\'s name, as "# Name".');
     s.ui.openFile.mockResolvedValueOnce({ size: exported.content.length, read: async () => exported.content });
     await s.commands.importGraph();
     expect(s.opened).toEqual([{ folder: s.folders[0], graphId: 'parity' }]);
@@ -135,10 +135,10 @@ describe('graph commands', () => {
     let written = '';
     s.ui.saveFile.mockResolvedValueOnce({ write: async (content: string) => void (written = content) });
     await s.commands.exportGraph({ folder: s.folders[0], graphId: g.id });
-    expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, 'parity.agent-stream.json'));
-    expect(JSON.parse(written).graph.variables).toEqual([{ name: 'schema', description: '' }]);
+    expect(s.ui.saveFile).toHaveBeenCalledWith(join(s.folders[0].path, 'parity.md'), 'markdown');
+    expect(written).toContain('## Variables\n\n- `schema`\n');
     expect(written).not.toContain('secret-schema');
-    expect(s.ui.info).toHaveBeenCalledWith('Exported parity.agent-stream.json. Variable values were left out.');
+    expect(s.ui.info).toHaveBeenCalledWith('Exported parity.md. Variable values were left out.');
   });
 
   describe('Export Run Report', () => {

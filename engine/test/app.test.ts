@@ -1671,8 +1671,21 @@ describe('app: model and effort', () => {
     await flush();
     const exported = app.exportGraph(graphId);
     if (!exported.ok) throw new Error(exported.error);
-    for (const text of [exported.content, readFileSync(join(paths.graphsDir, `${graphId}.json`), 'utf8')]) {
+    for (const text of [exported.content, readFileSync(join(paths.graphsDir, `${graphId}.md`), 'utf8'), readFileSync(join(paths.graphsDir, `${graphId}.meta.json`), 'utf8')]) {
       expect(text).not.toMatch(/"model"|"effort"|sonnet|haiku/);
     }
+  });
+});
+
+describe('graphs from before Markdown', () => {
+  it('converts them on start, after the planner-state move, with one note per graph', () => {
+    const paths = tmpProject();
+    writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ ...emptyGraph('g1', 'Old graph', 't'), plannerSessionId: 's' }));
+    const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+    expect(app.startupNotes()).toEqual(['Converted the graph "Old graph" to g1.md; the old file is kept as g1.json.bak.']);
+    expect(app.startupWarnings()).toEqual([]);
+    expect(app.sessionStore.plannerState('default', 'g1')).toMatchObject({ sessionId: 's' });
+    expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
+    expect(existsSync(join(paths.graphsDir, 'g1.json.bak'))).toBe(true);
   });
 });

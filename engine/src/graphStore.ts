@@ -3,18 +3,27 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync
 import { join } from 'node:path';
 import {
   applyOp,
+  canonicalGraph,
   diffGraphs,
   edgeId,
   emptyGraph,
+  formatFileErrors,
+  graphFromDoc,
+  legacyGraphForMarkdown,
+  MAX_IMPORT_CHARS,
   nextNodeId,
   parseExportFile,
   parseGraph,
-  toExportFile,
+  parseGraphMarkdown,
+  parseGraphMeta,
+  serializeGraphMarkdown,
+  serializeGraphMeta,
   type Actor,
   type AgentChange,
   type ChangeSource,
   type ChangeTarget,
   type Graph,
+  type GraphFileError,
   type GraphNode,
   type GraphListItem,
   type GraphResult,
@@ -38,6 +47,18 @@ const NO_CHANGES = 'There are no agent changes to review.';
 const ONLY_USER_REVIEWS = 'Only you can accept or revert agent changes.';
 const BASELINE_SUFFIX = '.baseline.json';
 
+/** A file's modification time and size: a cached graph is valid while both of its files keep theirs. */
+type Stamp = { mtimeMs: number; size: number };
+/** A graph as last read or written, with the exact text of its two files. */
+type Cached = { graph: Graph; text: string; metaText?: string; md: Stamp; meta?: Stamp };
+
+function stampOf(path: string): Stamp | undefined {
+  const s = statSync(path, { throwIfNoEntry: false });
+  return s && { mtimeMs: s.mtimeMs, size: s.size };
+}
+const sameStamp = (a: Stamp | undefined, b: Stamp | undefined) => a?.mtimeMs === b?.mtimeMs && a?.size === b?.size;
+const readIfExists = (path: string): string | undefined => (existsSync(path) ? readFileSync(path, 'utf8') : undefined);
+
 /** Whether an agent op made or touched this change (for attribution). */
 function touches(op: Op, change: AgentChange): boolean {
   if (change.kind === 'node') {
@@ -54,10 +75,16 @@ function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
   return { ...rest, title: source.title, kind: source.kind, ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)) };
 }
 
-/** Single source of truth for graphs. Every change goes through `apply`. */
+/**
+ * Single source of truth for graphs. Every change goes through `apply`. A graph is two files (Markdown graph files spec
+ * §5.1): `<id>.md`, its meaning, and `<id>.meta.json`, positions and bookkeeping.
+ */
 export class GraphStore extends EventEmitter {
-  /** Parsed graphs keyed by id, valid only while the file's mtime and size are unchanged. */
-  private cache = new Map<string, { graph: Graph; mtimeMs: number; size: number }>();
+  private cache = new Map<string, Cached>();
+  /** Markdown files that didn't parse, so an unchanged broken file isn't read again on every list. */
+  private failed = new Map<string, { md: Stamp; meta?: Stamp; error: string }>();
+  /** The problems in each graph's Markdown file. */
+  private errors = new Map<string, GraphFileError[]>();
 
   constructor(
     private paths: ProjectPaths,
@@ -67,6 +94,15 @@ export class GraphStore extends EventEmitter {
   }
 
   private file(id: string): string {
+    return join(this.paths.graphsDir, `${id}.md`);
+  }
+
+  private metaFile(id: string): string {
+    return join(this.paths.graphsDir, `${id}.meta.json`);
+  }
+
+  /** A graph file from before Markdown, not converted yet: its id stays taken. */
+  private legacyFile(id: string): string {
     return join(this.paths.graphsDir, `${id}.json`);
   }
 
@@ -85,14 +121,14 @@ export class GraphStore extends EventEmitter {
   private uniqueId(name: string): string {
     const base = slugify(name);
     let id = base;
-    for (let i = 2; existsSync(this.file(id)); i++) id = `${base}-${i}`;
+    for (let i = 2; existsSync(this.file(id)) || existsSync(this.legacyFile(id)); i++) id = `${base}-${i}`;
     return id;
   }
 
   list(): GraphListItem[] {
     const ids = readdirSync(this.paths.graphsDir)
-      .filter((f) => f.endsWith('.json') && !f.endsWith(BASELINE_SUFFIX))
-      .map((f) => f.slice(0, -'.json'.length))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.slice(0, -'.md'.length))
       .sort();
     const items = ids.map((id): GraphListItem => {
       const r = this.load(id);
@@ -107,27 +143,61 @@ export class GraphStore extends EventEmitter {
 
   load(id: string): GraphResult {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
-    const path = this.file(id);
-    const stat = statSync(path, { throwIfNoEntry: false });
-    if (!stat) {
-      this.cache.delete(id);
+    const md = stampOf(this.file(id));
+    if (!md) {
+      this.forget(id);
       return { ok: false, error: `graph "${id}" not found` };
     }
+    const meta = stampOf(this.metaFile(id));
     const cached = this.cache.get(id);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return { ok: true, graph: cached.graph };
-    // The file changed on disk (hand edit, git checkout, ...) or was never loaded: re-read it.
-    this.cache.delete(id);
-    let json: unknown;
-    try {
-      json = JSON.parse(readFileSync(path, 'utf8'));
-    } catch (e) {
-      return { ok: false, error: `invalid JSON: ${(e as Error).message}` };
+    if (cached && sameStamp(cached.md, md) && sameStamp(cached.meta, meta)) return { ok: true, graph: cached.graph };
+    const failed = this.failed.get(id);
+    if (!cached && failed && sameStamp(failed.md, md) && sameStamp(failed.meta, meta)) return { ok: false, error: failed.error };
+    // The files changed on disk (hand edit, git checkout, ...) or were never read: read them.
+    return this.read(id, md, meta);
+  }
+
+  /** Reads the graph's two files. A Markdown file that doesn't parse is reported and never overwritten. */
+  private read(id: string, md: Stamp, meta: Stamp | undefined): GraphResult {
+    const text = readFileSync(this.file(id), 'utf8');
+    const metaText = readIfExists(this.metaFile(id));
+    const parsed = parseGraphMarkdown(text);
+    if (!parsed.ok) {
+      const error = formatFileErrors(parsed.errors);
+      this.cache.delete(id);
+      this.failed.set(id, { md, meta, error });
+      this.setErrors(id, parsed.errors);
+      return { ok: false, error };
     }
-    const r = parseGraph(json);
-    if (!r.ok) return r;
-    const graph = { ...r.graph, id };
-    this.cache.set(id, { graph, mtimeMs: stat.mtimeMs, size: stat.size });
+    const graph = canonicalGraph(graphFromDoc(parsed.doc, parseGraphMeta(metaText), id, this.clock()));
+    this.cache.set(id, { graph, text, metaText, md, meta });
+    this.failed.delete(id);
+    this.setErrors(id, []);
     return { ok: true, graph };
+  }
+
+  /** Writes a graph converted from a file in the old JSON format (spec §5.2), in canonical form. */
+  writeConverted(graph: Graph): Graph {
+    return this.save(graph);
+  }
+
+  /** The problems in the graph's Markdown file: [] when it reads. */
+  fileErrors(id: string): GraphFileError[] {
+    return this.errors.get(id) ?? [];
+  }
+
+  private setErrors(id: string, errors: GraphFileError[]): void {
+    if (JSON.stringify(this.errors.get(id) ?? []) === JSON.stringify(errors)) return;
+    if (errors.length) this.errors.set(id, errors);
+    else this.errors.delete(id);
+    this.emit('fileErrors', id, errors);
+  }
+
+  /** Drops what the store remembers about a graph whose Markdown file is gone. */
+  private forget(id: string): void {
+    this.cache.delete(id);
+    this.failed.delete(id);
+    this.setErrors(id, []);
   }
 
   get(id: string): Graph {
@@ -138,9 +208,7 @@ export class GraphStore extends EventEmitter {
 
   create(name: string): Graph {
     const id = this.uniqueId(name);
-    const graph = emptyGraph(id, name.trim() || id, this.clock());
-    this.save(graph);
-    return graph;
+    return this.save(emptyGraph(id, name.trim() || id, this.clock()));
   }
 
   /** Changes the display name only; the id (file name) stays, so runs keep pointing at it. */
@@ -149,8 +217,7 @@ export class GraphStore extends EventEmitter {
     if (!trimmed) return { ok: false, error: 'A graph needs a name.' };
     const r = this.load(id);
     if (!r.ok) return r;
-    const graph = { ...r.graph, name: trimmed, updatedAt: this.clock() };
-    this.save(graph);
+    const graph = this.save({ ...r.graph, name: trimmed, updatedAt: this.clock() });
     this.emit('changed', graph);
     return { ok: true, graph };
   }
@@ -162,32 +229,38 @@ export class GraphStore extends EventEmitter {
     const names = new Set(this.list().map((g) => g.name));
     let name = `${r.graph.name} copy`;
     for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
-    const graph: Graph = { ...r.graph, id: this.uniqueId(name), name, updatedAt: this.clock() };
-    this.save(graph);
+    const graph = this.save({ ...r.graph, id: this.uniqueId(name), name, updatedAt: this.clock() });
     return { ok: true, graph };
   }
 
-  /** Removes the graph, its agent-change baseline, its edit history and its chat. Run logs stay on disk. */
+  /** Removes the graph, its side file, its agent-change baseline, its edit history and its chat. Run logs stay on disk. */
   delete(id: string): { ok: true } | { ok: false; error: string } {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     if (!existsSync(this.file(id))) return { ok: false, error: `graph "${id}" not found` };
-    for (const f of [this.file(id), this.baselineFile(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
-    this.cache.delete(id);
+    for (const f of [this.file(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
+    this.forget(id);
     return { ok: true };
   }
 
+  /** The graph's Markdown, as `<id>.md` (spec §5.4): the stored file's text, so never a variable value. */
   exportGraph(id: string): { ok: true; fileName: string; content: string } | { ok: false; error: string } {
     const r = this.load(id);
     if (!r.ok) return r;
-    return { ok: true, fileName: `${id}.agent-stream.json`, content: `${JSON.stringify(toExportFile(r.graph, this.clock()), null, 2)}\n` };
+    return { ok: true, fileName: `${id}.md`, content: serializeGraphMarkdown(r.graph) };
   }
 
+  /** A graph file in the Markdown format, or an `.agent-stream.json` export (content starting with `{`), as a new graph. */
   importGraph(content: string): GraphResult {
-    const parsed = parseExportFile(content, 'import', this.clock());
-    if (!parsed.ok) return parsed;
-    const graph = { ...parsed.graph, id: this.uniqueId(parsed.graph.name) };
-    this.save(graph);
-    return { ok: true, graph };
+    if (content.length > MAX_IMPORT_CHARS) return { ok: false, error: 'The file is larger than 1 MB.' };
+    const text = content.replace(/^\uFEFF/, '');
+    if (text.trimStart().startsWith('{')) {
+      const legacy = parseExportFile(text, 'import', this.clock());
+      if (!legacy.ok) return legacy;
+      return { ok: true, graph: this.save(legacyGraphForMarkdown({ ...legacy.graph, id: this.uniqueId(legacy.graph.name) }).graph) };
+    }
+    const parsed = parseGraphMarkdown(text);
+    if (!parsed.ok) return { ok: false, error: `The file is not a valid Agent Stream graph: ${formatFileErrors(parsed.errors, 3)}` };
+    return { ok: true, graph: this.save(graphFromDoc(parsed.doc, undefined, this.uniqueId(parsed.doc.name), this.clock())) };
   }
 
   /**
@@ -217,14 +290,14 @@ export class GraphStore extends EventEmitter {
         if (mirrored.ok) this.writeBaseline(mirrored.graph);
       }
     }
-    this.save(r.graph);
+    const saved = this.save(r.graph);
     if (resolved.type !== 'moveNode') {
-      this.dropBaselineIfSame(r.graph);
+      this.dropBaselineIfSame(saved);
       this.record(graphId, { at, by, op: resolved, ...(source && { source }) });
     }
-    this.emit('changed', r.graph);
+    this.emit('changed', saved);
     this.emit('op', graphId, resolved);
-    return r;
+    return { ok: true, graph: saved };
   }
 
   /** The user's graph before pending agent changes: none when the file is absent. */
@@ -239,7 +312,7 @@ export class GraphStore extends EventEmitter {
       r = { ok: false, error: (e as Error).message };
     }
     if (!r.ok) return { ok: false, error: `The agent-change baseline ${file} could not be read (${r.error}).` };
-    return { ok: true, graph: { ...r.graph, id } };
+    return { ok: true, graph: canonicalGraph({ ...r.graph, id }) };
   }
 
   /** What agents changed since the baseline, each attributed to the latest agent op that touched it. */
@@ -276,9 +349,11 @@ export class GraphStore extends EventEmitter {
     if (pending) return { ok: false, error: pending };
     const r = op.type === 'acceptChange' ? accept(base.graph, graph, op.target) : revert(base.graph, graph, op.target, at);
     if (!r.ok) return r;
-    if (op.type === 'acceptChange') this.writeBaseline(r.graph);
-    else this.save(r.graph);
-    return this.finishReview(graphId, op, op.type === 'acceptChange' ? graph : r.graph, at);
+    if (op.type === 'acceptChange') {
+      this.writeBaseline(r.graph);
+      return this.finishReview(graphId, op, graph, at);
+    }
+    return this.finishReview(graphId, op, this.save(r.graph), at);
   }
 
   private finishReview(graphId: string, op: ReviewOp, graph: Graph, at: string): GraphResult {
@@ -290,7 +365,7 @@ export class GraphStore extends EventEmitter {
   }
 
   private writeBaseline(graph: Graph): void {
-    writeFileAtomic(this.baselineFile(graph.id), `${JSON.stringify(graph, null, 2)}\n`);
+    writeFileAtomic(this.baselineFile(graph.id), `${JSON.stringify(canonicalGraph(graph), null, 2)}\n`);
   }
 
   /** No differences left means no pending agent changes: the graph is its own baseline again. */
@@ -308,11 +383,22 @@ export class GraphStore extends EventEmitter {
     return readJsonLines<OpRecord>(this.opsFile(graphId));
   }
 
-  private save(graph: Graph): void {
-    const path = this.file(graph.id);
-    writeFileAtomic(path, `${JSON.stringify(graph, null, 2)}\n`);
-    const { mtimeMs, size } = statSync(path);
-    this.cache.set(graph.id, { graph, mtimeMs, size });
+  /**
+   * Writes the graph in canonical form (spec §4.3), each file as a temp file renamed into place: the side file first,
+   * then the Markdown. A file whose text wouldn't change isn't rewritten, so a move leaves the Markdown alone.
+   */
+  private save(graph: Graph): Graph {
+    const g = canonicalGraph(graph);
+    const text = serializeGraphMarkdown(g);
+    const metaText = serializeGraphMeta(g);
+    const mdPath = this.file(g.id);
+    const metaPath = this.metaFile(g.id);
+    const cached = this.cache.get(g.id);
+    if (cached?.metaText !== metaText || !existsSync(metaPath)) writeFileAtomic(metaPath, metaText);
+    if (cached?.text !== text || !existsSync(mdPath)) writeFileAtomic(mdPath, text);
+    this.cache.set(g.id, { graph: g, text, metaText, md: stampOf(mdPath)!, meta: stampOf(metaPath) });
+    this.failed.delete(g.id);
+    return g;
   }
 }
 

@@ -107,7 +107,7 @@ describe('Set Up Parallel Tickets', () => {
       [r.p1, 'abc-1-fix-login', T1],
       [r.p2, 'abc-2-add-logout', T2],
     ]) {
-      expect(JSON.parse(readFileSync(join(path, '.agent-stream', 'graphs', `${id}.json`), 'utf8'))).toMatchObject({ name: ticket, goal: `Complete ticket: ${ticket}` });
+      expect(readFileSync(join(path, '.agent-stream', 'graphs', `${id}.md`), 'utf8')).toContain(`# ${ticket}\n\n## Goal\n\nComplete ticket: ${ticket}\n`);
       expect(JSON.parse(readFileSync(valuesFileFor(path, s.home), 'utf8')).graphs[id]).toEqual({ check_command: 'npm test && npm run typecheck' });
     }
     expect(s.ui.inputBox.mock.calls.map(([o]) => o.prompt)).toEqual([
@@ -219,7 +219,7 @@ describe('Set Up Parallel Tickets', () => {
     await s.cmds.setUpParallelTickets();
     expect(s.ui.error).toHaveBeenCalledWith(`Created 1 of 2 worktrees; stopped at ${T2}: fatal: could not create work tree dir '${r.p2}'. Nothing was removed.`);
     expect(s.ui.infoAction).toHaveBeenCalledWith('Set up 1 ticket worktrees from a1b2c3d.', 'Open in New VS Code Window…');
-    expect(existsSync(join(r.p1, '.agent-stream', 'graphs', 'abc-1-fix-login.json'))).toBe(true);
+    expect(existsSync(join(r.p1, '.agent-stream', 'graphs', 'abc-1-fix-login.md'))).toBe(true);
     expect(git.ran().some((a) => a.startsWith('worktree remove'))).toBe(false);
     expect(s.ui.openInNewWindow).not.toHaveBeenCalled();
   });

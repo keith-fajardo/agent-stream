@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { Ui } from './commands';
 
-const filters = { 'Agent Stream graph': ['json'] };
+const filters = { 'Agent Stream graph': ['md', 'json'] };
 const saveFilters = { graph: filters, markdown: { Markdown: ['md'] } };
 
 export const vscodeUi: Ui = {

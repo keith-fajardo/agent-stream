@@ -36,7 +36,7 @@ import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
 import { inspectCheckout, type GitExec } from './git';
 import { GraphStore } from './graphStore';
-import { migrateProjectFolder, migrateValuesFile } from './migrate';
+import { migrateGraphsToMarkdown, migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
 import { refineRequest, splitRequest } from './refine';
@@ -144,6 +144,9 @@ export function createApp(d: AppDeps) {
   const sessions = new SessionStore(paths, clock);
   // Planner state and chats from before work sessions move into the Default session.
   migrationWarnings.push(...migrateLegacy(paths, sessions));
+  // After the planner-state move above, which reads the old JSON graph files.
+  const converted = migrateGraphsToMarkdown(paths, graphStore, d.rename);
+  migrationWarnings.push(...converted.warnings);
   sessions.ensureDefault();
   const runStore = new RunStore(paths);
   const platform = d.platform ?? process.platform;
@@ -760,5 +763,7 @@ export function createApp(d: AppDeps) {
     status: () => status,
     dispose,
     startupWarnings,
+    /** One line per graph converted to Markdown on startup, for the Agent Stream output channel. */
+    startupNotes: () => [...converted.notes],
   };
 }

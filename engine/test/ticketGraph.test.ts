@@ -77,7 +77,7 @@ describe('starter ticket graph', () => {
     expect(new VariableValues(valuesFileFor(a, home)).get(ga.graphId)).toEqual({ check_command: 'npm test' });
     expect(existsSync(valuesFileFor(b, home))).toBe(false);
     expect(readdirSync(join(a, '.agent-stream')).sort()).toEqual(['.gitignore', 'graphs', 'runs', 'sessions']);
-    expect(readdirSync(join(a, '.agent-stream', 'graphs'))).toEqual([`${ga.graphId}.json`]);
+    expect(readdirSync(join(a, '.agent-stream', 'graphs')).sort()).toEqual([`${ga.graphId}.md`, `${ga.graphId}.meta.json`]);
     expect(readdirSync(join(a, '.agent-stream', 'runs'))).toEqual([]);
     expect(readdirSync(join(a, '.agent-stream', 'sessions'))).toEqual([]);
     expect(new GraphStore(projectPaths(b)).get(gb.graphId).name).toBe('ABC-2');
