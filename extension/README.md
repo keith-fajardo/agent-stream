@@ -183,10 +183,11 @@ Agent Stream runs agent steps and the planner on your ChatGPT subscription throu
   - Codex's requests for extra permissions are declined, and the step's log says so.
 - **Read-only steps** run in Codex's read-only sandbox. Anything that isn't a plain read is declined without asking.
 - **Privacy:** reads of the variable values file and of `.agent-stream/runs` and `.agent-stream/sessions` are declined without asking (a step may read its upstream `output.md`).
+- **MCP servers:** the MCP servers in your Codex config (yours or the project's) are turned off for Agent Stream's steps and planner, because their tools wouldn't go through approvals. A server named with anything other than letters, digits, `-` and `_` can't be turned off, so Codex isn't started until you rename or remove it. Anything else Codex does that Agent Stream doesn't know shows in the step's log by its type.
 - **Request cap:** none. Codex runs its own loop; a step is bounded by your plan and by Stop. Each step's log shows its tokens. Usage shows tokens only, with no cost, for a ChatGPT plan.
 - **Planner chat:** each conversation is a Codex thread, so it continues after a VS Code reload. **New chat** starts a new thread.
 - **Limitation, shell startup files:** Codex runs commands through a login shell (for example `zsh -lc`), so your shell startup files apply. If they export settings such as `RIPGREP_CONFIG_PATH` or `GREP_OPTIONS`, or define aliases, that make `rg` or `grep` search hidden or ignored folders, a search that runs without asking could read past run records. Agent Stream removes those variables from Codex's own environment but can't undo what your startup files set.
-- **Windows:** not verified yet. When npm installed Codex, Agent Stream runs `codex.cmd` through `cmd.exe`. How Codex wraps commands on Windows isn't verified, so most reads there will ask for approval.
+- **Windows:** not verified yet. When npm installed Codex, Agent Stream runs `codex.cmd` through `cmd.exe`. How Codex wraps commands on Windows isn't verified, so no read counts as a plain read there yet. In steps that can edit files, every read asks for approval. Read-only steps and the planner may not be able to read files at all until the wrapper is verified: their reads are declined without asking.
 
 ## Files it writes
 

@@ -69,10 +69,18 @@ Run on a Windows machine with Claude Code installed and signed in, and Git for W
 30. **Status.** The status bar shows `Codex (<your plan>)`. If it shows `Agent Stream: Codex: not found`, set `agentStream.codexPath` to the path `where codex` prints, and check that the status updates without a reload.
 31. **Two-step graph.** Make a graph with an agent step "Add a line `hello` to notes.txt and a line `bye` to other.txt" (Can edit files), followed by a read-only agent step "Read notes.txt and report what it says". Run it.
     - The first step shows an approval card for each change (Patch or Bash). Approve the change to notes.txt and deny the other. notes.txt changes, other.txt doesn't, and the log shows `declined: Denied by the user.` for the denied one.
-    - The second step reads notes.txt and reports it. No card offers to change anything. Note whether the read asked for approval: on Windows it may.
+    - The second step tries to read notes.txt. No card offers to change anything. Record whether the read ran or was declined (on Windows a read-only step's reads may be declined without asking), and the exact command Codex sent, as the step's log shows it.
 32. **Privacy.** Ask an agent step to run `type .agent-stream\runs\<a run id>\run.json`, or `cat` it. The log shows `declined:` with a privacy reason, or an approval card you deny. The file's contents never appear.
 33. **Stop.** Ask an agent step to run `ping -n 600 127.0.0.1`, approve it, then press Stop. The step is cancelled, and Task Manager shows no `codex.exe` or `node.exe` left from it.
 34. **Planner chat.** Ask the planner to add a step; it appears on the canvas. Ask for another and press Stop mid-turn: the chat shows `Stopped.` Reload the window (**Developer: Reload Window**) and ask a follow-up: the planner answers with the earlier conversation in mind.
+    - Ask the planner what notes.txt says. Record whether it read the file or said it couldn't (on Windows the planner may not be able to read files).
 35. **Effort.** Pick a model that offers `ultra` with **Agent Stream: Select Model**, choose `ultra`, and run a step. The run dialog's Model line shows that model and `Effort: ultra`, and the step runs.
+
+**OpenAI Codex, release check on Windows and macOS.** Run these on both. Other apps, such as the ChatGPT app, may run their own `codex app-server`: only the ones Agent Stream started count.
+
+36. **MCP servers.** Add an MCP server you use to your Codex config (`~/.codex/config.toml`, `%USERPROFILE%\.codex\config.toml` on Windows) and check that `codex mcp list` shows it. Ask an agent step, then the planner, to use one of its tools. Neither can: the agent says it has no such tool, and no step log shows an `mcpToolCall`. Remove the server afterwards.
+37. **Change order.** Run an agent step that changes a file. Its approval is a **Patch** card naming the file, not `declined: Codex asked to change files it didn't name; declined.`: Codex announced the change (`item/started`) before asking to approve it.
+38. **Stop, on macOS.** Ask an agent step to run `sleep 600`, approve it, then press Stop. In a terminal, `ps -ax | grep -E 'codex|sleep'` shows no `codex app-server` and no `sleep 600` left from the step. (On Windows this is step 33.)
+39. **Closing VS Code mid-step.** Start an agent step that runs a long command (`sleep 600`, or `ping -n 600 127.0.0.1` on Windows), approve it, and quit VS Code while it runs. `ps` (Task Manager on Windows) shows no `codex app-server` left from the step.
 
 Report anything that differs, with the step number and a screenshot.
