@@ -55,3 +55,18 @@ describe('bridge', () => {
     expect(loadViewState()).toEqual({ layout: { sideWidth: 300 } });
   });
 });
+
+describe('bridge: the graph file comes back', () => {
+  it('opens its graph again when the list has it readable again, and only then', () => {
+    const graphs = (error?: string) => ({ type: 'graphs', graphs: [{ id: 'parity', name: 'Parity', ...(error && { error }) }] });
+    deliver({ type: 'graphDeleted', graphId: 'parity', reason: 'file' });
+    deliver({ type: 'graphs', graphs: [] });
+    posted.length = 0;
+    deliver(graphs('line 1: the file must start with the graph\'s name, as "# Name".'));
+    expect(posted).toEqual([]);
+    deliver(graphs());
+    expect(posted).toEqual([{ type: 'openGraph', graphId: 'parity' }]);
+    deliver(graphs());
+    expect(posted).toHaveLength(1);
+  });
+});

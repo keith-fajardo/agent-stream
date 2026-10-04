@@ -43,6 +43,7 @@ export function buildMenus(s: State): Menu[] {
         host('Import…', 'importGraph'),
         SEPARATOR,
         host('Export…', 'exportGraph', hasGraph),
+        host('Open as Markdown', 'openGraphMarkdown', !s.graphGone),
         host('Rename…', 'renameGraph', hasGraph),
         host('Duplicate', 'duplicateGraph', hasGraph),
         SEPARATOR,

@@ -1,5 +1,5 @@
-import type { ClientMessage, HostCommand, HostMessage, WebviewMessage } from '@agent-stream/shared';
-import { dispatch } from './store';
+import type { ClientMessage, GraphListItem, HostCommand, HostMessage, WebviewMessage } from '@agent-stream/shared';
+import { dispatch, getState } from './store';
 
 type VsCodeApi = { postMessage(message: unknown): void; getState?(): unknown; setState?(state: unknown): void };
 declare const acquireVsCodeApi: (() => VsCodeApi) | undefined;
@@ -40,13 +40,19 @@ function isHostMessage(x: unknown): x is HostMessage {
   return typeof x === 'object' && x !== null && typeof (x as { type?: unknown }).type === 'string';
 }
 
+/** Whether the graphs list has this tab's graph, readable. */
+const listsOwnGraph = (graphs: readonly GraphListItem[]) => graphs.some((g) => g.id === bootGraphId() && !g.error);
+
 /** Listens to the extension and tells it this tab is ready; reports once its graph has loaded (ruling R5). */
 export function connect(): void {
   window.addEventListener('message', (event: MessageEvent) => {
     const msg: unknown = event.data;
     if (!isHostMessage(msg)) return;
+    const wasListed = listsOwnGraph(getState().graphs);
     dispatch({ kind: 'server', msg });
     if (msg.type === 'hello') send({ type: 'openGraph', graphId: bootGraphId() });
+    // The graph's file came back, or reads again (Markdown graph files spec §6.5): open it again.
+    if (msg.type === 'graphs' && !getState().graph && !wasListed && listsOwnGraph(msg.graphs)) send({ type: 'openGraph', graphId: bootGraphId() });
     if (msg.type === 'graphOpened') post({ type: 'opened', graphId: msg.graph.id });
   });
   // The checkout can change while the tab is hidden (a branch switch in a terminal): ask again when it shows (spec §7).

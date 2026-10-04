@@ -37,6 +37,7 @@ describe('menus', () => {
       ['Open…', true],
       ['Import…', true],
       ['Export…', true],
+      ['Open as Markdown', true],
       ['Rename…', true],
       ['Duplicate', true],
       ['Delete…', true],
@@ -159,5 +160,13 @@ describe('menus', () => {
       'Add variable…',
       'Edit variables…',
     ]);
+  });
+});
+
+describe('File › Open as Markdown', () => {
+  it('asks the extension to open the graph file, unless the file is gone', () => {
+    items(base(), 'file')['Open as Markdown'].run();
+    expect(sendHost).toHaveBeenCalledWith('openGraphMarkdown');
+    expect(items(base({ graph: undefined, graphGone: true }), 'file')['Open as Markdown'].enabled).toBe(false);
   });
 });
