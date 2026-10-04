@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import {
   edgeId,
   isWriteCapable,
@@ -27,6 +28,7 @@ import {
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import type { Executors, NodeExecutor, NodeOutcome } from './executors';
+import { realOrResolved } from './git';
 import { buildNodePrompt } from './prompt';
 import type { RunStore } from './runStore';
 import type { WriteLeases } from './writeLease';
@@ -435,8 +437,14 @@ export class Runner extends EventEmitter {
     Promise.resolve()
       .then(() => {
         const workspace = workspaceOf(node);
-        const place = workspace === null ? undefined : run.workspaces[workspace];
-        if (workspace !== null && !place) throw new Error(`Step ${nodeId} uses workspace "${workspace}", but this run has no worktree for it.`);
+        const worktree = workspace === null ? undefined : run.workspaces[workspace];
+        if (workspace !== null && !worktree) throw new Error(`Step ${nodeId} uses workspace "${workspace}", but this run has no worktree for it.`);
+        const place = worktree && { ...worktree, path: variantWorkDir(worktree.path, meta.checkout?.root, this.deps.projectDir) };
+        if (place && place.path !== worktree.path && !existsSync(place.path)) {
+          const sub = relative(worktree.path, place.path);
+          const outcome: NodeOutcome = { ok: false, output: '', error: `Workspace "${workspace}" has no ${sub} folder: its worktree holds only committed files, so commit that folder first.` };
+          return outcome;
+        }
         // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.
         const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => {
           const rel = this.deps.runStore.outputRelPath(meta.id, parentId);
@@ -574,4 +582,11 @@ function executionNode(meta: RunMeta, id: string): GraphNode {
   const text = meta.rendered?.nodes[id];
   if (text === undefined) throw new Error(`no reviewed text for step ${id}`);
   return node.kind === 'command' ? { ...node, command: text } : { ...node, prompt: text };
+}
+
+/** A variant step works in the same subfolder of its worktree as the opened folder is of its checkout (e.g. analytics/dbt), so commands find the same project files. */
+export function variantWorkDir(worktree: string, checkoutRoot: string | undefined, projectDir: string): string {
+  if (!checkoutRoot) return worktree;
+  const sub = relative(checkoutRoot, realOrResolved(projectDir));
+  return sub && !sub.startsWith('..') && !isAbsolute(sub) ? join(worktree, sub) : worktree;
 }
