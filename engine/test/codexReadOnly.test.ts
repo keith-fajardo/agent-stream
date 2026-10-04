@@ -204,7 +204,7 @@ describe('classifyCommand', () => {
 
   it('does not treat a search pattern as a path (fix 1: R1f)', () => {
     expect(kindOf('grep -n / notes.txt', search('grep -n / notes.txt'))).toBe('readOnly');
-    expect(classify(zsh(`grep -n / ${values}`), search('grep')).kind).toBe('private');
+    expect(classify(zsh(`grep -n / ${values}`), search('grep'), { platform: host }).kind).toBe('private');
   });
 
   it('asks for any other .agent-stream operand, but not the permitted upstream output.md (fix 1: R1g)', () => {
@@ -235,7 +235,7 @@ describe('classifyCommand', () => {
 
   it('does not privacy-check the pattern after -e (fix 2: R1m)', () => {
     expect(kindOf('grep -e / notes.txt', search('grep'))).toBe('readOnly');
-    expect(kindOf(`grep -e x ${values}`, search('grep'))).toBe('private');
+    expect(classify(zsh(`grep -e x ${values}`), search('grep'), { platform: host }).kind).toBe('private');
   });
 
   it("takes the .agent-stream test relative to the step's folder, never the cwd Codex chose (fix 3: R1o)", () => {

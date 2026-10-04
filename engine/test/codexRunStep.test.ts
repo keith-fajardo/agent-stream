@@ -276,7 +276,6 @@ describe('codexRunStep', () => {
     const text = JSON.stringify(call);
     expect(text).not.toContain('SECRETMARK');
     expect(call).toMatchObject({ input: { changes: [{ path: values, kind: 'update' }, { path: runFile, kind: 'update' }, { path: resolve(cwd, 'a.ts'), kind: 'update', diff: '-ordinary diff' }] } });
-    expect(text).toContain(values);
   });
 
   it('keeps the diff of a path that could be another spelling of a private folder out of the step log (RF3)', async () => {
