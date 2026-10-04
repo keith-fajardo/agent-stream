@@ -13,6 +13,7 @@ import {
   type ChatEntry,
   type ClientMessage,
   type Graph,
+  type GraphFileError,
   type GraphListItem,
   type GraphNode,
   type GraphResult,
@@ -35,7 +36,7 @@ import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
 import { inspectCheckout, type GitExec } from './git';
-import { GraphStore } from './graphStore';
+import { GraphStore, type FileSync } from './graphStore';
 import { migrateGraphsToMarkdown, migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
 import { Planner } from './planner';
@@ -340,6 +341,27 @@ export function createApp(d: AppDeps) {
       broadcastGraphs();
     }
   });
+  graphStore.on('fileErrors', (graphId: string, errors: GraphFileError[]) => broadcast({ type: 'graphFileErrors', graphId, errors }));
+  graphStore.on('fileDeleted', (graphId: string) => {
+    agentChangeCounts.delete(graphId);
+    broadcast({ type: 'graphDeleted', graphId, reason: 'file' });
+    broadcastGraphs();
+  });
+  /** The extension's file watcher saw `<id>.md` or `<id>.meta.json` change (Markdown graph files spec §6.2). */
+  function graphFileChanged(id: string): FileSync {
+    const r = graphStore.graphFileChanged(id);
+    if (r === 'added') {
+      // The store emits nothing for a new or restored file: a tab showing this id gets the graph itself too.
+      const g = graphStore.load(id);
+      if (g.ok) broadcast({ type: 'graph', graph: g.graph, ...review(id) });
+    }
+    if (r === 'added' || r === 'applied' || r === 'errors') broadcastGraphs();
+    return r;
+  }
+  /** The extension's file watcher saw `<id>.md` deleted: the store's fileDeleted event tells the clients. */
+  function graphFileDeleted(id: string): FileSync {
+    return graphStore.graphFileDeleted(id);
+  }
   /** Each active run's last announced state: the checkout chip follows a run that starts, ends or stops waiting (spec §4.5). */
   const announced = new Map<string, string>();
   runner.on('run', (run: RunMeta) => {
@@ -402,7 +424,8 @@ export function createApp(d: AppDeps) {
   function opened(graph: Graph): ServerMessage {
     const runs = runStore.list(graph.id);
     const run = runner.activeFor(graph.id) ?? (runs[0] ? runStore.get(runs[0].id) : undefined);
-    return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id), ...review(graph.id) };
+    const fileErrors = graphStore.fileErrors(graph.id);
+    return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id), ...review(graph.id), ...(fileErrors.length > 0 && { fileErrors }) };
   }
 
   /** A revert would change a step that a run in progress is about to run or is running. */
@@ -748,6 +771,8 @@ export function createApp(d: AppDeps) {
     deleteGraph,
     exportGraph: (id: string) => graphStore.exportGraph(id),
     importGraph,
+    graphFileChanged,
+    graphFileDeleted,
     runWorkspaces,
     markWorkspaceRemoved,
     runReport,

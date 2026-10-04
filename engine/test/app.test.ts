@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -1687,5 +1687,75 @@ describe('graphs from before Markdown', () => {
     expect(app.sessionStore.plannerState('default', 'g1')).toMatchObject({ sessionId: 's' });
     expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
     expect(existsSync(join(paths.graphsDir, 'g1.json.bak'))).toBe(true);
+  });
+});
+
+describe('graph files changed outside Agent Stream', () => {
+  function withFile() {
+    const { app, graphId, paths } = setupWithGraph();
+    app.graphStore.apply(graphId, { type: 'addVariable', name: 'schema' }, 'user');
+    app.graphStore.apply(graphId, { type: 'addNode', node: { title: 'Build', kind: 'command', command: 'make {{ schema }}' } }, 'user');
+    const md = join(paths.graphsDir, `${graphId}.md`);
+    const edit = (from: string, to: string) => writeFileSync(md, readFileSync(md, 'utf8').replace(from, to));
+    return { app, graphId, md, edit, c: client(app) };
+  }
+
+  it('sends the edited graph and the list, and records the edit as the user’s, via the file', () => {
+    const { app, graphId, edit, c } = withFile();
+    edit('# G', '# G edited\n\n## Goal\n\nFrom a text editor.');
+    expect(app.graphFileChanged(graphId)).toBe('applied');
+    expect(c.last('graph').graph).toMatchObject({ name: 'G edited', goal: 'From a text editor.' });
+    expect(c.last('graphs').graphs.find((g) => g.id === graphId)?.name).toBe('G edited');
+    expect(app.graphStore.readOps(graphId).at(-1)).toMatchObject({ by: 'user', op: { type: 'setGoal' }, via: 'file' });
+    expect(app.graphFileChanged(graphId)).toBe('unchanged');
+  });
+
+  it('forgets the value of a variable the file removed', () => {
+    const { app, graphId, edit } = withFile();
+    app.values.set(graphId, 'schema', 'dev');
+    edit('## Variables\n\n- `schema`\n\n', '');
+    edit('make {{ schema }}', 'make');
+    expect(app.graphFileChanged(graphId)).toBe('applied');
+    expect(app.values.get(graphId)).toEqual({});
+  });
+
+  it('publishes file errors, includes them when the graph opens, and clears them when fixed', async () => {
+    const { app, graphId, edit, c } = withFile();
+    edit('- kind: command', '- kind: robot');
+    expect(app.graphFileChanged(graphId)).toBe('errors');
+    expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors: [{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }] });
+    await app.handle(c.client, { type: 'openGraph', graphId });
+    expect(c.last('graphOpened').fileErrors).toEqual(c.last('graphFileErrors').errors);
+    // Back to the text the store holds: nothing to apply, and the problems are gone.
+    edit('- kind: robot', '- kind: command');
+    expect(app.graphFileChanged(graphId)).toBe('unchanged');
+    expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors: [] });
+    await app.handle(c.client, { type: 'openGraph', graphId });
+    expect('fileErrors' in c.last('graphOpened')).toBe(false);
+  });
+
+  it('tells the tabs a deleted file’s graph is gone, and lists it again when the file comes back', () => {
+    const { app, graphId, md, c } = withFile();
+    const saved = readFileSync(md, 'utf8');
+    rmSync(md);
+    expect(app.graphFileDeleted(graphId)).toBe('deleted');
+    expect(c.last('graphDeleted')).toEqual({ type: 'graphDeleted', graphId, reason: 'file' });
+    expect(c.last('graphs').graphs.map((g) => g.id)).toEqual([]);
+    writeFileSync(md, saved);
+    expect(app.graphFileChanged(graphId)).toBe('added');
+    expect(c.last('graphs').graphs.map((g) => g.id)).toEqual([graphId]);
+  });
+
+  it('sends the graph itself, not just the list, when a file is added or comes back (so a tab showing it refreshes)', () => {
+    const { app, graphId, md, c } = withFile();
+    const saved = readFileSync(md, 'utf8');
+    rmSync(md);
+    app.graphFileDeleted(graphId);
+    const before = c.all('graph').length;
+    writeFileSync(md, saved.replace('# G', '# G back'));
+    expect(app.graphFileChanged(graphId)).toBe('added');
+    expect(c.all('graph').length).toBe(before + 1);
+    expect(c.last('graph').graph).toMatchObject({ id: graphId, name: 'G back' });
+    expect(c.last('graphs').graphs.find((g) => g.id === graphId)?.name).toBe('G back');
   });
 });
