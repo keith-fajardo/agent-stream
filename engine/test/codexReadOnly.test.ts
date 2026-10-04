@@ -21,9 +21,9 @@ const zsh = (script: string) => `/bin/zsh -lc '${script}'`;
 const read = (script: string, file = 'notes.txt', dir = cwd): CommandAction[] => [{ type: 'read', command: script, name: file, path: resolve(dir, file) }];
 const search = (script: string): CommandAction[] => [{ type: 'search', command: script, query: null, path: null }];
 
-function classify(command: string, actions: CommandAction[] | null, o: { platform?: NodeJS.Platform; kind?: 'command' | 'writeStdin'; extra?: object; dir?: string } = {}): CommandClass {
+function classify(command: string, actions: CommandAction[] | null, o: { platform?: NodeJS.Platform; kind?: 'command' | 'writeStdin'; extra?: object; dir?: string; pcwd?: string } = {}): CommandClass {
   const dir = o.dir ?? cwd;
-  return classifyCommand(approvalParams({ command, cwd: dir, actions, kind: o.kind, extra: o.extra }), { cwd: dir, platform: o.platform ?? 'linux', privacy: privacyFor(dir) });
+  return classifyCommand(approvalParams({ command, cwd: o.pcwd ?? dir, actions, kind: o.kind, extra: o.extra }), { cwd: dir, platform: o.platform ?? 'linux', privacy: privacyFor(dir) });
 }
 const kindOf = (script: string, actions: CommandAction[] = read(script)) => classify(zsh(script), actions).kind;
 
@@ -236,5 +236,16 @@ describe('classifyCommand', () => {
   it('does not privacy-check the pattern after -e (fix 2: R1m)', () => {
     expect(kindOf('grep -e / notes.txt', search('grep'))).toBe('readOnly');
     expect(kindOf(`grep -e x ${values}`, search('grep'))).toBe('private');
+  });
+
+  it("takes the .agent-stream test relative to the step's folder, never the cwd Codex chose (fix 3: R1o)", () => {
+    const step = resolve('/', 'work', 'proj');
+    const v1 = resolve('/', 'h', '.agent-stream', 'worktrees', 'k', 'r1', 'v1');
+    const v2 = resolve('/', 'h', '.agent-stream', 'worktrees', 'k', 'r1', 'v2');
+    const ask = (script: string, actions: CommandAction[], dir: string, pcwd: string) => classify(zsh(script), actions, { dir, pcwd }).kind;
+    expect(ask('cat other.json', [{ type: 'read', command: 'cat other.json', name: 'other.json', path: 'other.json' }], step, resolve('/', 'h', '.agent-stream', 'values'))).not.toBe('readOnly');
+    expect(ask('cat secret.txt', read('cat secret.txt', 'secret.txt', v2), v1, v2)).toBe('ask');
+    expect(ask('cat values.json', read('cat values.json', 'values.json', resolve(step, '.agent-stream')), step, resolve(step, '.agent-stream'))).toBe('ask');
+    expect(ask('ls', search('ls'), step, resolve(step, '.agent-stream', 'worktrees'))).toBe('ask');
   });
 });

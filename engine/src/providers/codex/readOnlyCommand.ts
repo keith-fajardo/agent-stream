@@ -162,9 +162,9 @@ export function classifyCommand(p: CommandExecutionRequestApprovalParams, o: { c
       if (reason) return { kind: 'private', reason };
     }
     // Any other .agent-stream path (another project's values, worktrees, ...) asks, bar an upstream output.md (R1g).
-    // Below the step's own folder only: a variant step's cwd is itself under ~/.agent-stream/worktrees (R1j).
+    // Below the step's own folder (o.cwd, never the cwd Codex chose: R1o) only: a variant step's cwd is itself under ~/.agent-stream/worktrees (R1j).
     const below = (path: string) => {
-      const rel = relative(cwd, path);
+      const rel = relative(o.cwd, path);
       return rel === '..' || rel.startsWith('..') || isAbsolute(rel) ? path : rel;
     };
     namesAgentStreamOperand = paths.some((path) => namesAgentStream(below(path)) && !isUpstreamOutputPath(path));
