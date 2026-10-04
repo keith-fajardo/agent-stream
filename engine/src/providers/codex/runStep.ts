@@ -3,9 +3,10 @@ import { toLoopTools } from '../../agentLoop/graphLoopTools';
 import { clipResult } from '../../agentLoop/tools';
 import type { NodeContext, NodeOutcome } from '../../executors';
 import { STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../toolGate';
-import { createServerRequestHandler, toPatchChanges } from './approvals';
+import { changePrivacyReason, createServerRequestHandler, toPatchChanges, type PatchChange } from './approvals';
 import { errorMessage, openCodex, type CodexConnection, type SpawnCodex } from './connection';
 import { codexEffort } from './models';
+import { pathPrivacy } from './readOnlyCommand';
 import type { DynamicToolContentItem, FileUpdateChange, ThreadItem, ThreadResponse, ThreadStartParams } from './protocol';
 import { dynamicToolSpecs, runCodexTurn } from './turn';
 
@@ -42,8 +43,11 @@ function patchResult(item: Extract<ThreadItem, { type: 'fileChange' }>, declined
   return `changed ${item.changes.map((c) => c.path).join(', ')}`;
 }
 
+/** A change to a private path is logged by path and kind only: Codex builds its diff from the file's current content. */
+const withoutDiff = ({ diff: _diff, ...rest }: PatchChange): Omit<PatchChange, 'diff'> => rest;
+
 /** One item as step log events (spec §4.6): text when an item completes, a tool call when it starts and its result when it completes. */
-export function stepItemEvents(phase: 'started' | 'completed', item: ThreadItem, declined: ReadonlyMap<string, string>): NodeEventBody[] {
+export function stepItemEvents(phase: 'started' | 'completed', item: ThreadItem, declined: ReadonlyMap<string, string>, isPrivate: (change: FileUpdateChange) => boolean = () => false): NodeEventBody[] {
   switch (item.type) {
     case 'agentMessage':
       return phase === 'completed' && item.text.trim() ? [{ type: 'text', text: item.text }] : [];
@@ -57,7 +61,7 @@ export function stepItemEvents(phase: 'started' | 'completed', item: ThreadItem,
         : [{ type: 'tool_result', toolUseId: item.id, content: commandResult(item, declined.get(item.id)), isError: item.status !== 'completed' }];
     case 'fileChange':
       return phase === 'started'
-        ? [{ type: 'tool_call', toolUseId: item.id, name: 'Patch', input: { changes: toPatchChanges(item.changes) } }]
+        ? [{ type: 'tool_call', toolUseId: item.id, name: 'Patch', input: { changes: toPatchChanges(item.changes).map((p, i) => (isPrivate(item.changes[i]) ? withoutDiff(p) : p)) } }]
         : [{ type: 'tool_result', toolUseId: item.id, content: patchResult(item, declined.get(item.id)), isError: item.status !== 'completed' }];
     case 'dynamicToolCall':
       return phase === 'started'
@@ -80,6 +84,8 @@ export function codexRunStep(deps: CodexRunDeps) {
     const ended = new AbortController();
     const fileChanges = new Map<string, FileUpdateChange[]>();
     const declined = new Map<string, string>();
+    const privacy = pathPrivacy(gate);
+    const isPrivate = (change: FileUpdateChange) => changePrivacyReason(privacy, ctx.cwd, change) !== undefined;
     let conn: CodexConnection | undefined;
     let usage: NodeUsage | undefined;
     const cancelled = (): NodeOutcome => ({ ok: false, output: '', error: 'cancelled', ...(usage && { usage }) });
@@ -118,7 +124,7 @@ export function codexRunStep(deps: CodexRunDeps) {
         onItem: (phase, item) => {
           // Recorded before Codex's approval request for it arrives: notifications are handled in order (R14).
           if (phase === 'started' && item.type === 'fileChange') fileChanges.set(item.id, item.changes);
-          for (const e of stepItemEvents(phase, item, declined)) ctx.emit(e);
+          for (const e of stepItemEvents(phase, item, declined, isPrivate)) ctx.emit(e);
         },
         onRetry: (text) => ctx.emit({ type: 'text', text }),
         interruptWaitMs: deps.interruptWaitMs,

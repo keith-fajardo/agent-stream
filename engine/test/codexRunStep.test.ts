@@ -251,6 +251,32 @@ describe('codexRunStep', () => {
     expect(s.broker.pending()).toEqual([]);
   });
 
+  it('keeps the diff of a private file out of the step log, but not an ordinary one (F1)', async () => {
+    const runFile = resolve(cwd, '.agent-stream', 'runs', 'r1', 'run.json');
+    const mk = (path: string, diff: string) => ({ path, kind: { type: 'update' as const, move_path: null }, diff });
+    const changes = [mk(values, ' SECRETMARK1\n-old'), mk(runFile, '-SECRETMARK2'), mk(resolve(cwd, 'a.ts'), '-ordinary diff')];
+    const s = step((t) => {
+      t.started(fileChangeItem({ id: 'p1', changes, status: 'inProgress' }));
+      t.end();
+    });
+    await s.run();
+    const call = s.events.find((e) => e.type === 'tool_call');
+    const text = JSON.stringify(call);
+    expect(text).not.toContain('SECRETMARK');
+    expect(call).toMatchObject({ input: { changes: [{ path: values, kind: 'update' }, { path: runFile, kind: 'update' }, { path: resolve(cwd, 'a.ts'), kind: 'update', diff: '-ordinary diff' }] } });
+    expect(text).toContain(values);
+  });
+
+  it('withdraws a pending approval when the turn completes normally (R18)', async () => {
+    const s = step((t) => {
+      t.started(commandItem({ id: 'c1', command: zsh('npm test'), status: 'inProgress' }));
+      void t.ask('item/commandExecution/requestApproval', approvalParams({ itemId: 'c1', command: zsh('npm test'), cwd, actions: [{ type: 'unknown', command: 'npm test' }] }));
+      t.end();
+    });
+    expect(await s.run()).toEqual({ ok: true, output: '' });
+    expect(s.broker.pending()).toEqual([]);
+  });
+
   it("closes Codex when the thread can't start, and doesn't start Codex without a path", async () => {
     const refused = setup({ ...turnHandlers({}), 'thread/start': () => { throw new FakeRpcError(-32602, 'bad cwd'); } });
     expect(await refused.run()).toEqual({ ok: false, output: '', error: 'bad cwd' });

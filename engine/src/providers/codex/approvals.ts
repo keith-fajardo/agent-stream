@@ -21,6 +21,17 @@ export function toPatchChanges(changes: FileUpdateChange[]): PatchChange[] {
   return changes.map((c) => ({ path: c.path, kind: c.kind.type, diff: c.diff, ...(c.kind.type === 'update' && c.kind.move_path ? { movePath: c.kind.move_path } : {}) }));
 }
 
+/** Why a change may not be made: it touches a private path, or moves a file onto one. The read rule plus the write rule, with no upstream output.md exception, like Edit and Write (R26). */
+export function changePrivacyReason(privacy: ReturnType<typeof pathPrivacy>, cwd: string, ch: FileUpdateChange): string | undefined {
+  const paths = ch.kind.type === 'update' && ch.kind.move_path ? [ch.path, ch.kind.move_path] : [ch.path];
+  for (const path of paths) {
+    const full = resolve(cwd, path);
+    const reason = privacy(full, 'read') ?? privateFolderWriteDenial(full);
+    if (reason) return reason;
+  }
+  return undefined;
+}
+
 export const PERMISSIONS_DECLINED = 'Codex asked for extra permissions; declined.';
 export const UNNAMED_CHANGE = "Codex asked to change files it didn't name; declined.";
 export const grantRootDeclined = (root: string) => `Codex asked to write anywhere under ${root} for the rest of the session; declined.`;
@@ -68,13 +79,8 @@ export function createServerRequestHandler(c: ApprovalContext): (method: string,
     const changes = c.fileChanges.get(p.itemId);
     if (!changes || changes.length === 0) return settle(p.itemId, { allow: false, reason: UNNAMED_CHANGE });
     for (const ch of changes) {
-      const paths = ch.kind.type === 'update' && ch.kind.move_path ? [ch.path, ch.kind.move_path] : [ch.path];
-      for (const path of paths) {
-        const full = resolve(c.cwd, path);
-        // The read rule (values files, run.json) plus the write rule: no upstream output.md exception, like Edit and Write (R26).
-        const reason = privacy(full, 'read') ?? privateFolderWriteDenial(full);
-        if (reason) return settle(p.itemId, { allow: false, reason });
-      }
+      const reason = changePrivacyReason(privacy, c.cwd, ch);
+      if (reason) return settle(p.itemId, { allow: false, reason });
     }
     const input = { ...(p.reason ? { description: p.reason } : {}), changes: toPatchChanges(changes) };
     return settle(p.itemId, await c.gate.decide('Patch', input, c.signal));
