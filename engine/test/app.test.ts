@@ -1786,3 +1786,96 @@ describe('graph files changed outside Agent Stream', () => {
     expect(c.last('graphs').graphs.find((g) => g.id === graphId)?.name).toBe('G back');
   });
 });
+
+describe('the graph tab’s Markdown editor', () => {
+  function withFile() {
+    const { app, graphId, paths } = setupWithGraph();
+    app.graphStore.apply(graphId, { type: 'addNode', node: { title: 'Build', kind: 'command', command: 'make' } }, 'user');
+    const md = join(paths.graphsDir, `${graphId}.md`);
+    const text = () => readFileSync(md, 'utf8');
+    return { app, graphId, md, text, c: client(app) };
+  }
+
+  it('sends the file’s text when asked, and an error for a graph that has no file', async () => {
+    const { app, graphId, text, c } = withFile();
+    await app.handle(c.client, { type: 'getGraphMarkdown', graphId });
+    expect(c.last('graphMarkdown')).toEqual({ type: 'graphMarkdown', graphId, text: text() });
+    await app.handle(c.client, { type: 'getGraphMarkdown', graphId: 'nope' });
+    expect(c.last('error')).toEqual({ type: 'error', message: 'graph "nope" not found' });
+  });
+
+  it('sends the new text to the tabs after a canvas edit, and nothing when the text stays the same', async () => {
+    const { app, graphId, text, c } = withFile();
+    const other = client(app);
+    await app.handle(c.client, { type: 'getGraphMarkdown', graphId });
+    await app.handle(c.client, { type: 'op', graphId, op: { type: 'setGoal', goal: 'From the canvas.' } });
+    expect(text()).toContain('From the canvas.');
+    expect(c.last('graphMarkdown')).toEqual({ type: 'graphMarkdown', graphId, text: text() });
+    expect(other.last('graphMarkdown')).toEqual({ type: 'graphMarkdown', graphId, text: text() });
+    const sent = c.all('graphMarkdown').length;
+    // A move only rewrites the side file.
+    await app.handle(c.client, { type: 'op', graphId, op: { type: 'moveNode', id: 'n1', position: { x: 3, y: 4 } } });
+    expect(c.all('graphMarkdown').length).toBe(sent);
+  });
+
+  it('sends the new text after an outside edit, including a broken one', async () => {
+    const { app, graphId, md, text, c } = withFile();
+    await app.handle(c.client, { type: 'getGraphMarkdown', graphId });
+    writeFileSync(md, text().replace('# G', '# G edited'));
+    expect(app.graphFileChanged(graphId)).toBe('applied');
+    expect(c.last('graphMarkdown').text).toBe(text());
+    expect(text()).toContain('# G edited');
+    writeFileSync(md, text().replace('- kind: command', '- kind: robot'));
+    expect(app.graphFileChanged(graphId)).toBe('errors');
+    expect(c.last('graphMarkdown').text).toBe(text());
+    // A second broken edit with the same problem changes no errors, but the text still follows.
+    writeFileSync(md, text().replace('make', 'make all'));
+    expect(app.graphFileChanged(graphId)).toBe('errors');
+    expect(c.last('graphMarkdown').text).toBe(text());
+  });
+
+  it('saves the editor’s text through the file path: the graph, its history and the canonical text come back', async () => {
+    const { app, graphId, text, c } = withFile();
+    const base = text();
+    await app.handle(c.client, { type: 'getGraphMarkdown', graphId });
+    await app.handle(c.client, { type: 'saveGraphMarkdown', graphId, text: `${base}\n## Report\n\n\`\`\`prompt\nSum up.\n\`\`\`\n`, base });
+    expect(c.last('graph').graph.nodes.map((n) => n.id)).toEqual(['n1', 'n2']);
+    expect(app.graphStore.readOps(graphId).at(-1)).toMatchObject({ by: 'user', op: { type: 'addNode' }, via: 'file' });
+    expect(text()).toContain('## n2 · Report');
+    expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId, ok: true, text: text() });
+    expect(c.last('graphMarkdown')).toEqual({ type: 'graphMarkdown', graphId, text: text() });
+  });
+
+  it('saves broken text, keeps the last good graph and answers with the errors', async () => {
+    const { app, graphId, text, c } = withFile();
+    const base = text();
+    const broken = base.replace('- kind: command', '- kind: robot');
+    await app.handle(c.client, { type: 'saveGraphMarkdown', graphId, text: broken, base });
+    expect(text()).toBe(broken);
+    const errors = [{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }];
+    expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId, ok: false, text: broken, errors });
+    expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors });
+    expect(app.graphStore.get(graphId).nodes[0].kind).toBe('command');
+  });
+
+  it('refuses a stale save without writing, and overwrites when forced', async () => {
+    const { app, graphId, md, text, c } = withFile();
+    const base = text();
+    writeFileSync(md, base.replace('make', 'make it'));
+    const onDisk = text();
+    const mine = base.replace('# G', '# Mine');
+    await app.handle(c.client, { type: 'saveGraphMarkdown', graphId, text: mine, base });
+    expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId, ok: false, conflict: true });
+    expect(text()).toBe(onDisk);
+    await app.handle(c.client, { type: 'saveGraphMarkdown', graphId, text: mine, base, force: true });
+    expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId, ok: true, text: text() });
+    expect(app.graphStore.get(graphId)).toMatchObject({ name: 'Mine' });
+    expect(app.graphStore.get(graphId).nodes[0].command).toBe('make');
+  });
+
+  it('answers a save for a graph that has no file with the reason', async () => {
+    const { app, c } = withFile();
+    await app.handle(c.client, { type: 'saveGraphMarkdown', graphId: 'nope', text: '# X\n', base: '# X\n' });
+    expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId: 'nope', ok: false, error: 'graph "nope" not found' });
+  });
+});

@@ -263,6 +263,7 @@ export function createApp(d: AppDeps) {
     if (!r.ok) return r;
     values.deleteGraph(id);
     agentChangeCounts.delete(id);
+    markdownSent.delete(id);
     try {
       sessions.removeGraph(id);
     } catch (e) {
@@ -336,6 +337,16 @@ export function createApp(d: AppDeps) {
   });
   /** Each graph's agent-change count as last broadcast, so the graphs list follows it. */
   const agentChangeCounts = new Map<string, number>();
+  /** The Markdown text last sent for each graph a tab's Markdown editor asked for (getGraphMarkdown): those tabs follow the file. */
+  const markdownSent = new Map<string, string>();
+  /** Sends a watched graph's Markdown file to the tabs when its text changed since it was last sent. */
+  function sendMarkdownIfChanged(graphId: string): void {
+    if (!markdownSent.has(graphId)) return;
+    const text = graphStore.markdownText(graphId);
+    if (text === undefined || text === markdownSent.get(graphId)) return;
+    markdownSent.set(graphId, text);
+    broadcast({ type: 'graphMarkdown', graphId, text });
+  }
   graphStore.on('changed', (graph: Graph) => {
     const r = review(graph.id);
     broadcast({ type: 'graph', graph, ...r });
@@ -343,8 +354,12 @@ export function createApp(d: AppDeps) {
       agentChangeCounts.set(graph.id, r.changes.length);
       broadcastGraphs();
     }
+    sendMarkdownIfChanged(graph.id);
   });
-  graphStore.on('fileErrors', (graphId: string, errors: GraphFileError[]) => broadcast({ type: 'graphFileErrors', graphId, errors }));
+  graphStore.on('fileErrors', (graphId: string, errors: GraphFileError[]) => {
+    broadcast({ type: 'graphFileErrors', graphId, errors });
+    sendMarkdownIfChanged(graphId);
+  });
   graphStore.on('fileDeleted', (graphId: string) => {
     agentChangeCounts.delete(graphId);
     broadcast({ type: 'graphDeleted', graphId, reason: 'file' });
@@ -353,13 +368,33 @@ export function createApp(d: AppDeps) {
   /** The extension's file watcher saw `<id>.md` or `<id>.meta.json` change (Markdown graph files spec §6.2). */
   function graphFileChanged(id: string): FileSync {
     const r = graphStore.graphFileChanged(id);
+    fileSynced(id, r);
+    return r;
+  }
+  /** Tells the clients what reading the graph's Markdown file did (graphFileChanged, or a save from the Markdown editor). */
+  function fileSynced(id: string, r: FileSync): void {
     if (r === 'added') {
       // The store emits nothing for a new or restored file: a tab showing this id gets the graph itself too.
       const g = graphStore.load(id);
       if (g.ok) broadcast({ type: 'graph', graph: g.graph, ...review(id) });
     }
     if (r === 'added' || r === 'applied' || r === 'errors') broadcastGraphs();
-    return r;
+    // A broken file edited again with the same problems emits nothing: its text still changed.
+    sendMarkdownIfChanged(id);
+  }
+  /** The Markdown editor's Save (Graph | Markdown toggle): the store writes the text and reads it like an outside edit. */
+  function saveGraphMarkdown(client: Client, msg: Extract<ClientMessage, { type: 'saveGraphMarkdown' }>): void {
+    const { graphId } = msg;
+    let r: ReturnType<GraphStore['saveMarkdown']>;
+    try {
+      r = graphStore.saveMarkdown(graphId, msg.text, msg.base, msg.force);
+    } catch (e) {
+      r = { ok: false, error: `Could not save ${graphId}.md (${e instanceof Error ? e.message : String(e)}).` };
+    }
+    if (!r.ok) return client.send({ type: 'graphMarkdownSaved', graphId, ok: false, ...('conflict' in r ? { conflict: true } : { error: r.error }) });
+    fileSynced(graphId, r.sync);
+    const errors = graphStore.fileErrors(graphId);
+    client.send({ type: 'graphMarkdownSaved', graphId, ok: errors.length === 0, text: graphStore.markdownText(graphId), ...(errors.length > 0 && { errors }) });
   }
   /** The extension's file watcher saw `<id>.md` deleted: the store's fileDeleted event tells the clients. */
   function graphFileDeleted(id: string): FileSync {
@@ -499,6 +534,15 @@ export function createApp(d: AppDeps) {
         if (!r.ok) client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
         return;
       }
+      case 'getGraphMarkdown': {
+        const text = graphStore.markdownText(msg.graphId);
+        if (text === undefined) return error(`graph "${msg.graphId}" not found`);
+        markdownSent.set(msg.graphId, text);
+        client.send({ type: 'graphMarkdown', graphId: msg.graphId, text });
+        return;
+      }
+      case 'saveGraphMarkdown':
+        return saveGraphMarkdown(client, msg);
       case 'openChat': {
         const g = graphStore.load(msg.graphId);
         if (!g.ok) return error(g.error);

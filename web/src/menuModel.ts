@@ -85,6 +85,9 @@ export function buildMenus(s: State): Menu[] {
       id: 'view',
       label: 'View',
       items: [
+        // Named for the mode it switches to.
+        item(s.canvasMode === 'markdown' ? 'Show as Graph' : 'Show as Markdown', hasGraph, actions.toggleCanvasMode),
+        SEPARATOR,
         item(s.layout.sideCollapsed ? 'Show Side Panel' : 'Hide Side Panel', true, actions.toggleSidePanel),
         item(s.layout.logsCollapsed ? 'Show Logs' : 'Hide Logs', selected, actions.toggleLogs),
         item('Minimap', hasGraph, actions.toggleMinimap, { checked: s.minimap }),

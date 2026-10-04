@@ -23,6 +23,7 @@ import { actions, registerCanvas } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
 import { dispatch, useStore } from '../store';
+import { CanvasModeToggle } from './CanvasModeToggle';
 import { StepNode, type StepFlowNode } from './StepNode';
 
 const nodeTypes = { step: StepNode };
@@ -107,6 +108,7 @@ export function Canvas() {
       }}
     >
       <div className="canvas-toolbar">
+        <CanvasModeToggle />
         <button onClick={actions.addStep}>+ Step</button>
         <button onClick={actions.tidy}>Tidy</button>
         {selection.count > 0 && (

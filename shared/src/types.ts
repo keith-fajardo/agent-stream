@@ -95,6 +95,8 @@ export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; v
 
 /** One problem in a graph's Markdown file: its 1-based line and a message that says how to fix it. */
 export type GraphFileError = { line: number; message: string };
+/** The largest graph file Import reads, and the largest text the Markdown editor saves: 1 MB. */
+export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
@@ -313,6 +315,14 @@ export type ServerMessage =
   /** The graph's Markdown file has these problems, so the graph shown is the last good version; [] when they are fixed. */
   | { type: 'graphFileErrors'; graphId: string; errors: GraphFileError[] }
   | { type: 'graph'; graph: Graph; baseline?: Graph; changes: AgentChange[] }
+  /** The graph's Markdown file exactly as it is on disk, even with errors: the answer to getGraphMarkdown, then again whenever the text changes. */
+  | { type: 'graphMarkdown'; graphId: string; text: string }
+  /**
+   * The answer to saveGraphMarkdown. `ok`: written and read without errors; `text` is the file as Agent Stream wrote it
+   * back. `errors`: written, but the file has these problems, so the last good graph stays. `conflict`: the file changed
+   * since the editing began, so nothing was written. `error`: it couldn't be saved.
+   */
+  | { type: 'graphMarkdownSaved'; graphId: string; ok: boolean; text?: string; errors?: GraphFileError[]; conflict?: boolean; error?: string }
   | { type: 'opRejected'; graphId: string; error: string }
   | { type: 'runs'; graphId: string; runs: RunSummary[] }
   | { type: 'run'; run: RunMeta; select?: boolean }
@@ -348,6 +358,13 @@ export type ClientMessage =
   | { type: 'openGraph'; graphId: string }
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
+  /** Asks for the graph's Markdown file as it is on disk; the engine answers with graphMarkdown and keeps sending it as the text changes. */
+  | { type: 'getGraphMarkdown'; graphId: string }
+  /**
+   * Writes the Markdown editor's text to the graph's file and reads it like any outside edit. `base`: the file's text when
+   * the editing began; the engine refuses (conflict) when the file is no longer that, unless `force`.
+   */
+  | { type: 'saveGraphMarkdown'; graphId: string; text: string; base: string; force?: boolean }
   /** Subscribes this client to one planner conversation; the engine answers with chatOpened. */
   | { type: 'openChat'; graphId: string; sessionId: string }
   | { type: 'chat'; graphId: string; sessionId: string; text: string }

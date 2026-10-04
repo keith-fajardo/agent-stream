@@ -306,6 +306,26 @@ export class GraphStore extends EventEmitter {
     return this.save(graph);
   }
 
+  /** The graph's Markdown file exactly as it is on disk, even when it has errors; undefined when there is none. */
+  markdownText(id: string): string | undefined {
+    return isGraphId(id) ? readIfExists(this.file(id)) : undefined;
+  }
+
+  /**
+   * Saves the graph tab's Markdown editor: writes the user's text, then reads it like any outside edit (graphFileChanged),
+   * so it applies all or nothing, or keeps the last good graph and reports its errors. The one write of the Markdown file
+   * while it has errors: the text is the user's own. Refused, writing nothing, when the file is no longer `base` (the text
+   * the editing began from), unless `force`.
+   */
+  saveMarkdown(id: string, text: string, base: string, force = false): { ok: true; sync: FileSync } | { ok: false; conflict: true } | { ok: false; error: string } {
+    if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
+    const onDisk = readIfExists(this.file(id));
+    if (onDisk === undefined) return { ok: false, error: `graph "${id}" not found` };
+    if (onDisk !== base && !force) return { ok: false, conflict: true };
+    writeFileAtomic(this.file(id), text);
+    return { ok: true, sync: this.graphFileChanged(id) };
+  }
+
   /** The problems in the graph's Markdown file: [] when it reads. */
   fileErrors(id: string): GraphFileError[] {
     return this.errors.get(id) ?? [];

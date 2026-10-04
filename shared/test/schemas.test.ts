@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fmtDuration, providerLabel, statusLabel } from '../src/format';
+import { MAX_IMPORT_CHARS } from '../src/exportFile';
 import { parseGraph, parseWebviewMessage } from '../src/schemas';
 
 const node = (id: string) => ({ id, title: id, kind: 'agent' });
@@ -62,6 +63,16 @@ describe('parseWebviewMessage', () => {
     const engine = { type: 'exportRunReport', graphId: 'g', runId: 'r1' };
     expect(parseWebviewMessage(engine)).toEqual({ ok: true, kind: 'engine', msg: engine });
     expect(parseWebviewMessage({ type: 'exportRunReport' }).ok).toBe(false);
+  });
+
+  it('parses the Markdown editor’s messages, and bounds their text like an import', () => {
+    expect(parseWebviewMessage({ type: 'getGraphMarkdown', graphId: 'g' })).toEqual({ ok: true, kind: 'engine', msg: { type: 'getGraphMarkdown', graphId: 'g' } });
+    const save = { type: 'saveGraphMarkdown', graphId: 'g', text: '# G\n', base: '# F\n' };
+    expect(parseWebviewMessage(save)).toEqual({ ok: true, kind: 'engine', msg: save });
+    expect(parseWebviewMessage({ ...save, force: true })).toEqual({ ok: true, kind: 'engine', msg: { ...save, force: true } });
+    expect(parseWebviewMessage({ type: 'saveGraphMarkdown', graphId: 'g', text: '# G\n' }).ok).toBe(false);
+    expect(parseWebviewMessage({ ...save, text: 'x'.repeat(MAX_IMPORT_CHARS + 1) }).ok).toBe(false);
+    expect(parseWebviewMessage({ ...save, base: 'x'.repeat(MAX_IMPORT_CHARS + 1) }).ok).toBe(false);
   });
 
   it('parses splitStep as a tab message and as an engine message', () => {

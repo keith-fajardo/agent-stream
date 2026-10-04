@@ -63,6 +63,20 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .logs-body .error { color: var(--danger); }
 .canvas-toolbar { position: absolute; z-index: 5; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; }
 .canvas-hint { font-size: 11px; color: var(--muted); }
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0; }
+.segmented button:first-child { border-radius: 6px 0 0 6px; }
+.segmented button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.segmented button.on { background: var(--vscode-button-secondaryBackground, var(--code-bg)); color: var(--vscode-button-secondaryForeground, var(--text)); font-weight: 600; }
+.markdown-editor { display: flex; flex-direction: column; }
+.markdown-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px; }
+.markdown-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 8px 8px; padding: 6px 10px; border: 1px solid var(--warn); border-radius: 6px; color: var(--warn); background: var(--panel); }
+.markdown-body { flex: 1; display: flex; min-height: 0; margin: 0 8px 8px; border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 6px; overflow: hidden; background: var(--vscode-editor-background, var(--panel)); }
+.markdown-body pre, .markdown-body textarea { margin: 0; padding: 8px; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: var(--vscode-editor-font-size, 12px); line-height: 1.5; tab-size: 4; }
+.markdown-gutter { flex: none; min-width: 3em; max-height: none; padding-bottom: 24px; overflow: hidden; text-align: right; white-space: pre; border-radius: 0; color: var(--vscode-editorLineNumber-foreground, var(--muted)); background: var(--vscode-editorGutter-background, var(--code-bg)); user-select: none; }
+.markdown-body textarea { flex: 1; height: 100%; resize: none; border: none; border-radius: 0; outline: none; white-space: pre; overflow: auto; background: transparent; color: var(--vscode-editor-foreground, var(--text)); }
+.markdown-errors { margin: 0 8px 8px; padding: 6px 10px 6px 26px; max-height: 30%; overflow: auto; border: 1px solid var(--border); border-radius: 6px; color: var(--danger); background: var(--panel); }
+.markdown-errors button.link { color: var(--danger); text-align: left; }
 .stale { font-size: 12px; color: var(--warn); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--muted); }
 

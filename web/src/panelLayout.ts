@@ -1,5 +1,5 @@
 import { loadViewState, saveViewState } from './bridge';
-import type { PanelLayout } from './state';
+import type { CanvasMode, PanelLayout } from './state';
 import { dispatch, getState } from './store';
 
 export const SIDE_MIN = 280;
@@ -59,11 +59,17 @@ export function restoreLayout(): void {
   dispatch({ kind: 'setLayout', layout: loadLayout() });
 }
 
+/** What this tab keeps in its webview state: its layout, and Markdown mode while the canvas area shows the Markdown. */
+function tabViewState(): { layout: PanelLayout; canvasMode?: CanvasMode } {
+  const { layout, canvasMode } = getState();
+  return { layout, ...(canvasMode === 'markdown' && { canvasMode }) };
+}
+
 /** Called when a drag ends, a key is pressed or a panel is collapsed: remembers the layout for this tab and for new tabs. */
 export function persistLayout(): void {
   const { layout } = getState();
   try {
-    saveViewState({ layout });
+    saveViewState(tabViewState());
   } catch {
     /* the webview state is a convenience */
   }
@@ -72,4 +78,25 @@ export function persistLayout(): void {
   } catch {
     /* storage can be blocked */
   }
+}
+
+/** Remembers Graph or Markdown for this tab only: a new tab starts on Graph. */
+export function persistCanvasMode(): void {
+  try {
+    saveViewState(tabViewState());
+  } catch {
+    /* the webview state is a convenience */
+  }
+}
+
+/** Applies this tab's Graph | Markdown choice at boot. */
+export function restoreCanvasMode(): void {
+  let mode: CanvasMode = 'graph';
+  try {
+    const state = loadViewState();
+    if (typeof state === 'object' && state !== null && (state as { canvasMode?: unknown }).canvasMode === 'markdown') mode = 'markdown';
+  } catch {
+    /* the webview state is a convenience */
+  }
+  dispatch({ kind: 'setCanvasMode', mode });
 }

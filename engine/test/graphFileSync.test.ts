@@ -290,3 +290,75 @@ describe('graphFileDeleted', () => {
     expect(deleted).toHaveBeenCalledWith(id);
   });
 });
+
+describe('the graph tab’s Markdown editor', () => {
+  it('reads the file exactly as it is on disk, even when it has errors', () => {
+    const { store, id, md, text } = setup();
+    expect(store.markdownText(id)).toBe(text());
+    writeFileSync(md, `${text()}stray paragraph\n`);
+    expect(store.graphFileChanged(id)).toBe('errors');
+    expect(store.markdownText(id)).toBe(readFileSync(md, 'utf8'));
+    expect(store.markdownText('missing')).toBeUndefined();
+    expect(store.markdownText('../x')).toBeUndefined();
+  });
+
+  it('saves valid text all or nothing, recorded via the file, and writes it back in canonical form', () => {
+    const { store, id, text, changed } = setup();
+    const base = text();
+    const edited = `${base.replace('Plan it.', 'Plan it well.')}\n## Report\n\n\`\`\`prompt\nSum up.\n\`\`\`\n`;
+    expect(store.saveMarkdown(id, edited, base)).toEqual({ ok: true, sync: 'applied' });
+    expect(store.get(id).nodes.map((n) => [n.id, n.prompt ?? n.command])).toEqual([
+      ['n1', 'Plan it well.'],
+      ['n2', 'make'],
+      ['n3', 'Sum up.'],
+    ]);
+    expect(store.readOps(id).slice(-2)).toEqual([
+      { at: expect.any(String), by: 'user', op: { type: 'addNode', node: { id: 'n3', title: 'Report', kind: 'agent', prompt: 'Sum up.' } }, via: 'file' },
+      { at: expect.any(String), by: 'user', op: { type: 'updateNode', id: 'n1', patch: { prompt: 'Plan it well.' } }, via: 'file' },
+    ]);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(text()).toContain('## n3 · Report');
+    expect(store.markdownText(id)).toBe(text());
+  });
+
+  it('writes broken text as the user wrote it, keeps the last good graph and reports the errors', () => {
+    const { store, id, text, fileErrors } = setup();
+    const good = store.get(id);
+    const base = text();
+    const broken = base.replace('- kind: command', '- kind: robot');
+    expect(store.saveMarkdown(id, broken, base)).toEqual({ ok: true, sync: 'errors' });
+    expect(text()).toBe(broken);
+    expect(store.get(id)).toEqual(good);
+    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }]);
+    expect(fileErrors).toHaveBeenLastCalledWith(id, store.fileErrors(id));
+    // Fixing it from the editor: the file on disk is now the broken text, the new base.
+    expect(store.saveMarkdown(id, broken.replace('- kind: robot', '- kind: command\n- timeout: 9'), broken)).toEqual({ ok: true, sync: 'applied' });
+    expect(store.fileErrors(id)).toEqual([]);
+    expect(store.get(id).nodes[1]).toMatchObject({ id: 'n2', timeoutSec: 9 });
+  });
+
+  it('refuses a save whose base is no longer the file on disk, writing nothing, unless forced', () => {
+    const { store, id, md, text, edit, changed, ops } = setup();
+    const base = text();
+    edit('Prove it.', 'Prove it twice.');
+    const onDisk = text();
+    const mine = base.replace('Plan it.', 'Plan it well.');
+    expect(store.saveMarkdown(id, mine, base)).toEqual({ ok: false, conflict: true });
+    expect(text()).toBe(onDisk);
+    expect(changed).not.toHaveBeenCalled();
+    expect(ops).not.toHaveBeenCalled();
+    expect(store.saveMarkdown(id, mine, base, true)).toEqual({ ok: true, sync: 'applied' });
+    expect(store.get(id)).toMatchObject({ goal: 'Prove it.' });
+    expect(store.get(id).nodes[0].prompt).toBe('Plan it well.');
+    expect(readFileSync(md, 'utf8')).toBe(text());
+  });
+
+  it('refuses a graph whose file is gone', () => {
+    const { store, id, md, text } = setup();
+    const base = text();
+    rmSync(md);
+    expect(store.saveMarkdown(id, base, base)).toEqual({ ok: false, error: `graph "${id}" not found` });
+    expect(existsSync(md)).toBe(false);
+    expect(store.saveMarkdown('../x', base, base)).toEqual({ ok: false, error: 'invalid graph id "../x"' });
+  });
+});

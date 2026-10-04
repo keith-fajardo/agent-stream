@@ -1,5 +1,4 @@
-import { ReactFlowProvider } from '@xyflow/react';
-import { Canvas } from './components/Canvas';
+import { CanvasArea } from './components/CanvasArea';
 import { ChangeConfirmDialog } from './components/ChangeConfirmDialog';
 import { GraphFileNotice } from './components/GraphFileNotice';
 import { LogsPanel } from './components/LogsPanel';
@@ -19,9 +18,7 @@ export function App() {
       <GraphFileNotice />
       <main className="main">
         <div className="workspace">
-          <ReactFlowProvider>
-            <Canvas />
-          </ReactFlowProvider>
+          <CanvasArea />
           <LogsPanel />
         </div>
         <RightPanel />

@@ -1,12 +1,13 @@
 import { edgeId, seqOf } from './graph';
 import { parseGraph } from './schemas';
-import type { Graph, GraphNode, GraphResult, VariableDef } from './types';
+import { MAX_IMPORT_CHARS, type Graph, type GraphNode, type GraphResult, type VariableDef } from './types';
 
 export const EXPORT_FORMAT = 'agent-stream/graph';
 /** The format name written before the rename to Agent Stream; still accepted on import. */
 const LEGACY_EXPORT_FORMAT = 'claude-stream/graph';
 export const EXPORT_VERSION = 1;
-export const MAX_IMPORT_CHARS = 1024 * 1024;
+// Defined in types.ts so the message schemas can bound text with it without importing this module back.
+export { MAX_IMPORT_CHARS };
 
 export type ExportedNode = Pick<GraphNode, 'id' | 'title' | 'kind' | 'description' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'position'>;
 export type ExportFile = {

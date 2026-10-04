@@ -2,7 +2,7 @@ import type { ApprovalRequest, ChangeTarget, HostCommand } from '@agent-stream/s
 import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
-import type { State, Tab } from './state';
+import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
@@ -111,5 +111,33 @@ export const actions = {
   },
   addVariable(): void {
     dispatch({ kind: 'openVariables', addRow: true });
+  },
+  /** Graph | Markdown. Switching to Graph with unsaved Markdown edits asks first (Save / Discard / Keep editing). */
+  showCanvas(mode: CanvasMode): void {
+    const s = getState();
+    if (mode === s.canvasMode) return;
+    if (mode === 'graph' && s.markdown.draft !== undefined) return dispatch({ kind: 'confirmLeaveMarkdown', open: true });
+    dispatch({ kind: 'setCanvasMode', mode });
+  },
+  toggleCanvasMode(): void {
+    actions.showCanvas(getState().canvasMode === 'graph' ? 'markdown' : 'graph');
+  },
+  /**
+   * Sends the Markdown editor's unsaved text with the text the editing began from. `force`: Save anyway, over a file that
+   * changed since. `thenGraph`: switch to Graph once it saves without errors.
+   */
+  saveMarkdown(o: { force?: boolean; thenGraph?: boolean } = {}): void {
+    const { graph, markdown: m } = getState();
+    if (!graph || m.draft === undefined || m.base === undefined || m.saving) return;
+    send({ type: 'saveGraphMarkdown', graphId: graph.id, text: m.draft, base: m.base, ...(o.force && { force: true }) });
+    dispatch({ kind: 'markdownSaving', thenGraph: !!o.thenGraph });
+  },
+  /** Drops the unsaved Markdown edits: the editor shows the file as it is now. */
+  reloadMarkdown(): void {
+    dispatch({ kind: 'markdownReload' });
+  },
+  discardMarkdownAndShowGraph(): void {
+    dispatch({ kind: 'markdownReload' });
+    dispatch({ kind: 'setCanvasMode', mode: 'graph' });
   },
 };

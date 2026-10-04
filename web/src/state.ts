@@ -28,6 +28,23 @@ export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string; reques
 export type StartRequest = { graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string };
 /** A start the engine refused because another run is changing files in this checkout (spec §7). */
 export type Blocked = { message: string; canSetUpTickets: boolean; start?: StartRequest };
+/** What the canvas area shows: the graph, or its Markdown file in an editor (the Graph | Markdown toggle). */
+export type CanvasMode = 'graph' | 'markdown';
+/** The Markdown editor. With no unsaved edits it shows, and follows, the file. */
+export type MarkdownEditorState = {
+  /** The graph's Markdown file as the engine last sent it; undefined until asked for, and again after the engine says hello. */
+  disk?: string;
+  /** Unsaved edits; undefined while the editor shows the file. */
+  draft?: string;
+  /** The file's text when the editing began: the engine refuses a save once the file is no longer this. */
+  base?: string;
+  /** The file changed since the editing began, or a save was refused for that. */
+  conflict: boolean;
+  /** A save on its way; `thenGraph`: switch to Graph when it succeeds (Save in the dialog that asks before switching). */
+  saving?: { thenGraph: boolean };
+  /** Switching to Graph with unsaved edits asks first: Save / Discard / Keep editing. */
+  confirmLeave: boolean;
+};
 
 export type State = {
   connected: boolean;
@@ -78,13 +95,18 @@ export type State = {
   minimap: boolean;
   layout: PanelLayout;
   variablesDialog?: { focus?: string; addRow?: boolean };
+  /** Each tab keeps its own (webview state); never saved in the graph or the session. */
+  canvasMode: CanvasMode;
+  markdown: MarkdownEditorState;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
   return { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId, ...(msg.requestedBy && { requestedBy: msg.requestedBy }) };
 }
 
-export const initialState: State = { connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };
+
+export const initialState: State = { connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -105,7 +127,13 @@ export type Action =
   | { kind: 'openVariables'; focus?: string; addRow?: boolean }
   | { kind: 'closeVariables' }
   | { kind: 'startRequested'; start: StartRequest }
-  | { kind: 'closeBlocked' };
+  | { kind: 'closeBlocked' }
+  | { kind: 'setCanvasMode'; mode: CanvasMode }
+  | { kind: 'markdownEdited'; text: string }
+  | { kind: 'markdownSaving'; thenGraph: boolean }
+  /** Drops the unsaved edits: the editor shows the file again. */
+  | { kind: 'markdownReload' }
+  | { kind: 'confirmLeaveMarkdown'; open: boolean };
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
@@ -157,6 +185,22 @@ export function reduce(state: State, action: Action): State {
       return { ...state, lastStart: action.start };
     case 'closeBlocked':
       return { ...state, blocked: undefined };
+    case 'setCanvasMode':
+      return { ...state, canvasMode: action.mode, markdown: { ...state.markdown, confirmLeave: false } };
+    case 'markdownEdited': {
+      const m = state.markdown;
+      if (m.disk === undefined && m.draft === undefined) return state;
+      const base = m.draft === undefined ? m.disk : m.base;
+      // Typed back to the file's text: nothing unsaved, so the editor follows the file again.
+      if (action.text === base && !m.conflict) return { ...state, markdown: { ...m, draft: undefined, base: undefined } };
+      return { ...state, markdown: { ...m, draft: action.text, base } };
+    }
+    case 'markdownSaving':
+      return { ...state, markdown: { ...state.markdown, saving: { thenGraph: action.thenGraph }, confirmLeave: false } };
+    case 'markdownReload':
+      return { ...state, markdown: { ...state.markdown, draft: undefined, base: undefined, conflict: false, confirmLeave: false } };
+    case 'confirmLeaveMarkdown':
+      return { ...state, markdown: { ...state.markdown, confirmLeave: action.open } };
     case 'server':
       return reduceServer(state, action.msg);
   }
@@ -175,7 +219,8 @@ function reduceServer(state: State, msg: HostMessage): State {
   const current = state.graph?.id;
   switch (msg.type) {
     case 'hello':
-      return { ...state, connected: true, status: msg.status, project: msg.project, graphs: msg.graphs, approvals: msg.approvals };
+      // A new engine connection follows no file yet: the Markdown editor asks for it again.
+      return { ...state, connected: true, status: msg.status, project: msg.project, graphs: msg.graphs, approvals: msg.approvals, markdown: { ...state.markdown, disk: undefined } };
     case 'auth':
       return { ...state, status: msg.status };
     case 'graphs':
@@ -193,7 +238,7 @@ function reduceServer(state: State, msg: HostMessage): State {
         ...state,
         ...reviewing(state, msg.changes),
         // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
-        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined }),
+        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined, markdown: initialMarkdown }),
         graph: msg.graph,
         graphGone: false,
         fileErrors: msg.fileErrors ?? [],
@@ -212,6 +257,24 @@ function reduceServer(state: State, msg: HostMessage): State {
       if (msg.graph.id !== current) return state;
       const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);
       return { ...state, ...reviewing(state, msg.changes), graph: msg.graph, baseline: msg.baseline, changes: msg.changes, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
+    }
+    case 'graphMarkdown': {
+      if (msg.graphId !== current) return state;
+      const m = { ...state.markdown, disk: msg.text };
+      // A save on its way answers for itself (graphMarkdownSaved): the text it sends now is that save's.
+      if (m.draft === undefined || m.saving) return { ...state, markdown: m };
+      if (msg.text === m.draft) return { ...state, markdown: { ...m, draft: undefined, base: undefined, conflict: false } };
+      // Unsaved edits are never replaced: the editor says the file changed.
+      return { ...state, markdown: { ...m, conflict: msg.text !== m.base } };
+    }
+    case 'graphMarkdownSaved': {
+      if (msg.graphId !== current) return state;
+      const m = { ...state.markdown, saving: undefined };
+      if (msg.conflict) return { ...state, markdown: { ...m, conflict: true } };
+      if (msg.error !== undefined) return { ...state, markdown: m, toast: msg.error };
+      // Written (with or without errors): the editor shows the file as it is now.
+      const markdown = { ...m, disk: msg.text ?? m.disk, draft: undefined, base: undefined, conflict: false };
+      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode };
     }
     case 'opRejected':
       return msg.graphId === current ? { ...state, toast: msg.error } : state;

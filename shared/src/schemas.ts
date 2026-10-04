@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { legacyNodeIdProblem, topoOrder } from './graph';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
-import { EFFORT_LEVELS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
+import { EFFORT_LEVELS, MAX_IMPORT_CHARS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
@@ -113,11 +113,15 @@ const opSchema = z.discriminatedUnion('type', [
 ]);
 
 const refineNodeIds = z.array(z.string()).min(1).max(50);
+/** A graph's Markdown text from the editor: no larger than a file Import accepts. */
+const markdownText = z.string().max(MAX_IMPORT_CHARS);
 
 const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openGraph'), graphId: z.string() }),
   z.object({ type: z.literal('createGraph'), name: z.string().min(1) }),
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
+  z.object({ type: z.literal('getGraphMarkdown'), graphId: z.string() }),
+  z.object({ type: z.literal('saveGraphMarkdown'), graphId: z.string(), text: markdownText, base: markdownText, force: z.boolean().optional() }),
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
   z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
