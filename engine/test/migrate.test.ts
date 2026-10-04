@@ -142,6 +142,32 @@ describe('migrateGraphsToMarkdown', () => {
     expect(readdirSync(paths.graphsDir).sort()).toEqual(['bad.json', 'cyclic.json', 'done.json', 'done.md']);
   });
 
+  it('never replaces an existing <id>.json.bak: the old file goes to .bak2, .bak3, …, and the note names it', () => {
+    const paths = tmpProject();
+    writeFileSync(join(paths.graphsDir, 'g1.json'), legacy('g1', 'First'));
+    writeFileSync(join(paths.graphsDir, 'g1.json.bak'), 'older g1');
+    writeFileSync(join(paths.graphsDir, 'g2.json'), legacy('g2', 'Second'));
+    writeFileSync(join(paths.graphsDir, 'g2.json.bak'), 'older g2');
+    writeFileSync(join(paths.graphsDir, 'g2.json.bak2'), 'even older g2');
+    expect(migrateGraphsToMarkdown(paths, new GraphStore(paths, fixedClock()))).toEqual({
+      notes: ['Converted the graph "First" to g1.md; the old file is kept as g1.json.bak2.', 'Converted the graph "Second" to g2.md; the old file is kept as g2.json.bak3.'],
+      warnings: [],
+    });
+    expect(['g1.json.bak', 'g2.json.bak', 'g2.json.bak2'].map((f) => readFileSync(join(paths.graphsDir, f), 'utf8'))).toEqual(['older g1', 'older g2', 'even older g2']);
+    expect(JSON.parse(readFileSync(join(paths.graphsDir, 'g1.json.bak2'), 'utf8')).name).toBe('First');
+    expect(JSON.parse(readFileSync(join(paths.graphsDir, 'g2.json.bak3'), 'utf8')).name).toBe('Second');
+  });
+
+  it('skips the graphs it is told to, leaving their JSON for the next start', () => {
+    const paths = tmpProject();
+    writeFileSync(join(paths.graphsDir, 'g1.json'), legacy('g1', 'First'));
+    writeFileSync(join(paths.graphsDir, 'g2.json'), legacy('g2', 'Second'));
+    const store = new GraphStore(paths, fixedClock());
+    expect(migrateGraphsToMarkdown(paths, store, renameSync, new Set(['g1']))).toEqual({ notes: ['Converted the graph "Second" to g2.md; the old file is kept as g2.json.bak.'], warnings: [] });
+    expect(readdirSync(paths.graphsDir).sort()).toEqual(['g1.json', 'g2.json.bak', 'g2.md', 'g2.meta.json']);
+    expect(migrateGraphsToMarkdown(paths, store).notes).toEqual(['Converted the graph "First" to g1.md; the old file is kept as g1.json.bak.']);
+  });
+
   it('keeps the converted graph when the old file cannot be renamed, and says so', () => {
     const paths = tmpProject();
     writeFileSync(join(paths.graphsDir, 'g1.json'), legacy('g1', 'First'));

@@ -176,8 +176,10 @@ describe('migrateLegacy', () => {
     const failingWrite = () => {
       throw new Error('disk full');
     };
-    const warnings = migrateLegacy(paths, store, { writeGraph: failingWrite });
+    const failed = new Set<string>();
+    const warnings = migrateLegacy(paths, store, { writeGraph: failingWrite }, failed);
     expect(warnings).toEqual([expect.stringMatching(/g1.*disk full.*retried/)]);
+    expect([...failed]).toEqual(['g1']);
     expect(migrateLegacy(paths, store)).toEqual([]);
     expect(store.chatLog(DEFAULT_SESSION_ID).read('g1').map((e) => e.text)).toEqual(['one', 'two']);
     expect(JSON.parse(readFileSync(join(paths.graphsDir, 'g1.json'), 'utf8')).plannerSessionId).toBeUndefined();
@@ -222,6 +224,8 @@ describe('migrateLegacy', () => {
     store.ensureDefault = () => {
       throw new Error('nope');
     };
-    expect(migrateLegacy(paths, store)).toEqual([expect.stringMatching(/Could not prepare the Default session.*nope.*retried next time/)]);
+    const failed = new Set<string>();
+    expect(migrateLegacy(paths, store, undefined, failed)).toEqual([expect.stringMatching(/Could not prepare the Default session.*nope.*retried next time/)]);
+    expect([...failed]).toEqual(['g1']);
   });
 });

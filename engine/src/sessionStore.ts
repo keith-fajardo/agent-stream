@@ -218,22 +218,24 @@ export type MigrationIo = { writeGraph: (path: string, content: string) => void 
 
 /**
  * Moves pre-sessions planner state (graph-file fields) and chats (graphs/<id>.chat.jsonl) into
- * the Default session (sessions spec §3.3). Idempotent and resumable; failures become warnings.
+ * the Default session (sessions spec §3.3). Idempotent and resumable; failures become warnings, and the ids of the
+ * graphs whose move failed go into `failed`, so nothing that would stop the retry (the Markdown conversion) runs on them.
  */
-export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: MigrationIo = { writeGraph: writeFileAtomic }): string[] {
+export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: MigrationIo = { writeGraph: writeFileAtomic }, failed?: Set<string>): string[] {
   const warnings: string[] = [];
   if (!existsSync(paths.graphsDir)) return warnings;
+  const ids = readdirSync(paths.graphsDir)
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.chat.jsonl') && !f.endsWith('.ops.jsonl'))
+    .map((f) => f.slice(0, -'.json'.length))
+    .filter(isGraphId);
   let target: string;
   try {
     target = store.ensureDefault().id;
   } catch (e) {
     warnings.push(`Could not prepare the Default session for older planner conversations (${(e as Error).message}); they stay where they are and will be retried next time.`);
+    for (const id of ids) failed?.add(id);
     return warnings;
   }
-  const ids = readdirSync(paths.graphsDir)
-    .filter((f) => f.endsWith('.json') && !f.endsWith('.chat.jsonl') && !f.endsWith('.ops.jsonl'))
-    .map((f) => f.slice(0, -'.json'.length))
-    .filter(isGraphId);
   for (const id of ids) {
     try {
       const legacyChat = join(paths.graphsDir, `${id}.chat.jsonl`);
@@ -264,6 +266,7 @@ export function migrateLegacy(paths: ProjectPaths, store: SessionStore, io: Migr
       io.writeGraph(graphFile, `${JSON.stringify(definition, null, 2)}\n`);
     } catch (e) {
       warnings.push(`Could not finish moving the planner conversation of graph ${id} into the Default session (${(e as Error).message}); it will be retried next time.`);
+      failed?.add(id);
     }
   }
   return warnings;

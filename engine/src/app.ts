@@ -145,9 +145,10 @@ export function createApp(d: AppDeps) {
   const graphStore = new GraphStore(paths, clock);
   const sessions = new SessionStore(paths, clock);
   // Planner state and chats from before work sessions move into the Default session.
-  migrationWarnings.push(...migrateLegacy(paths, sessions));
-  // After the planner-state move above, which reads the old JSON graph files.
-  const converted = migrateGraphsToMarkdown(paths, graphStore, d.rename);
+  const legacyMoveFailed = new Set<string>();
+  migrationWarnings.push(...migrateLegacy(paths, sessions, undefined, legacyMoveFailed));
+  // After the planner-state move above, which reads the old JSON graph files; a graph whose move failed stays JSON for its retry.
+  const converted = migrateGraphsToMarkdown(paths, graphStore, d.rename, legacyMoveFailed);
   migrationWarnings.push(...converted.warnings);
   sessions.ensureDefault();
   const runStore = new RunStore(paths);

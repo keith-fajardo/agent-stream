@@ -53,19 +53,25 @@ function renamedNote(renamed: StepRename[]): string {
 
 /**
  * Converts each graph file from before Markdown, `<id>.json` without a `<id>.md`, to `<id>.md` and `<id>.meta.json`,
- * then renames the JSON to `<id>.json.bak` (Markdown graph files spec §5.2). Baselines stay JSON. What the Markdown
+ * then renames the JSON to `<id>.json.bak` (Markdown graph files spec §5.2), or `.bak2`, `.bak3`, … when that name is
+ * taken, so an older backup is never replaced. Graphs in `skip` are left for the next start. Baselines stay JSON. What the Markdown
  * can't hold is fixed first (`legacyGraphForMarkdown`): a step id with "--" or a trailing "-" is renamed, in the graph,
  * its side file and its baseline (run records keep the old id), and the note says so. Returns one note per converted
  * graph and a warning per file left as it was; never throws, never deletes.
  */
-export function migrateGraphsToMarkdown(paths: ProjectPaths, store: GraphStore, rename: typeof renameSync = renameSync): { notes: string[]; warnings: string[] } {
+export function migrateGraphsToMarkdown(
+  paths: ProjectPaths,
+  store: GraphStore,
+  rename: typeof renameSync = renameSync,
+  skip: ReadonlySet<string> = new Set(),
+): { notes: string[]; warnings: string[] } {
   const notes: string[] = [];
   const warnings: string[] = [];
   if (!existsSync(paths.graphsDir)) return { notes, warnings };
   const ids = readdirSync(paths.graphsDir)
     .filter((f) => f.endsWith('.json') && !f.endsWith('.baseline.json') && !f.endsWith('.meta.json'))
     .map((f) => f.slice(0, -'.json'.length))
-    .filter((id) => isGraphId(id) && !existsSync(join(paths.graphsDir, `${id}.md`)))
+    .filter((id) => isGraphId(id) && !skip.has(id) && !existsSync(join(paths.graphsDir, `${id}.md`)))
     .sort();
   for (const id of ids) {
     const file = join(paths.graphsDir, `${id}.json`);
@@ -98,11 +104,13 @@ export function migrateGraphsToMarkdown(paths: ProjectPaths, store: GraphStore, 
       continue;
     }
     const note = renamedNote(renamed);
+    let bak = `${id}.json.bak`;
+    for (let i = 2; existsSync(join(paths.graphsDir, bak)); i++) bak = `${id}.json.bak${i}`;
     try {
-      rename(file, `${file}.bak`);
-      notes.push(`Converted the graph "${graph.name}" to ${id}.md; the old file is kept as ${id}.json.bak.${note}`);
+      rename(file, join(paths.graphsDir, bak));
+      notes.push(`Converted the graph "${graph.name}" to ${id}.md; the old file is kept as ${bak}.${note}`);
     } catch (e) {
-      warnings.push(`Converted the graph "${graph.name}" to ${id}.md, but could not rename ${id}.json to ${id}.json.bak (${errorText(e)}). Delete ${id}.json when you no longer need it.${note}`);
+      warnings.push(`Converted the graph "${graph.name}" to ${id}.md, but could not rename ${id}.json to ${bak} (${errorText(e)}). Delete ${id}.json when you no longer need it.${note}`);
     }
   }
   return { notes, warnings };

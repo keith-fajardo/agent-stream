@@ -1688,6 +1688,27 @@ describe('graphs from before Markdown', () => {
     expect(app.listGraphs().map((g) => g.id)).toEqual(['g1']);
     expect(existsSync(join(paths.graphsDir, 'g1.json.bak'))).toBe(true);
   });
+
+  it('leaves a graph whose planner-state move failed as JSON, so the move can be retried next start', () => {
+    const paths = tmpProject();
+    const deps = () => ({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider: testProvider(), status: signedIn, maxParallel: 1 });
+    createApp(deps()); // makes the Default session
+    writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ ...emptyGraph('g1', 'Old graph', 't'), plannerSessionId: 's' }));
+    writeFileSync(join(paths.graphsDir, 'g1.chat.jsonl'), '{}\n');
+    // The moved chat's place is taken by a folder, so the move fails this start.
+    const dest = join(paths.sessionsDir, 'default', 'chats', 'g1.chat.jsonl');
+    mkdirSync(dest, { recursive: true });
+    const first = createApp(deps());
+    expect(first.startupWarnings()).toEqual([expect.stringMatching(/^Could not finish moving the planner conversation of graph g1 .*retried next time\.$/)]);
+    expect(first.startupNotes()).toEqual([]);
+    expect(existsSync(join(paths.graphsDir, 'g1.json'))).toBe(true);
+    expect(existsSync(join(paths.graphsDir, 'g1.md'))).toBe(false);
+    rmSync(dest, { recursive: true });
+    const second = createApp(deps());
+    expect(second.startupWarnings()).toEqual([]);
+    expect(second.startupNotes()).toEqual(['Converted the graph "Old graph" to g1.md; the old file is kept as g1.json.bak.']);
+    expect(second.sessionStore.plannerState('default', 'g1')).toMatchObject({ sessionId: 's' });
+  });
 });
 
 describe('graph files changed outside Agent Stream', () => {
