@@ -13,3 +13,5 @@ export * from './graphFlow';
 export * from './graphDoc';
 export * from './freeText';
 export * from './graphMarkdownParse';
+export * from './graphMeta';
+export * from './graphMarkdownWrite';

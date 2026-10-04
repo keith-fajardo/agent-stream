@@ -1,5 +1,6 @@
+import { edgeId, seqOf } from './graph';
 import type { FlowEdge } from './graphFlow';
-import type { GraphFileError, NodeKind } from './types';
+import type { Graph, GraphFileError, GraphNode, NodeKind } from './types';
 
 /** The longest timeout a step can have: Node's longest timer, in whole seconds. */
 export const MAX_TIMEOUT_SEC = 2_147_483;
@@ -41,4 +42,39 @@ export function formatFileErrors(errors: readonly GraphFileError[], max = 1): st
     .join(' ');
   const more = errors.length - max;
   return more > 0 ? `${shown} (and ${more} more)` : shown;
+}
+
+/**
+ * The graph as its files hold it (spec §4): what loading its Markdown and side file gives back. Names, titles, variable
+ * descriptions and step descriptions on one line; goal and instructions trimmed; LF line endings; only the text of the
+ * step's kind (a prompt or a command), absent when empty; `access` only for a read-only agent step; whole-second
+ * timeouts; `nodeSeq` at least the highest n<number> id.
+ */
+export function canonicalGraph(graph: Graph): Graph {
+  const nodes = graph.nodes.map(canonicalNode);
+  return {
+    ...graph,
+    name: oneLine(graph.name),
+    goal: normText(graph.goal).trim(),
+    instructions: normText(graph.instructions).trim(),
+    variables: graph.variables.map((v) => ({ name: v.name, description: oneLine(v.description) })),
+    nodes,
+    edges: graph.edges.map((e) => ({ id: edgeId(e.from, e.to), from: e.from, to: e.to })),
+    nodeSeq: Math.max(graph.nodeSeq, ...nodes.map((n) => seqOf(n.id))),
+  };
+}
+
+function canonicalNode(node: GraphNode): GraphNode {
+  const { prompt, command, description, timeoutSec, access, workspace, ...rest } = node;
+  const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
+  const summary = oneLine(description ?? '');
+  return {
+    ...rest,
+    title: oneLine(node.title),
+    ...(summary && { description: summary }),
+    ...(text && (node.kind === 'agent' ? { prompt: text } : { command: text })),
+    ...(timeoutSec !== undefined && { timeoutSec: timeoutValue(timeoutSec) }),
+    ...(node.kind === 'agent' && access === 'read' && { access: 'read' as const }),
+    ...(workspace && { workspace }),
+  };
 }
