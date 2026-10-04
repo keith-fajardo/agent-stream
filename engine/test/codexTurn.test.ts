@@ -130,6 +130,15 @@ describe('runCodexTurn', () => {
     t.conn.close();
   });
 
+  it('Stop before the turn starts returns cancelled without sending turn/start (M2)', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const t = await scripted((s) => s.end(), { signal: ac.signal });
+    expect(await t.outcome).toEqual({ status: 'cancelled', lastText: '' });
+    expect(t.proc.methods()).not.toContain('turn/start');
+    t.conn.close();
+  });
+
   it('rejects with the exit message when Codex exits mid-turn', async () => {
     const t = await scripted((s) => {
       s.item(agentMessage('Hi'));

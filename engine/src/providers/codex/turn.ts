@@ -71,6 +71,8 @@ function settleable<T>() {
  * rejects with the connection's message.
  */
 export async function runCodexTurn(o: RunTurnOptions): Promise<TurnOutcome> {
+  // Stopped already: no turn is started that would only be interrupted (M2).
+  if (o.signal.aborted) return { status: 'cancelled', lastText: '' };
   const waitMs = o.interruptWaitMs ?? INTERRUPT_WAIT_MS;
   let lastText = '';
   let usage: NodeUsage | undefined;
