@@ -34,14 +34,16 @@ export class CodexExitError extends Error {
     readonly code: number | null,
     readonly tail: string,
     readonly startError?: string,
+    /** The signal that ended the process, when one did (M5). */
+    readonly signal?: NodeJS.Signals,
   ) {
     super(message);
     this.name = 'CodexExitError';
   }
 }
 
-export type CodexProcess = { stdin: Writable; stdout: Readable; stderr: Readable; kill(): void; onExit(cb: (code: number | null, error?: Error) => void): void };
-/** Starts Codex; tests substitute the fake app-server (spec §8). `onExit` also reports a spawn that failed (R4). */
+export type CodexProcess = { stdin: Writable; stdout: Readable; stderr: Readable; kill(): void; onExit(cb: (code: number | null, error?: Error, signal?: NodeJS.Signals | null) => void): void };
+/** Starts Codex; tests substitute the fake app-server (spec §8). `onExit` also reports a spawn that failed (R4), and the signal that ended the process (M5). */
 export type SpawnCodex = (codexPath: string, args: readonly string[], env: NodeJS.ProcessEnv) => CodexProcess;
 
 export interface CodexConnection {
@@ -116,17 +118,20 @@ export const realSpawnCodex: SpawnCodex = (codexPath, args, env) => {
     },
     onExit: (cb) => {
       let done = false;
-      const once = (code: number | null, error?: Error) => {
+      const once = (code: number | null, error?: Error, signal?: NodeJS.Signals | null) => {
         if (done) return;
         done = true;
-        cb(code, error);
+        cb(code, error, signal);
       };
       // 'close', not 'exit': stdout is fully read by then, so a last turn/completed isn't lost.
-      child.once('close', (code) => once(code));
+      child.once('close', (code, signal) => once(code, undefined, signal));
       child.once('error', (error) => once(null, error));
     },
   };
 };
+
+/** `exit 3`, or `signal SIGKILL` when a signal ended the process (M5). */
+const exitReason = (code: number | null, signal?: NodeJS.Signals | null) => (code === null && signal ? `signal ${signal}` : `exit ${code ?? 'unknown'}`);
 
 type RpcMessage = { id?: unknown; method?: unknown; params?: unknown; result?: unknown; error?: { code?: unknown; message?: unknown } };
 type Pending = { resolve: (value: unknown) => void; reject: (error: unknown) => void; cleanup: () => void };
@@ -217,14 +222,21 @@ function connect(proc: CodexProcess, log: (message: string) => void): CodexConne
   proc.stderr.on('data', (chunk: string) => {
     stderr = (stderr + chunk).slice(-4 * STDERR_TAIL_CHARS);
   });
-  proc.onExit((code, error) => {
+  proc.onExit((code, error, signal) => {
     if (closed) return;
     closed = true;
     const tail = stderr.replace(ANSI, '').trim().slice(-STDERR_TAIL_CHARS);
-    const message = error ? `Codex didn't start: ${error.message}` : `Codex stopped unexpectedly (exit ${code ?? 'unknown'}).${tail ? `\n${tail}` : ''}`;
-    ended = new CodexExitError(message, code, tail, error?.message);
+    const message = error ? `Codex didn't start: ${error.message}` : `Codex stopped unexpectedly (${exitReason(code, signal)}).${tail ? `\n${tail}` : ''}`;
+    ended = new CodexExitError(message, code, tail, error?.message, signal ?? undefined);
     rejectAll(ended);
-    for (const h of exitHandlers) h(message);
+    for (const h of exitHandlers) {
+      // One handler that throws must not keep the others from learning that Codex ended (M7).
+      try {
+        h(message);
+      } catch (e) {
+        console.error(`[agent-stream] Handling the end of Codex failed: ${errorMessage(e)}`);
+      }
+    }
   });
 
   return {
@@ -273,7 +285,7 @@ function connect(proc: CodexProcess, log: (message: string) => void): CodexConne
 }
 
 function startReason(e: unknown, timeoutMs: number): string {
-  if (e instanceof CodexExitError) return e.startError ?? `exit ${e.code ?? 'unknown'}.${e.tail ? `\n${e.tail}` : ''}`;
+  if (e instanceof CodexExitError) return e.startError ?? `${exitReason(e.code, e.signal)}.${e.tail ? `\n${e.tail}` : ''}`;
   if (isTimeout(e)) return `no answer within ${timeoutMs / 1000} s`;
   return errorMessage(e);
 }

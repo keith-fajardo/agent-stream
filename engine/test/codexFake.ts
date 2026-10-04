@@ -35,7 +35,7 @@ export class FakeProc implements CodexProcess {
   readonly received: Msg[] = [];
   killed = false;
   exited = false;
-  private exitCallbacks: ((code: number | null, error?: Error) => void)[] = [];
+  private exitCallbacks: ((code: number | null, error?: Error, signal?: NodeJS.Signals | null) => void)[] = [];
   private answers = new Map<number, (m: Msg) => void>();
   private nextId = 1000;
 
@@ -96,13 +96,13 @@ export class FakeProc implements CodexProcess {
     this.stdout.write(text);
   }
 
-  /** The process ends by itself: stderr first, then the exit, as a real process reports it. */
-  async exit(code: number | null, stderr = ''): Promise<void> {
+  /** The process ends by itself: stderr first, then the exit (or the signal that killed it), as a real process reports it. */
+  async exit(code: number | null, stderr = '', signal?: NodeJS.Signals): Promise<void> {
     if (this.exited) return;
     if (stderr) this.stderr.write(stderr);
     await tick();
     this.exited = true;
-    for (const cb of this.exitCallbacks) cb(code);
+    for (const cb of this.exitCallbacks) cb(code, undefined, signal ?? null);
   }
 
   /** The process could not be started at all (ENOENT). */
@@ -117,7 +117,7 @@ export class FakeProc implements CodexProcess {
     void this.exit(null);
   }
 
-  onExit(cb: (code: number | null, error?: Error) => void): void {
+  onExit(cb: (code: number | null, error?: Error, signal?: NodeJS.Signals | null) => void): void {
     this.exitCallbacks.push(cb);
   }
 

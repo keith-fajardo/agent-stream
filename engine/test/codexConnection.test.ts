@@ -119,6 +119,36 @@ describe('CodexConnection', () => {
     await expect(conn.request('later', {})).rejects.toThrow(message);
   });
 
+  it('names the signal when Codex was killed by one (M5)', async () => {
+    const { conn, proc } = await connected({ hang: never });
+    const exits: string[] = [];
+    conn.onExit((message) => exits.push(message));
+    const pending = conn.request('hang', {});
+    await proc.exit(null, 'killed\n', 'SIGKILL');
+    await expect(pending).rejects.toThrow('Codex stopped unexpectedly (signal SIGKILL).\nkilled');
+    expect(exits).toEqual(['Codex stopped unexpectedly (signal SIGKILL).\nkilled']);
+    const killed = fakeCodex({ initialize: (_p, p) => { void p.exit(null, '', 'SIGTERM'); return never(); } });
+    await expect(openCodex({ codexPath: '/bin/codex', spawn: killed.spawn })).rejects.toThrow("Codex didn't start: signal SIGTERM.");
+  });
+
+  it('calls every exit handler even when one throws, and reports the throw (M7)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { conn, proc } = await connected();
+      const exits: string[] = [];
+      conn.onExit(() => {
+        throw new Error('handler broke');
+      });
+      conn.onExit((message) => exits.push(message));
+      await proc.exit(1);
+      expect(exits).toEqual(['Codex stopped unexpectedly (exit 1).']);
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(String(error.mock.calls[0][0])).toContain('handler broke');
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('keeps only the last 2,000 characters of stderr', async () => {
     const { conn, proc } = await connected({ hang: never });
     const pending = conn.request('hang', {});
