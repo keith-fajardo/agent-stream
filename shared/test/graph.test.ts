@@ -5,6 +5,7 @@ import {
   descendants,
   emptyGraph,
   nextNodeId,
+  nodeIdProblem,
   refinable,
   reusableNodeIds,
   topoOrder,
@@ -295,6 +296,15 @@ describe('addNode ids', () => {
     expect(add('constructor')).toEqual({ ok: false, error: `"constructor" can't be used as a step id.` });
     expect(add('a b')).toEqual({ ok: false, error: 'invalid node id "a b"' });
     for (const id of ['n1', 'build_old', 'my-step']) expect(add(id).ok).toBe(true);
+  });
+
+  it('rejects ids the Flow could not write: "--" inside, or "-" at the end', () => {
+    const g = emptyGraph('g', 'G', 't');
+    const add = (id: string) => applyOp(g, { type: 'addNode', node: { id, title: 'a', kind: 'agent', prompt: 'p' } }, 'user', 't');
+    for (const id of ['a--b', 'a---b', '--a', 'a-', 'n1-']) expect(add(id)).toEqual({ ok: false, error: `invalid node id "${id}"` });
+    for (const id of ['n12', 'step_4', 'a-b', 'a_-_b', '-a', 'a-b-c']) expect(add(id).ok).toBe(true);
+    expect(nodeIdProblem('a--b')).toBe('invalid node id "a--b"');
+    expect(nodeIdProblem('a-b')).toBeNull();
   });
 });
 });

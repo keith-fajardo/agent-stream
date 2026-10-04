@@ -2,7 +2,8 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun } from './types';
 
-const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+/** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
+const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
 const WINDOWS_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 /** Why `id` can't be a step id, or null. Ids key plain objects and become folder names under runs/. */

@@ -10,3 +10,6 @@ export * from './checkout';
 export * from './models';
 export * from './fence';
 export * from './graphFlow';
+export * from './graphDoc';
+export * from './freeText';
+export * from './graphMarkdownParse';
