@@ -1,8 +1,8 @@
 # Agent Stream
 
-Agent Stream is an independent project. It is not made, endorsed or supported by Anthropic or GitHub.
+Agent Stream is an independent project. It is not made, endorsed or supported by Anthropic, GitHub or OpenAI.
 
-A VS Code extension where you and an AI planner co-create a workflow as a graph, then run it step by step on your own AI subscription. Agent Stream is **provider-agnostic**: agent steps and the planner run on the provider you choose. That is **Claude** (your Claude subscription through Claude Code) or **GitHub Copilot** (your Copilot plan through VS Code's Language Model API). Every file edit, shell command or other non-read-only action an agent step attempts waits for your approval, whichever provider runs it, and every step keeps its own logs.
+A VS Code extension where you and an AI planner co-create a workflow as a graph, then run it step by step on your own AI subscription. Agent Stream is **provider-agnostic**: agent steps and the planner run on the provider you choose. That is **Claude** (your Claude subscription through Claude Code), **GitHub Copilot** (your Copilot plan through VS Code's Language Model API) or **OpenAI Codex** (your ChatGPT subscription through the Codex CLI). Every file edit, shell command or other non-read-only action an agent step attempts waits for your approval, whichever provider runs it, and every step keeps its own logs.
 
 ## Requirements
 
@@ -10,6 +10,7 @@ A VS Code extension where you and an AI planner co-create a workflow as a graph,
 - One provider:
   - **Claude:** Claude Code installed and signed in with your Claude account (run `claude`, then `/login`). Check with `claude auth status`.
   - **GitHub Copilot:** the GitHub Copilot extension installed and signed in to a Copilot plan. The first run or chat on Copilot asks you to allow Agent Stream to use it.
+  - **OpenAI Codex:** the Codex CLI installed (from https://developers.openai.com/codex) and signed in with ChatGPT (run `codex login` in a terminal and choose ChatGPT). An API-key sign-in is refused.
 - Windows only: Git for Windows, which provides Git Bash for command steps.
 
 ## Install
@@ -25,14 +26,14 @@ Get `agent-stream-<version>.vsix` (or build it: `npm install && npm run package`
 - **Chat view:** the **Agent Stream Chat** view on the right, next to VS Code's own Chat. It shows the planner conversation for the graph tab you're on, in the current session. Describe a goal; the planner reads your repo (read-only) and draws the plan. **New chat** starts over; the session button switches session.
 - **Stop:** while the planner works, **■ Stop** takes the place of Send; it, or Esc in the chat, stops the planner's turn. The chat shows `Stopped.`, graph edits it already made stay, and you can type continue to pick up where it stopped.
 - **Runs:** the planner never starts a run. It asks to run (or test) the graph only when you ask it to; after building or changing a plan it stops so you can review it. Its request opens the run dialog headed **The planner asks to run this graph**, where **Not now** closes it.
-- **Model and effort:** the chat header's **Model** menu picks the model for this conversation (**Default**, or one the provider lists), and **Effort** its effort level when that model offers levels (for **Default**: the levels of the model in the settings, else of Claude Code's default model). A saved effort always shows, so it can be cleared. The choice is kept with the conversation in the session (New chat keeps it) and applies from the next message. **Default** uses the `agentStream.model` / `agentStream.effort` settings, or the provider's own default when they are empty (Claude Code's default; Auto on Copilot). Runs use those settings, read once when the run starts: the run dialog and the run's tooltip show `Model: … · Effort: …`. Set them with **Agent Stream: Select Model**; the provider's status bar tooltip shows them. A model or effort is never written into a graph or an export. An effort level the chosen model doesn't offer is left out.
+- **Model and effort:** the chat header's **Model** menu picks the model for this conversation (**Default**, or one the provider lists), and **Effort** its effort level when that model offers levels (for **Default**: the levels of the model in the settings, else of the provider's default model). A saved effort always shows, so it can be cleared. The choice is kept with the conversation in the session (New chat keeps it) and applies from the next message. **Default** uses the `agentStream.model` / `agentStream.effort` settings, or the provider's own default when they are empty (Claude Code's default; Auto on Copilot; Codex's default model on Codex). Runs use those settings, read once when the run starts: the run dialog and the run's tooltip show `Model: … · Effort: …`. Set them with **Agent Stream: Select Model**; the provider's status bar tooltip shows them. A model or effort is never written into a graph or an export. An effort level the chosen model doesn't offer is left out.
 - **Graph tab:** the canvas, the logs of the selected step underneath, and Node · Graph on the right (plus a Changes tab while agent changes wait for review). The menu bar has File, Edit, Run, Variables and View, with View › Chat opening the chat view.
 - **Markdown:** step logs (the agent's text and the prompt it was sent) and the planner's chat replies render Markdown. HTML in agent output is shown as text, never run; links open in your browser only when they are http(s).
 - **Work sessions:**
   - A session is a named set of open graph tabs plus its own planner conversations.
   - Switching a session closes the current graph tabs and brings back the other session's tabs, splits and chats.
   - Sessions are personal: they stay in `.agent-stream/sessions/`, which git ignores.
-- **Status bar:** the provider your steps run on (for example `Claude Max` or `Copilot`) and the current session (`Default`). Click either one to change it.
+- **Status bar:** the provider your steps run on (for example `Claude Max`, `Copilot` or `Codex (Plus)`) and the current session (`Default`). Click either one to change it.
 - **Agent steps** run a separate AI agent with the step's prompt, the goal, the instructions and the outputs of earlier steps. **Command steps** run an exact shell command in the project folder: your login shell on macOS, Git Bash on Windows.
 - **Step descriptions:** each step has a plain-language description for people. It shows on the canvas card, and agents get it as context: a step sees its own description as "In short", and later steps see earlier steps' descriptions next to their results. The planner writes one for every step it adds or changes, and you can write or edit it in the Node panel.
 - **Refine with planner:** write a step in plain words, then press **Refine with planner** (Node panel, or **Edit › Refine selected step** / **Refine steps you changed**). The planner reads your repository and writes the precise prompt or command, plus a one-line description, for you to review.
@@ -133,11 +134,12 @@ Recommended workflow:
 
 ## Settings
 
-- `agentStream.provider` — `claude` (default) or `copilot`.
+- `agentStream.provider` — `claude` (default), `copilot` or `codex`.
 - `agentStream.claudePath` — Claude provider only. Claude Code's full path if it isn't found automatically.
+- `agentStream.codexPath` — OpenAI Codex provider only. The Codex CLI's full path (`codex`, or `codex.exe` / `codex.cmd` on Windows) if it isn't found automatically.
 - `agentStream.gitBashPath` — Windows: Git Bash's full path if it isn't found automatically.
-- `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): the provider's default (Claude Code's default; Auto on Copilot).
-- `agentStream.effort` — the effort level for the same: `low`, `medium`, `high`, `xhigh` or `max`. Empty (default): the model's own level.
+- `agentStream.model` — the model agent steps in runs use, and planner conversations without their own choice (an alias such as `sonnet`, or a full model id). Empty (default): the provider's default (Claude Code's default; Auto on Copilot; Codex's default model on Codex).
+- `agentStream.effort` — the effort level for the same: `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Empty (default): the model's own level. A level the model doesn't offer is left out.
 - `agentStream.maxParallel` — how many steps of a run may run at once (default 3). Steps that can change files still take turns within each workspace.
 - `agentStream.copilot.maxRequestsPerStep` — GitHub Copilot: the most model requests one agent step may make (default 100, 1–200). A step that reaches it stops with a message naming this setting.
 - `agentStream.copilot.maxRequestsPerTurn` — GitHub Copilot: the most model requests one planner chat message may make (default 100, 1–100). A planner message that reaches it stops with a message naming this setting; type continue to pick up where it stopped.
@@ -166,6 +168,25 @@ How Copilot behaves:
   - Whether these requests count against your premium-request quota is not verified, and Agent Stream doesn't track it. Check your Copilot usage page. Each step's log shows how many Copilot requests it used.
 - **Long conversations:** when a conversation nears the model's input limit, older turns are summarised in one extra request, which counts toward the cap. If that isn't possible, they are dropped with a note.
 - **Planner chat:** the conversation is kept in your session (`.agent-stream/sessions/<id>/transcripts/`), so it continues after a VS Code reload. **New chat** deletes it.
+
+### OpenAI Codex
+
+Agent Stream runs agent steps and the planner on your ChatGPT subscription through your installed Codex CLI (`codex app-server`). It never reads or stores your credentials.
+
+- **What you need:** the Codex CLI, and `codex login` in a terminal, signed in with ChatGPT. If Agent Stream can't find Codex, set `agentStream.codexPath`.
+- **What it refuses:** an API-key sign-in. Agent Stream starts Codex with `forced_login_method="chatgpt"` and removes `OPENAI_API_KEY`, `CODEX_API_KEY` and `OPENAI_BASE_URL` from its environment. If Codex still reports an API-key account, the status bar shows `Codex: API key` and runs are refused until you run `codex logout`, then `codex login` and choose ChatGPT.
+- **Status:** the status bar shows `Codex (<plan>)`, for example `Codex (Plus)`.
+- **Models and effort:** the Model menus list the models Codex offers on your plan. **Default** runs Codex's own default model. The Effort menu offers the levels the model supports, up to `ultra` on some models.
+- **Approvals:** Codex asks Agent Stream before every command and file change, and each approval covers that one action only.
+  - A short list of commands that only read run without asking, like Claude's Read, Grep and Glob: `cat`, `head`, `tail`, `nl`, `wc`, `ls`, `pwd`, `stat`, `grep`, `rg`, `find` and `sed -n`, with a few plain options (for example `-n`, `-i`, `-l`). A command with options outside that list, shell operators such as `|`, `;`, `>` or `$`, or anything that touches `.agent-stream` asks, or is declined if it would read private files. Writes, other programs and unknown commands ask.
+  - File changes show a **Patch** card with each file, what happens to it (add, update or delete) and its diff.
+  - Codex's requests for extra permissions are declined, and the step's log says so.
+- **Read-only steps** run in Codex's read-only sandbox. Anything that isn't a plain read is declined without asking.
+- **Privacy:** reads of the variable values file and of `.agent-stream/runs` and `.agent-stream/sessions` are declined without asking (a step may read its upstream `output.md`).
+- **Request cap:** none. Codex runs its own loop; a step is bounded by your plan and by Stop. Each step's log shows its tokens. Usage shows tokens only, with no cost, for a ChatGPT plan.
+- **Planner chat:** each conversation is a Codex thread, so it continues after a VS Code reload. **New chat** starts a new thread.
+- **Limitation, shell startup files:** Codex runs commands through a login shell (for example `zsh -lc`), so your shell startup files apply. If they export settings such as `RIPGREP_CONFIG_PATH` or `GREP_OPTIONS`, or define aliases, that make `rg` or `grep` search hidden or ignored folders, a search that runs without asking could read past run records. Agent Stream removes those variables from Codex's own environment but can't undo what your startup files set.
+- **Windows:** not verified yet. When npm installed Codex, Agent Stream runs `codex.cmd` through `cmd.exe`. How Codex wraps commands on Windows isn't verified, so most reads there will ask for approval.
 
 ## Files it writes
 
