@@ -267,6 +267,18 @@ describe('codexRunStep', () => {
     expect(text).toContain(values);
   });
 
+  it('keeps the diff of a path that could be another spelling of a private folder out of the step log (RF3)', async () => {
+    const folded = resolve(cwd, '.agent-\u017ftream', 'runs', 'r1', 'run.json');
+    const s = step((t) => {
+      t.started(fileChangeItem({ id: 'p1', changes: [{ path: folded, kind: { type: 'update', move_path: null }, diff: '-SECRETMARK' }], status: 'inProgress' }));
+      t.end();
+    });
+    await s.run();
+    const call = s.events.find((e) => e.type === 'tool_call');
+    expect(JSON.stringify(call)).not.toContain('SECRETMARK');
+    expect(call).toMatchObject({ input: { changes: [{ path: folded, kind: 'update' }] } });
+  });
+
   it('withdraws a pending approval when the turn completes normally (R18)', async () => {
     const s = step((t) => {
       t.started(commandItem({ id: 'c1', command: zsh('npm test'), status: 'inProgress' }));

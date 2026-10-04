@@ -6,10 +6,11 @@ import type { Decision } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { LoopTool } from '../src/agentLoop/tools';
 import { createPlannerGate, createStepGate, STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../src/providers/toolGate';
-import { createServerRequestHandler, grantRootDeclined, toPatchChanges, UNNAMED_CHANGE, type ApprovalContext } from '../src/providers/codex/approvals';
+import { aliasedPathDeclined, changePrivacyReason, createServerRequestHandler, grantRootDeclined, toPatchChanges, UNNAMED_CHANGE, type ApprovalContext } from '../src/providers/codex/approvals';
 import { UNSUPPORTED_REQUEST } from '../src/providers/codex/connection';
 import type { CommandAction, FileUpdateChange } from '../src/providers/codex/protocol';
 import { approvalParams, readAction, waitFor } from './codexFake';
+import { pathPrivacy } from '../src/providers/codex/readOnlyCommand';
 
 const cwd = resolve('/', 'work', 'proj');
 const values = resolve('/', 'h', '.agent-stream', 'values', 'abc.json');
@@ -186,6 +187,36 @@ describe('file changes', () => {
     expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p-mv' })).toEqual({ decision: 'decline' });
     expect(declined.has('p-mv')).toBe(true);
     expect(broker.pending()).toEqual([]);
+  });
+
+  it('declines without asking a change whose path could be another spelling of a private folder (RF3)', async () => {
+    const update = (path: string, move_path: string | null = null): FileUpdateChange => ({ path, kind: { type: 'update', move_path }, diff: '' });
+    const folded = resolve(cwd, '.agent-\u017ftream', 'runs', 'r1', 'run.json');
+    const shortName = resolve(cwd, 'AGENT-~1', 'runs', 'r1', 'run.json');
+    const { gate, broker } = stepGate();
+    const { handle, fileChanges, declined } = handlerFor(gate);
+    fileChanges.set('p-fold', [update(folded)]);
+    expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p-fold' })).toEqual({ decision: 'decline' });
+    expect(declined.get('p-fold')).toBe(aliasedPathDeclined(folded));
+    const cafe = resolve(cwd, 'caf\u00e9.md');
+    fileChanges.set('p-mv', [update(resolve(cwd, 'a.ts'), cafe)]);
+    expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p-mv' })).toEqual({ decision: 'decline' });
+    expect(declined.get('p-mv')).toBe(aliasedPathDeclined(cafe));
+    const win = handlerFor(gate, { platform: 'win32' });
+    win.fileChanges.set('p-short', [update(shortName)]);
+    expect(await win.handle('item/fileChange/requestApproval', { ...at, itemId: 'p-short' })).toEqual({ decision: 'decline' });
+    expect(win.declined.get('p-short')).toBe(aliasedPathDeclined(shortName));
+    expect(broker.pending()).toEqual([]);
+    // Outside Windows a ~ is an ordinary character in a name: the change asks.
+    const privacy = pathPrivacy(gate);
+    expect(changePrivacyReason(privacy, cwd, update(shortName), 'linux')).toBeUndefined();
+    expect(changePrivacyReason(privacy, cwd, update(resolve(cwd, 'notes~')), 'win32')).toBe(aliasedPathDeclined(resolve(cwd, 'notes~')));
+    // The folder the step works in, and its parents, may have such names: only what lies past it counts.
+    const accented = resolve('/', 'work', 'D\u00e9veloppement', 'proj');
+    expect(changePrivacyReason(privacy, accented, update(resolve(accented, 'a.ts')), 'linux')).toBeUndefined();
+    const short = resolve('/', 'KEITHF~1', 'proj');
+    expect(changePrivacyReason(privacy, short, update(resolve(short, 'a.ts')), 'win32')).toBeUndefined();
+    expect(changePrivacyReason(privacy, short, update(resolve(short, 'AGENT-~1', 'runs', 'r1', 'run.json')), 'win32')).toBeDefined();
   });
 
   it('treats an empty change list as one Codex never named (R6b)', async () => {

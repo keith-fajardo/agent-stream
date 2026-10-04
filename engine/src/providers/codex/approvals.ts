@@ -21,11 +21,32 @@ export function toPatchChanges(changes: FileUpdateChange[]): PatchChange[] {
   return changes.map((c) => ({ path: c.path, kind: c.kind.type, diff: c.diff, ...(c.kind.type === 'update' && c.kind.move_path ? { movePath: c.kind.move_path } : {}) }));
 }
 
-/** Why a change may not be made: it touches a private path, or moves a file onto one. The read rule plus the write rule, with no upstream output.md exception, like Edit and Write (R26). */
-export function changePrivacyReason(privacy: ReturnType<typeof pathPrivacy>, cwd: string, ch: FileUpdateChange): string | undefined {
+/** A path the privacy checks can't vouch for: it may be another spelling of a private folder (RF3). */
+export const aliasedPathDeclined = (path: string) => `Agent Stream can't tell whether ${path} is one of its private folders, so Codex may not change it.`;
+
+/**
+ * A path that may name a private folder by another spelling: a non-ASCII character (a file system that folds case
+ * may read `.agent-ſtream` as `.agent-stream`), or on Windows a `~` (an 8.3 short name such as `AGENT-~1`). Only the
+ * segments past the folder the step works in count: that folder and its parents are where the user chose to work,
+ * and a project under `Développement` must still be able to change its files.
+ */
+function mayAliasPrivatePath(full: string, cwd: string, platform: NodeJS.Platform): boolean {
+  const segments = full.split(/[\\/]/);
+  const base = cwd.split(/[\\/]/);
+  let shared = 0;
+  while (shared < segments.length && shared < base.length && segments[shared] === base[shared]) shared++;
+  return segments.slice(shared).some((segment) => /[^\x00-\x7f]/.test(segment) || (platform === 'win32' && segment.includes('~')));
+}
+
+/**
+ * Why a change may not be made: it touches a private path, moves a file onto one, or names a path that may be another
+ * spelling of one. The read rule plus the write rule, with no upstream output.md exception, like Edit and Write (R26, RF3).
+ */
+export function changePrivacyReason(privacy: ReturnType<typeof pathPrivacy>, cwd: string, ch: FileUpdateChange, platform: NodeJS.Platform = process.platform): string | undefined {
   const paths = ch.kind.type === 'update' && ch.kind.move_path ? [ch.path, ch.kind.move_path] : [ch.path];
   for (const path of paths) {
     const full = resolve(cwd, path);
+    if (mayAliasPrivatePath(full, resolve(cwd), platform)) return aliasedPathDeclined(path);
     const reason = privacy(full, 'read') ?? privateFolderWriteDenial(full);
     if (reason) return reason;
   }
@@ -79,7 +100,7 @@ export function createServerRequestHandler(c: ApprovalContext): (method: string,
     const changes = c.fileChanges.get(p.itemId);
     if (!changes || changes.length === 0) return settle(p.itemId, { allow: false, reason: UNNAMED_CHANGE });
     for (const ch of changes) {
-      const reason = changePrivacyReason(privacy, c.cwd, ch);
+      const reason = changePrivacyReason(privacy, c.cwd, ch, c.platform);
       if (reason) return settle(p.itemId, { allow: false, reason });
     }
     const input = { ...(p.reason ? { description: p.reason } : {}), changes: toPatchChanges(changes) };

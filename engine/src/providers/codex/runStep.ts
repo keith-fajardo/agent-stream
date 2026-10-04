@@ -85,7 +85,7 @@ export function codexRunStep(deps: CodexRunDeps) {
     const fileChanges = new Map<string, FileUpdateChange[]>();
     const declined = new Map<string, string>();
     const privacy = pathPrivacy(gate);
-    const isPrivate = (change: FileUpdateChange) => changePrivacyReason(privacy, ctx.cwd, change) !== undefined;
+    const isPrivate = (change: FileUpdateChange) => changePrivacyReason(privacy, ctx.cwd, change, deps.platform) !== undefined;
     let conn: CodexConnection | undefined;
     let usage: NodeUsage | undefined;
     const cancelled = (): NodeOutcome => ({ ok: false, output: '', error: 'cancelled', ...(usage && { usage }) });
