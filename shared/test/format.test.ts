@@ -44,6 +44,16 @@ describe('approval text', () => {
     expect(approvalSentence(request('Bash', { command: 'dbt build\nrm -rf ~' }))).toBe('n2 Build new wants to run: dbt build … (+1 more line)');
   });
 
+  it("names the files a Codex Patch would change (R29)", () => {
+    const input = { changes: [{ path: 'a.ts', kind: 'update', diff: '' }, { path: 'b.ts', kind: 'add', diff: '' }] };
+    expect(approvalSummary('Patch', input)).toBe('Patch: a.ts, b.ts');
+    expect(approvalSentence(request('Patch', input))).toBe('n2 Build new wants to change a.ts, b.ts');
+    const many = { changes: ['a', 'b', 'c', 'd', 'e'].map((p) => ({ path: `${p}.ts`, kind: 'update', diff: '' })) };
+    expect(approvalSummary('Patch', many)).toBe('Patch: a.ts, b.ts, c.ts and 2 more');
+    expect(approvalSummary('Patch', {})).toBe('Patch');
+    expect(approvalSentence(request('Patch', {}))).toBe('n2 Build new wants to use Patch');
+  });
+
   it('uses the summary of a graph change', () => {
     const graphChange = { summary: 'n2 wants to change n4\'s command', detail: 'Command:\nnpm ci' };
     const a: ApprovalRequest = { ...request('Change graph', { id: 'n4', command: 'npm ci' }), graphChange };

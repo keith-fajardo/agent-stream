@@ -147,6 +147,8 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .approval-card { border: 1px solid var(--warn); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .diff.del { background: rgba(180, 35, 24, 0.08); }
 .diff.add { background: rgba(46, 125, 50, 0.08); }
+.patch-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 125, 50, 0.2)); }
+.patch-del { background: var(--vscode-diffEditor-removedTextBackground, rgba(180, 35, 24, 0.18)); }
 .approval-label { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .approval-warning { margin: 0; padding: 6px 8px; border-radius: 6px; color: var(--danger); background: rgba(180, 35, 24, 0.1); font-weight: 600; }
 .needs-approval { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--warn); }

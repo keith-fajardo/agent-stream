@@ -87,12 +87,12 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
       );
     case 'result': {
       const u = e.usage;
-      // A provider that reports no tokens or cost (Copilot) shows only its request count.
+      // A provider that reports no tokens or cost (Copilot) shows only its request count; one that reports no cost (Codex), no cost.
       const counted = u ? u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens > 0 || u.costUsd > 0 : false;
       const usage = !u
         ? ''
         : counted
-          ? ` · ${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns · ~$${u.costUsd.toFixed(2)} API-equivalent`
+          ? ` · ${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns${u.costUsd > 0 ? ` · ~$${u.costUsd.toFixed(2)} API-equivalent` : ''}`
           : ` · ${u.turns} turns`;
       const exit = e.exitCode !== undefined && e.exitCode !== null ? ` · exit ${e.exitCode}` : '';
       return (

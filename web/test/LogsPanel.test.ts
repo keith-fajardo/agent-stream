@@ -136,4 +136,12 @@ describe('LogsPanel', () => {
     expect(text()).not.toContain('API-equivalent');
     expect(text()).not.toContain('0 in / 0 out');
   });
+
+  it('shows tokens but no API-equivalent cost for a step that reports no cost (Codex)', async () => {
+    await act(async () => dispatch({ kind: 'selectNode', id: 'n2' }));
+    const usage = { inputTokens: 300, outputTokens: 50, cacheReadTokens: 600, cacheWriteTokens: 100, costUsd: 0, turns: 1 };
+    await act(async () => server({ type: 'nodeLogs', runId: run.id, nodeId: 'n2', events: [{ at: '2026-10-02T10:00:00Z', type: 'result', ok: true, durationMs: 1200, usage }] }));
+    expect(text()).toContain('· 1000 in / 50 out tokens · 1 turns');
+    expect(text()).not.toContain('API-equivalent');
+  });
 });

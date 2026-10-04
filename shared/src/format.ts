@@ -65,12 +65,23 @@ const firstLine = (text: string, max = 80) => {
 };
 const fieldsOf = (input: unknown) => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {});
 
+/** A Patch's file paths, or undefined when its input names none. */
+const patchPaths = (input: unknown): string[] | undefined => {
+  const changes = fieldsOf(input).changes;
+  if (!Array.isArray(changes)) return undefined;
+  const paths = changes.flatMap((c) => (typeof c === 'object' && c !== null && typeof (c as { path?: unknown }).path === 'string' ? [(c as { path: string }).path] : []));
+  return paths.length ? paths : undefined;
+};
+const listPaths = (paths: string[]) => (paths.length <= 3 ? paths.join(', ') : `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`);
+
 /** One line for lists: "Bash: dbt build …", "Edit: models/x.sql", or a graph change's own summary. */
 export function approvalSummary(toolName: string, input: unknown, graphChange?: GraphChangeRequest): string {
   if (graphChange) return graphChange.summary;
   const f = fieldsOf(input);
   if ((toolName === 'Bash' || toolName === 'PowerShell') && typeof f.command === 'string') return `${toolName}: ${firstLine(f.command)}`;
   if (typeof f.file_path === 'string') return `${toolName}: ${f.file_path}`;
+  const patched = toolName === 'Patch' ? patchPaths(input) : undefined;
+  if (patched) return `Patch: ${listPaths(patched)}`;
   return toolName;
 }
 
@@ -82,5 +93,7 @@ export function approvalSentence(a: ApprovalRequest): string {
   if ((a.toolName === 'Bash' || a.toolName === 'PowerShell') && typeof f.command === 'string') return `${who} wants to run: ${firstLine(f.command)}`;
   if (a.toolName === 'Edit' && typeof f.file_path === 'string') return `${who} wants to edit ${f.file_path}`;
   if (a.toolName === 'Write' && typeof f.file_path === 'string') return `${who} wants to write ${f.file_path}`;
+  const patched = a.toolName === 'Patch' ? patchPaths(a.input) : undefined;
+  if (patched) return `${who} wants to change ${listPaths(patched)}`;
   return `${who} wants to use ${a.toolName}`;
 }

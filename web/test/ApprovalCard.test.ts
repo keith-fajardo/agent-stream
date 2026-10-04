@@ -37,4 +37,17 @@ describe('ApprovalCard', () => {
     expect([...card.querySelectorAll('button')].map((b) => b.textContent)).toEqual(expect.arrayContaining(['Approve', 'Deny']));
     await act(async () => root.unmount());
   });
+
+  it('shows a Patch as each file and its diff, with added and removed lines marked', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const input = { changes: [{ path: 'src/a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' }] };
+    await act(async () => root.render(createElement(ApprovalCard, { request: { ...request('a3', ''), toolName: 'Patch', input } })));
+    const card = container.querySelector('.approval-card') as HTMLElement;
+    expect(card.querySelector('.approval-label')!.textContent).toBe('Update src/a.ts');
+    expect([...card.querySelectorAll('.patch-add')].map((e) => e.textContent)).toEqual(['+new']);
+    expect([...card.querySelectorAll('.patch-del')].map((e) => e.textContent)).toEqual(['-old']);
+    expect(card.querySelector('.diff-block')!.textContent).toContain('@@ -1 +1 @@');
+    await act(async () => root.unmount());
+  });
 });

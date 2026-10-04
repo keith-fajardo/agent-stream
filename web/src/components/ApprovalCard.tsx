@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ApprovalRequest } from '@agent-stream/shared';
-import { describeApprovalInput } from '../approvalView';
+import { describeApprovalInput, patchLineClass } from '../approvalView';
 import { send } from '../bridge';
 import { dispatch } from '../store';
 
@@ -34,10 +34,20 @@ export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
           <pre className="mono">{a.graphChange.detail}</pre>
         </details>
       )}
-      {!a.graphChange && view.primary.map((b) => (
-        <div key={b.label}>
+      {!a.graphChange && view.primary.map((b, i) => (
+        <div key={`${i}:${b.label}`}>
           <div className="approval-label">{b.label}</div>
-          <pre className={b.tone ? `diff ${b.tone}` : 'mono'}>{b.text}</pre>
+          {b.diff ? (
+            <pre className="diff-block">
+              {b.text.split('\n').map((line, j) => (
+                <div key={j} className={patchLineClass(line)}>
+                  {line || ' '}
+                </div>
+              ))}
+            </pre>
+          ) : (
+            <pre className={b.tone ? `diff ${b.tone}` : 'mono'}>{b.text}</pre>
+          )}
         </div>
       ))}
       {!a.graphChange && view.warnings.map((w) => (

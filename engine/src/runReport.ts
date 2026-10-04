@@ -78,10 +78,12 @@ function durationOf(state: { startedAt?: string; endedAt?: string; durationMs?: 
   return Number.isNaN(ms) || ms < 0 ? undefined : fmtDuration(ms);
 }
 
-/** The step log's usage wording: tokens and cost, or only the turns when a provider reports no tokens (Copilot). */
+/** The step log's usage wording: tokens, and the cost when one is reported; only the turns when a provider reports no tokens (Copilot). */
 function usageLine(u: NodeUsage): string {
   const counted = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens > 0 || u.costUsd > 0;
-  return counted ? `${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns · ~$${u.costUsd.toFixed(2)} API-equivalent` : `${u.turns} turns`;
+  if (!counted) return `${u.turns} turns`;
+  const cost = u.costUsd > 0 ? ` · ~$${u.costUsd.toFixed(2)} API-equivalent` : '';
+  return `${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns${cost}`;
 }
 
 /** The steps in run order: topological order of the snapshot, then any left over (a cycle) in file order. */

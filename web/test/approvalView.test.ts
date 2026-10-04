@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeApprovalInput } from '../src/approvalView';
+import { describeApprovalInput, patchLineClass } from '../src/approvalView';
 
 const json = (value: unknown) => JSON.stringify(value, null, 2);
 
@@ -65,5 +65,45 @@ describe('describeApprovalInput', () => {
       ],
       warnings: [],
     });
+  });
+});
+
+describe('describeApprovalInput for a Codex Patch', () => {
+  it('lays out each file with what happens to it, and its diff', () => {
+    const input = {
+      description: 'Fix the bug',
+      changes: [
+        { path: 'src/a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' },
+        { path: 'src/b.ts', kind: 'add', diff: 'hello' },
+        { path: 'src/c.ts', kind: 'delete', diff: 'bye' },
+        { path: 'src/d.ts', kind: 'update', diff: '', movePath: 'src/e.ts' },
+      ],
+    };
+    expect(describeApprovalInput('Patch', input)).toEqual({
+      primary: [
+        { label: 'Description', text: 'Fix the bug' },
+        { label: 'Update src/a.ts', text: '@@ -1 +1 @@\n-old\n+new', diff: true },
+        { label: 'Add src/b.ts', text: 'hello', tone: 'add' },
+        { label: 'Delete src/c.ts', text: 'bye', tone: 'del' },
+        { label: 'Update src/d.ts → src/e.ts', text: '', diff: true },
+      ],
+      warnings: [],
+    });
+  });
+
+  it('keeps other keys visible, and shows a Patch it cannot read as its full JSON', () => {
+    expect(describeApprovalInput('Patch', { changes: [{ path: 'a', kind: 'add', diff: 'x' }], extra: 1 }).rest).toBe(json({ extra: 1 }));
+    for (const input of [{ changes: [] }, { changes: [{ path: 'a', kind: 'rename', diff: '' }] }, { changes: 'a' }, { changes: [{ path: 'a', kind: 'add', diff: 'x' }], description: 3 }]) {
+      expect(describeApprovalInput('Patch', input)).toEqual({ primary: [], warnings: [], rest: json(input) });
+    }
+  });
+
+  it('marks added and removed diff lines, leaving headers and context plain', () => {
+    expect(patchLineClass('+new')).toBe('patch-add');
+    expect(patchLineClass('-old')).toBe('patch-del');
+    expect(patchLineClass('+++ b/a.ts')).toBe('patch-line');
+    expect(patchLineClass('--- a/a.ts')).toBe('patch-line');
+    expect(patchLineClass('@@ -1 +1 @@')).toBe('patch-line');
+    expect(patchLineClass(' same')).toBe('patch-line');
   });
 });

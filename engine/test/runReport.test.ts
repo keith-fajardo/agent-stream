@@ -144,6 +144,15 @@ describe('buildRunReport', () => {
     expect(md).toContain('## Plan\n\n1. n1 · Inspect models (agent, read-only)\n2. n2 · Build models (command, workspace wh_small) — after n1\n');
   });
 
+  it('leaves out the API-equivalent cost when a provider reports tokens but no cost (Codex)', () => {
+    const { input } = fixture();
+    const usage = { inputTokens: 300, outputTokens: 50, cacheReadTokens: 600, cacheWriteTokens: 100, costUsd: 0, turns: 1 };
+    const md = buildRunReport({ ...input, run: { ...run, provider: 'codex', nodes: { ...run.nodes, n1: { ...run.nodes.n1, usage } } } });
+    expect(md).toContain('- Provider: OpenAI Codex');
+    expect(md).toContain('**Usage:** 1000 in / 50 out tokens · 1 turns');
+    expect(md).not.toContain('API-equivalent');
+  });
+
   it('shows each step with its description, the prompt or command as it ran, tool calls and usage', () => {
     const md = buildRunReport(fixture().input);
     const n1 = md.slice(md.indexOf('### n1'), md.indexOf('### n2'));
