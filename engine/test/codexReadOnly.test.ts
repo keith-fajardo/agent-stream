@@ -213,4 +213,28 @@ describe('classifyCommand', () => {
     expect(kindOf('cat .agent-stream/worktrees/w1/a.txt')).toBe('ask');
     expect(kindOf(`ls ${resolve('/', 'h', '.agent-stream', 'worktrees')}`, search('ls'))).toBe('ask');
   });
+
+  it('lets plain reads run in a variant worktree step, whose cwd is itself under .agent-stream (fix 2: R1j)', () => {
+    const dir = resolve('/', 'h', '.agent-stream', 'worktrees', 'k', 'r1', 'v1');
+    const other = resolve('/', 'h', '.agent-stream', 'values', 'other.json');
+    for (const s of ['cat notes.txt', 'head -n 5 notes.txt', 'rg foo .', 'ls']) {
+      expect(classify(zsh(s), s === 'cat notes.txt' || s.startsWith('head') ? read(s, 'notes.txt', dir) : search(s), { dir }).kind, s).toBe('readOnly');
+    }
+    expect(classify(zsh('cat .agent-stream/runs/r1/run.json'), read('cat x', 'notes.txt', dir), { dir }).kind).not.toBe('readOnly');
+    expect(classify(zsh('cat .agent-stream/x/a.txt'), read('cat x', 'notes.txt', dir), { dir }).kind).toBe('ask');
+    expect(classify(zsh(`cat ${other}`), read('cat x', 'notes.txt', dir), { dir }).kind).toBe('ask');
+  });
+
+  it('asks for obsolete +N tail and head forms, and for any ls flag on Windows (fix 2: R1l, R1n)', () => {
+    expect(kindOf('tail +1f notes.txt')).toBe('ask');
+    expect(kindOf('head +1 notes.txt')).toBe('ask');
+    expect(classify('ls -r', search('ls -r'), { platform: 'win32' }).kind).toBe('ask');
+    expect(classify('ls -h', search('ls -h'), { platform: 'win32' }).kind).toBe('ask');
+    expect(classify('ls', search('ls'), { platform: 'win32' }).kind).toBe('readOnly');
+  });
+
+  it('does not privacy-check the pattern after -e (fix 2: R1m)', () => {
+    expect(kindOf('grep -e / notes.txt', search('grep'))).toBe('readOnly');
+    expect(kindOf(`grep -e x ${values}`, search('grep'))).toBe('private');
+  });
 });

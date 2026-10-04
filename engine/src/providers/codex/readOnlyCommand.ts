@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { privateFolderDenial } from '../../agentLoop/tools';
 import type { ToolGate } from '../toolGate';
 import type { CommandAction, CommandExecutionRequestApprovalParams } from './protocol';
@@ -36,7 +36,7 @@ const LONG: Readonly<Record<string, ReadonlyMap<string, boolean>>> = {
 };
 /** Short-flag letters each program may be given, with digits (R1b). Programs not listed take no flags (sed and find are limited separately). */
 const SHORT: Readonly<Record<string, string>> = {
-  grep: 'niclLwxFEvhHmABC', egrep: 'niclLwxFEvhHmABC', fgrep: 'niclLwxFEvhHmABC', rg: 'niclwxFvmABC',
+  grep: 'niclLwxFEvhHmABCe', egrep: 'niclLwxFEvhHmABCe', fgrep: 'niclLwxFEvhHmABCe', rg: 'niclwxFvmABC',
   head: 'nc', tail: 'nc', wc: 'lwcm', ls: 'la1htrSF',
 };
 const FIND_PREDICATES: ReadonlySet<string> = new Set(['-name', '-iname', '-type', '-maxdepth', '-mindepth', '-path', '-ipath', '-size', '-mtime', '-newer', '-print', '-not', '-o', '-a']);
@@ -91,10 +91,14 @@ function commandWords(command: string, platform: NodeJS.Platform): string[] | nu
 const namesAgentStream = (word: string) => word.split(/[\\/]/).some((part) => part.toLowerCase() === '.agent-stream');
 
 /** The per-program limits of R1: nothing that writes, runs another program, never ends, or ignores ignore rules. */
-function programAllows([program, ...args]: string[]): boolean {
+function programAllows([program, ...args]: string[], platform: NodeJS.Platform): boolean {
   if (program === 'find') return args.every((a) => !a.startsWith('-') || FIND_PREDICATES.has(a));
   if (program === 'sed') return args.length >= 3 && args[0] === '-n' && /^\d+(,\d+)?p$/.test(args[1]) && args.slice(2).every((a) => !a.startsWith('-'));
-  // Flag-looking words on Windows (PowerShell's `-Path:x`) fail these letter and name lists too, so they ask (R1i).
+  // The obsolete `tail +1f` follows forever (R1l).
+  if ((program === 'head' || program === 'tail') && args.some((a) => a.startsWith('+'))) return false;
+  // PowerShell's `ls` is Get-ChildItem, where `-r` and `-h` mean -Recurse and -Hidden: no flag is safe there (R1n).
+  // Other flag-looking words on Windows (`-Path:x`) fail the letter and name lists below, so they ask (R1i).
+  if (platform === 'win32' && program === 'ls') return args.every((a) => !a.startsWith('-') || a === '-');
   const longs = LONG[program];
   const letters = SHORT[program] ?? '';
   return args.every((a) => {
@@ -137,10 +141,20 @@ export function classifyCommand(p: CommandExecutionRequestApprovalParams, o: { c
   if (words && words.length > 0 && PROGRAMS.has(words[0])) {
     // The actions are a best-effort parse: `cat notes.txt <values file>` reports one read of notes.txt.
     const kind: PathKind = SEARCHERS.has(words[0]) ? 'search' : 'read';
-    let operands = words.slice(1).filter((w) => !w.startsWith('-'));
-    // A search pattern is not a path (R1f), unless -e or -f makes the operands something else.
-    const patternFirst = (words[0] === 'rg' || GREPS.has(words[0])) && !words.slice(1).some((w) => /^-[^-]*[ef]/.test(w));
-    if (patternFirst) operands = operands.slice(1);
+    // A search pattern is not a path (R1f): the first operand, or the word after -e (R1m); -f and long options ask anyway.
+    const operands: string[] = [];
+    const args = words.slice(1);
+    const patterns = words[0] === 'rg' || GREPS.has(words[0]);
+    let patternPending = patterns && !args.some((w) => /^-[^-]*e/.test(w));
+    for (let i = 0; i < args.length; i++) {
+      const w = args[i];
+      if (w.startsWith('-')) {
+        if (patterns && /^-[^-]*e$/.test(w)) i++;
+        continue;
+      }
+      if (patternPending) patternPending = false;
+      else operands.push(w);
+    }
     const paths = operands.map((w) => resolve(cwd, w));
     if (kind === 'search') paths.push(resolve(cwd));
     for (const path of paths) {
@@ -148,12 +162,17 @@ export function classifyCommand(p: CommandExecutionRequestApprovalParams, o: { c
       if (reason) return { kind: 'private', reason };
     }
     // Any other .agent-stream path (another project's values, worktrees, ...) asks, bar an upstream output.md (R1g).
-    namesAgentStreamOperand = paths.some((path) => namesAgentStream(path) && !isUpstreamOutputPath(path));
+    // Below the step's own folder only: a variant step's cwd is itself under ~/.agent-stream/worktrees (R1j).
+    const below = (path: string) => {
+      const rel = relative(cwd, path);
+      return rel === '..' || rel.startsWith('..') || isAbsolute(rel) ? path : rel;
+    };
+    namesAgentStreamOperand = paths.some((path) => namesAgentStream(below(path)) && !isUpstreamOutputPath(path));
   }
   if ((p.kind ?? 'command') !== 'command' || p.additionalPermissions || p.networkApprovalContext) return ASK;
   if (actions.length === 0 || !actions.every((a) => READ_ACTIONS.has(a.type)) || actions.some((a) => special(a.command))) return ASK;
   if (!words || words.length === 0 || !PROGRAMS.has(words[0]) || words.some((w) => w.startsWith('='))) return ASK;
-  if (namesAgentStreamOperand || !programAllows(words)) return ASK;
+  if (namesAgentStreamOperand || !programAllows(words, o.platform)) return ASK;
   if ((words[0] === 'rg' || GREPS.has(words[0])) && words.slice(1).some(namesAgentStream)) return ASK;
   return { kind: 'readOnly' };
 }

@@ -169,7 +169,7 @@ describe('sanitizedCodexEnv', () => {
   });
 
   it('removes the ripgrep config path, which could make rg search hidden and ignored folders', () => {
-    expect(sanitizedCodexEnv({ PATH: '/bin', RIPGREP_CONFIG_PATH: '/h/.ripgreprc', ripgrep_config_path: 'x' })).toEqual({ PATH: '/bin' });
+    expect(sanitizedCodexEnv({ PATH: '/bin', RIPGREP_CONFIG_PATH: '/h/.ripgreprc', GREP_OPTIONS: '-r', ripgrep_config_path: 'x' })).toEqual({ PATH: '/bin' });
   });
 });
 
