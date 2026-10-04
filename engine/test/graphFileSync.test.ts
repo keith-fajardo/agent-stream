@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { GraphStore } from '../src/graphStore';
@@ -121,6 +121,37 @@ describe('graphFileChanged', () => {
     expect(store.graphFileChanged(id)).toBe('errors');
     expect(readFileSync(md, 'utf8')).toBe(broken);
     expect(store.fileErrors(id)).toHaveLength(1);
+  });
+
+  it('writes a valid file read fresh back in canonical form, so new steps keep their ids through later edits', () => {
+    const { paths, id, md, text } = setup();
+    writeFileSync(md, `${text()}\n## Clean up\n\n\`\`\`prompt\nTidy.\n\`\`\`\n`.replace(/\n/g, '\r\n'));
+    const store = new GraphStore(paths, fixedClock());
+    expect(store.get(id).nodes.map((n) => [n.id, n.title])).toEqual([['n1', 'Plan'], ['n2', 'Build'], ['n3', 'Clean up']]);
+    const written = readFileSync(md, 'utf8');
+    expect(written).toContain('## n3 · Clean up\n');
+    expect(written).not.toContain('\r');
+    expect(store.graphFileChanged(id)).toBe('unchanged');
+    const before = store.readOps(id).length;
+    writeFileSync(md, written.replace('Prove it.', 'Prove it again.'));
+    expect(store.graphFileChanged(id)).toBe('applied');
+    expect(store.readOps(id).slice(before).map((r) => r.op)).toEqual([{ type: 'setGoal', goal: 'Prove it again.' }]);
+    expect(store.get(id).nodes.map((n) => n.id)).toEqual(['n1', 'n2', 'n3']);
+  });
+
+  it('never writes a file read fresh while it has errors, nor a canonical one', () => {
+    const { paths, id, md, text, edit } = setup();
+    const canonical = text();
+    const stamp = statSync(md).mtimeMs;
+    expect(new GraphStore(paths, fixedClock()).get(id).goal).toBe('Prove it.');
+    expect([readFileSync(md, 'utf8'), statSync(md).mtimeMs]).toEqual([canonical, stamp]);
+    edit('- kind: command', '- kind: robot');
+    const broken = `${text()}\n## Clean up\n\n\`\`\`prompt\nTidy.\n\`\`\`\n`;
+    writeFileSync(md, broken);
+    const store = new GraphStore(paths, fixedClock());
+    expect(store.load(id).ok).toBe(false);
+    expect(store.graphFileChanged(id)).toBe('errors');
+    expect(readFileSync(md, 'utf8')).toBe(broken);
   });
 
   it('applies all of an edit or none of it', () => {

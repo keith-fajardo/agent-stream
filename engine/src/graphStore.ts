@@ -171,7 +171,11 @@ export class GraphStore extends EventEmitter {
     return this.read(id, md, meta);
   }
 
-  /** Reads the graph's two files. A Markdown file that doesn't parse is reported and never overwritten. */
+  /**
+   * Reads the graph's two files. A Markdown file that doesn't parse is reported and never overwritten. One that reads
+   * but isn't in canonical form (CRLF, hand formatting, steps without ids) is written back in it, so new steps' ids are
+   * kept in the file; a file that can't be written (read-only) is still read.
+   */
   private read(id: string, md: Stamp, meta: Stamp | undefined): GraphResult {
     const text = readFileSync(this.file(id), 'utf8');
     const metaText = readIfExists(this.metaFile(id));
@@ -188,6 +192,13 @@ export class GraphStore extends EventEmitter {
     this.failed.delete(id);
     this.written.delete(id);
     this.setErrors(id, []);
+    if (text !== serializeGraphMarkdown(graph)) {
+      try {
+        this.save(graph);
+      } catch {
+        // Not writable: the graph still reads, and the cache keeps the text on disk.
+      }
+    }
     return { ok: true, graph };
   }
 
@@ -205,11 +216,8 @@ export class GraphStore extends EventEmitter {
     const meta = stampOf(this.metaFile(id));
     const cached = this.cache.get(id);
     if (!cached) {
-      // A new file, a deleted one that came back, or one that didn't parse until now.
-      const r = this.read(id, md, meta);
-      if (!r.ok) return 'errors';
-      if (this.cache.get(id)?.text !== serializeGraphMarkdown(r.graph)) this.save(r.graph);
-      return 'added';
+      // A new file, a deleted one that came back, or one that didn't parse until now; read() writes it back in canonical form.
+      return this.read(id, md, meta).ok ? 'added' : 'errors';
     }
     const text = readFileSync(this.file(id), 'utf8');
     const metaText = readIfExists(this.metaFile(id));
