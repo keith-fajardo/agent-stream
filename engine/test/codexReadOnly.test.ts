@@ -162,4 +162,55 @@ describe('classifyCommand', () => {
     expect(classify(zsh('cat notes.txt'), read('cat notes.txt'), { extra: { additionalPermissions: { network: { enabled: true } } } }).kind).toBe('ask');
     expect(classify(zsh('cat notes.txt'), read('cat notes.txt'), { extra: { networkApprovalContext: { host: 'example.com' } } }).kind).toBe('ask');
   });
+
+  it('asks for abbreviated and =valued long options, and short flags outside the allowed letters (fix 1: R1a, R1b)', () => {
+    for (const s of [
+      'grep --recurs SECRET .',
+      'grep --dir=recurse SECRET .',
+      'grep --deref SECRET .',
+      'tail --foll notes.txt',
+      'rg --glob=.agent-stream --glob=run.json SECRET',
+      'rg --iglob=.agent-stream SECRET',
+      'rg --file=.agent-stream/runs/r1/run.json x notes.txt',
+      'wc --files0-from=.agent-stream/runs/r1/run.json',
+      'rg -g.agent-stream SECRET',
+      'grep -f.agent-stream/runs/r1/run.json x notes.txt',
+      'rg -e foo notes.txt',
+      'cat -v notes.txt',
+      'head -q notes.txt',
+      'ls -R',
+      'find . -newer .agent-stream/worktrees/w1/a',
+      'find . -regex x',
+      'find -L . -name a',
+    ]) {
+      expect(kindOf(s, search(s)), s).toBe('ask');
+    }
+    // A private predicate value is declined, not merely asked.
+    expect(classify(zsh('find . -newer .agent-stream/runs/r1/run.json'), search('find')).kind).toBe('private');
+    for (const s of ['head -n 20 notes.txt', 'head -n20 notes.txt', 'wc -l notes.txt', 'ls -la', 'grep -n foo notes.txt', 'grep --max-count=5 foo notes.txt', 'rg -m5 -C3 foo src', 'rg --line-number foo src', 'sed -n 1,5p notes.txt', 'find . -name a.ts -type f -maxdepth 2']) {
+      expect(kindOf(s, search(s)), s).toBe('readOnly');
+    }
+  });
+
+  it('asks for non-ASCII words, extended-glob and comment characters, and shell wrappers not at a known path (fix 1: R1c, R1d, R1e)', () => {
+    expect(kindOf('cat .agent-\u017Ftream/runs/r1/run.json')).toBe('ask');
+    expect(kindOf('cat .agent-stream/^sessions/r1/run.json')).toBe('ask');
+    expect(kindOf('cat notes.txt #x')).toBe('ask');
+    expect(classify(`./zsh -lc 'cat notes.txt'`, read('cat notes.txt')).kind).toBe('ask');
+    expect(classify(`/work/proj/bash -c 'cat notes.txt'`, read('cat notes.txt')).kind).toBe('ask');
+    expect(classify(`zsh -lc 'cat notes.txt'`, read('cat notes.txt')).kind).toBe('readOnly');
+    expect(classify(`/usr/bin/bash -c 'cat notes.txt'`, read('cat notes.txt')).kind).toBe('readOnly');
+  });
+
+  it('does not treat a search pattern as a path (fix 1: R1f)', () => {
+    expect(kindOf('grep -n / notes.txt', search('grep -n / notes.txt'))).toBe('readOnly');
+    expect(classify(zsh(`grep -n / ${values}`), search('grep')).kind).toBe('private');
+  });
+
+  it('asks for any other .agent-stream operand, but not the permitted upstream output.md (fix 1: R1g)', () => {
+    const other = resolve('/', 'h', '.agent-stream', 'values', 'other.json');
+    expect(kindOf(`cat ${other}`)).toBe('ask');
+    expect(kindOf('cat .agent-stream/worktrees/w1/a.txt')).toBe('ask');
+    expect(kindOf(`ls ${resolve('/', 'h', '.agent-stream', 'worktrees')}`, search('ls'))).toBe('ask');
+  });
 });

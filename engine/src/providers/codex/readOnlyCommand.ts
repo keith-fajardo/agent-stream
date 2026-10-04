@@ -17,7 +17,29 @@ const GREPS: ReadonlySet<string> = new Set(['grep', 'egrep', 'fgrep']);
 const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const FIND_ACTIONS: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls']);
 /** Characters that let a shell run another command, or open other files than the words it was given (R1). */
-const SPECIAL = /[;&|<>`$~*?[\]{}%()!\r\n]/;
+const SPECIAL = /[;&|<>`$~*?[\]{}%()!^#\r\n]/;
+/** Non-ASCII words could name a private folder through the file system's case folding (U+017F matches `s` on APFS and NTFS). */
+const NON_ASCII = /[^\x00-\x7f]/;
+const SHELL_DIRS: readonly string[] = ['/bin/', '/usr/bin/', '/usr/local/bin/', '/opt/homebrew/bin/'];
+
+/** Long options each program may be given (R1a). `true`: also `--name=<digits>`. Everything else asks, so no abbreviation or `=value` slips through. */
+const GREP_LONG: ReadonlyMap<string, boolean> = new Map([
+  ['--line-number', false], ['--ignore-case', false], ['--count', false], ['--files-with-matches', false], ['--files-without-match', false],
+  ['--word-regexp', false], ['--line-regexp', false], ['--fixed-strings', false], ['--extended-regexp', false], ['--invert-match', false],
+  ['--no-filename', false], ['--with-filename', false], ['--max-count', true], ['--context', true], ['--before-context', true], ['--after-context', true],
+]);
+const LONG: Readonly<Record<string, ReadonlyMap<string, boolean>>> = {
+  grep: GREP_LONG, egrep: GREP_LONG, fgrep: GREP_LONG, rg: GREP_LONG,
+  head: new Map([['--lines', true], ['--bytes', true]]),
+  tail: new Map([['--lines', true], ['--bytes', true]]),
+  wc: new Map([['--lines', false], ['--words', false], ['--bytes', false], ['--chars', false]]),
+};
+/** Short-flag letters each program may be given, with digits (R1b). Programs not listed take no flags (sed and find are limited separately). */
+const SHORT: Readonly<Record<string, string>> = {
+  grep: 'niclLwxFEvhHmABC', egrep: 'niclLwxFEvhHmABC', fgrep: 'niclLwxFEvhHmABC', rg: 'niclwxFvmABC',
+  head: 'nc', tail: 'nc', wc: 'lwcm', ls: 'la1htrSF',
+};
+const FIND_PREDICATES: ReadonlySet<string> = new Set(['-name', '-iname', '-type', '-maxdepth', '-mindepth', '-path', '-ipath', '-size', '-mtime', '-newer', '-print', '-not', '-o', '-a']);
 
 /** The gate's privacy rule for a path, plus the run-records and sessions folders the agent loop's tools refuse (spec §4.5). */
 export function pathPrivacy(gate: Pick<ToolGate, 'privacy'>): PathPrivacy {
@@ -56,10 +78,13 @@ export function shellWords(s: string, platform: NodeJS.Platform): string[] | nul
   return words;
 }
 
+/** A shell by bare name, or at one of the standard folders: `./zsh` or `/work/proj/bash` is not trusted to be a shell (R1d). */
+const isShell = (word: string) => SHELLS.has(word) || SHELL_DIRS.some((dir) => word.startsWith(dir) && SHELLS.has(word.slice(dir.length)));
+
 /** The words the shell will run: `<shell> -c|-lc '<script>'`, as Codex sends commands, is unwrapped once. */
 function commandWords(command: string, platform: NodeJS.Platform): string[] | null {
   const words = shellWords(command, platform);
-  if (words?.length === 3 && SHELLS.has(words[0].split('/').pop() ?? '') && (words[1] === '-c' || words[1] === '-lc')) return shellWords(words[2], platform);
+  if (words?.length === 3 && isShell(words[0]) && (words[1] === '-c' || words[1] === '-lc')) return shellWords(words[2], platform);
   return words;
 }
 
@@ -67,25 +92,27 @@ const namesAgentStream = (word: string) => word.split(/[\\/]/).some((part) => pa
 
 /** The per-program limits of R1: nothing that writes, runs another program, never ends, or ignores ignore rules. */
 function programAllows([program, ...args]: string[]): boolean {
-  const flags = args.filter((a) => a.startsWith('-') && a !== '-');
-  const short = (letters: string) => flags.some((f) => !f.startsWith('--') && [...f.slice(1)].some((ch) => letters.includes(ch)));
-  const long = (re: RegExp) => flags.some((f) => re.test(f));
-  switch (program) {
-    case 'find':
-      return !args.some((a) => FIND_ACTIONS.has(a));
-    case 'sed':
-      return args.length >= 3 && args[0] === '-n' && /^\d+(,\d+)?p$/.test(args[1]) && args.slice(2).every((a) => !a.startsWith('-'));
-    case 'rg':
-      return !short('u.z') && !long(/^--(pre|pre-glob|hidden|no-ignore[\w-]*|unrestricted|search-zip)(=|$)/);
-    case 'grep':
-    case 'egrep':
-    case 'fgrep':
-      return !short('rRd') && !long(/^--(recursive|dereference-recursive|directories)(=|$)/);
-    case 'tail':
-      return !short('fF') && !long(/^--(follow|retry)(=|$)/);
-    default:
-      return true;
-  }
+  if (program === 'find') return args.every((a) => !a.startsWith('-') || FIND_PREDICATES.has(a));
+  if (program === 'sed') return args.length >= 3 && args[0] === '-n' && /^\d+(,\d+)?p$/.test(args[1]) && args.slice(2).every((a) => !a.startsWith('-'));
+  // Flag-looking words on Windows (PowerShell's `-Path:x`) fail these letter and name lists too, so they ask (R1i).
+  const longs = LONG[program];
+  const letters = SHORT[program] ?? '';
+  return args.every((a) => {
+    if (a === '-' || !a.startsWith('-')) return true;
+    if (a.startsWith('--')) {
+      const [name, value, ...more] = a.split('=');
+      const numeric = longs?.get(name);
+      return numeric !== undefined && more.length === 0 && (value === undefined || (numeric && /^\d+$/.test(value)));
+    }
+    return [...a.slice(1)].every((ch) => letters.includes(ch) || /\d/.test(ch));
+  });
+}
+
+/** `<…>/.agent-stream/runs/<run>/nodes/<node>/output.md`: the one file under .agent-stream a step may read (the privacy check has vetted it). */
+function isUpstreamOutputPath(path: string): boolean {
+  const parts = path.toLowerCase().split(/[\\/]/);
+  const i = parts.length - 6;
+  return i >= 0 && parts[i] === '.agent-stream' && parts[i + 1] === 'runs' && parts[i + 3] === 'nodes' && parts[i + 5] === 'output.md';
 }
 
 /**
@@ -103,23 +130,30 @@ export function classifyCommand(p: CommandExecutionRequestApprovalParams, o: { c
     const reason = o.privacy(resolve(cwd, path), a.type === 'read' ? 'read' : 'search');
     if (reason) return { kind: 'private', reason };
   }
-  const special = (text: string) => SPECIAL.test(text) || (o.platform === 'win32' ? text.includes(',') : text.includes('\\'));
+  const special = (text: string) => SPECIAL.test(text) || NON_ASCII.test(text) || (o.platform === 'win32' ? text.includes(',') : text.includes('\\'));
   const command = p.command ?? '';
+  let namesAgentStreamOperand = false;
   const words = special(command) ? null : commandWords(command, o.platform);
   if (words && words.length > 0 && PROGRAMS.has(words[0])) {
     // The actions are a best-effort parse: `cat notes.txt <values file>` reports one read of notes.txt.
     const kind: PathKind = SEARCHERS.has(words[0]) ? 'search' : 'read';
-    const paths = words.slice(1).filter((w) => !w.startsWith('-')).map((w) => resolve(cwd, w));
+    let operands = words.slice(1).filter((w) => !w.startsWith('-'));
+    // A search pattern is not a path (R1f), unless -e or -f makes the operands something else.
+    const patternFirst = (words[0] === 'rg' || GREPS.has(words[0])) && !words.slice(1).some((w) => /^-[^-]*[ef]/.test(w));
+    if (patternFirst) operands = operands.slice(1);
+    const paths = operands.map((w) => resolve(cwd, w));
     if (kind === 'search') paths.push(resolve(cwd));
     for (const path of paths) {
       const reason = o.privacy(path, kind);
       if (reason) return { kind: 'private', reason };
     }
+    // Any other .agent-stream path (another project's values, worktrees, ...) asks, bar an upstream output.md (R1g).
+    namesAgentStreamOperand = paths.some((path) => namesAgentStream(path) && !isUpstreamOutputPath(path));
   }
   if ((p.kind ?? 'command') !== 'command' || p.additionalPermissions || p.networkApprovalContext) return ASK;
   if (actions.length === 0 || !actions.every((a) => READ_ACTIONS.has(a.type)) || actions.some((a) => special(a.command))) return ASK;
   if (!words || words.length === 0 || !PROGRAMS.has(words[0]) || words.some((w) => w.startsWith('='))) return ASK;
-  if (!programAllows(words)) return ASK;
+  if (namesAgentStreamOperand || !programAllows(words)) return ASK;
   if ((words[0] === 'rg' || GREPS.has(words[0])) && words.slice(1).some(namesAgentStream)) return ASK;
   return { kind: 'readOnly' };
 }

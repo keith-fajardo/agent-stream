@@ -167,6 +167,10 @@ describe('sanitizedCodexEnv', () => {
     expect(sanitizedCodexEnv(env)).toEqual({ PATH: '/bin', HOME: '/h' });
     expect(env.OPENAI_API_KEY).toBe('a');
   });
+
+  it('removes the ripgrep config path, which could make rg search hidden and ignored folders', () => {
+    expect(sanitizedCodexEnv({ PATH: '/bin', RIPGREP_CONFIG_PATH: '/h/.ripgreprc', ripgrep_config_path: 'x' })).toEqual({ PATH: '/bin' });
+  });
 });
 
 describe('codexSpawnSpec', () => {
