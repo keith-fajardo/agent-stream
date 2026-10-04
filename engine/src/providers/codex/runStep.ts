@@ -44,9 +44,11 @@ function patchResult(item: Extract<ThreadItem, { type: 'fileChange' }>, declined
 }
 
 const SUMMARY_CHARS = 200;
-/** An item type Agent Stream doesn't know (an MCP tool call, a web search): its fields but id, type and status, clipped. Never its whole payload. */
+/** Fields that carry what an item produced, which may be a file's content: never in a summary. */
+const RESULT_FIELDS = new Set(['id', 'type', 'status', 'result', 'output', 'aggregatedOutput', 'content', 'contentItems']);
+/** An item type Agent Stream doesn't know (an MCP tool call, a web search): its other fields, clipped. Never its whole payload or result. */
 function itemSummary(item: Record<string, unknown>): string {
-  const { id: _id, type: _type, status: _status, ...rest } = item;
+  const rest = Object.fromEntries(Object.entries(item).filter(([key]) => !RESULT_FIELDS.has(key)));
   const text = JSON.stringify(rest) ?? '';
   return text.length > SUMMARY_CHARS ? `${text.slice(0, SUMMARY_CHARS)}…` : text;
 }

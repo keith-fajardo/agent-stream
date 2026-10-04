@@ -338,6 +338,8 @@ describe('stepItemEvents', () => {
     const search = { type: 'webSearch', id: 'w1', query: 'codex docs' } as unknown as ThreadItem;
     expect(stepItemEvents('started', search, none)).toEqual([{ type: 'tool_call', toolUseId: 'w1', name: 'webSearch', input: { summary: '{"query":"codex docs"}' } }]);
     expect(stepItemEvents('completed', search, none)).toEqual([{ type: 'tool_result', toolUseId: 'w1', content: 'done', isError: false }]);
+    const output = { type: 'functionCallOutput', id: 'f1', callId: 'c1', output: 'SECRETMARK', result: 'SECRETMARK', content: ['SECRETMARK'] } as unknown as ThreadItem;
+    expect(stepItemEvents('started', output, none)).toEqual([{ type: 'tool_call', toolUseId: 'f1', name: 'functionCallOutput', input: { summary: '{"callId":"c1"}' } }]);
   });
 
   it('skips empty text, other phases and item types it does not show', () => {
