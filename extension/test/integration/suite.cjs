@@ -97,6 +97,26 @@ exports.run = async function run() {
   await config().update('provider', undefined, vscode.ConfigurationTarget.Global);
   await waitFor(() => api.engines.status.provider === 'claude' && api.engines.status.label !== 'checking', 'the Claude status again');
 
+  // OpenAI Codex is selectable. agentStream.codexPath points at a file that doesn't exist, so no real Codex starts,
+  // even on a machine that has one (R20): its status says so, and a run is refused with that reason.
+  const noCodex = path.join(os.tmpdir(), `agent-stream-no-codex-${crypto.randomUUID()}`, process.platform === 'win32' ? 'codex.exe' : 'codex');
+  await config().update('codexPath', noCodex, vscode.ConfigurationTarget.Global);
+  await config().update('provider', 'codex', vscode.ConfigurationTarget.Global);
+  await waitFor(() => api.engines.status.provider === 'codex' && api.engines.status.label !== 'checking', 'the Codex status');
+  assert.equal(api.engines.status.label, 'Codex: not found');
+  assert.equal(api.engines.status.error, `agentStream.codexPath points to ${noCodex}, which doesn't exist or can't be run.`);
+  {
+    const probe = [];
+    const probeClient = { send: (m) => probe.push(m) };
+    const detachProbe = app.connect(probeClient);
+    await app.handle(probeClient, { type: 'startRun', graphId: 'demo', reviewed: 'x' });
+    assert.equal(probe.find((m) => m.type === 'error').message, `Runs are disabled: ${api.engines.status.error}`);
+    detachProbe();
+  }
+  await config().update('provider', undefined, vscode.ConfigurationTarget.Global);
+  await config().update('codexPath', undefined, vscode.ConfigurationTarget.Global);
+  await waitFor(() => api.engines.status.provider === 'claude' && api.engines.status.label !== 'checking', 'the Claude status after Codex');
+
   // Work sessions: the tab set comes back per session, and conversations stay apart.
   const uriOf = (id) => vscode.Uri.joinPath(wf.uri, '.agent-stream', 'graphs', `${id}.json`);
   await vscode.commands.executeCommand('vscode.openWith', uriOf('second'), 'agentStream.graph', { viewColumn: vscode.ViewColumn.Two, preview: false });

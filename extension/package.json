@@ -1,8 +1,8 @@
 {
   "name": "agent-stream",
   "displayName": "Agent Stream",
-  "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude or GitHub Copilot.",
-  "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot"],
+  "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude, GitHub Copilot or OpenAI Codex.",
+  "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot", "codex", "openai"],
   "version": "0.2.0",
   "publisher": "agent-stream-local",
   "license": "MIT",
@@ -31,11 +31,12 @@
       "properties": {
         "agentStream.provider": {
           "type": "string",
-          "enum": ["claude", "copilot"],
+          "enum": ["claude", "copilot", "codex"],
           "default": "claude",
           "enumDescriptions": [
             "Claude: your Claude subscription through Claude Code.",
-            "GitHub Copilot: your Copilot plan through VS Code's Language Model API."
+            "GitHub Copilot: your Copilot plan through VS Code's Language Model API.",
+            "OpenAI Codex: your ChatGPT subscription through the Codex CLI."
           ],
           "description": "The AI provider that runs agent steps and the planner."
         },
@@ -43,6 +44,11 @@
           "type": "string",
           "default": "",
           "description": "Full path to Claude Code (claude, or claude.exe on Windows). Leave empty to find it automatically. Claude provider only."
+        },
+        "agentStream.codexPath": {
+          "type": "string",
+          "default": "",
+          "description": "Full path to the Codex CLI (codex, or codex.exe or codex.cmd on Windows). Leave empty to find it automatically. OpenAI Codex provider only."
         },
         "agentStream.gitBashPath": {
           "type": "string",
@@ -52,7 +58,7 @@
         "agentStream.model": {
           "type": "string",
           "default": "",
-          "description": "The model agent steps in runs use, and planner conversations that haven't chosen their own (an alias such as sonnet, or a full model id). Leave empty for the provider's default (Claude Code's default; Auto on Copilot). Agent Stream: Select Model lists the models."
+          "description": "The model agent steps in runs use, and planner conversations that haven't chosen their own (an alias such as sonnet, or a full model id). Leave empty for the provider's default (Claude Code's default; Auto on Copilot; Codex's default model on Codex). Agent Stream: Select Model lists the models."
         },
         "agentStream.effort": {
           "type": "string",

@@ -14,7 +14,7 @@ import { parallelCommands, realParallelFs } from './parallelTickets';
 import { runCommands } from './runCommands';
 import { selectModel } from './selectModel';
 import { selectProvider } from './selectProvider';
-import { readSettings } from './settings';
+import { affectsProvider, readSettings } from './settings';
 import { SessionManager, sessionStatusFolder, type GraphTabInfo } from './sessions';
 import { SessionItem, SessionsView } from './sessionsView';
 import { sessionStatusText, signInDetails, statusBarText } from './statusBar';
@@ -375,7 +375,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }),
     ),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('agentStream.provider') || e.affectsConfiguration('agentStream.claudePath')) void manager.checkProvider();
+      if (affectsProvider(e)) void manager.checkProvider();
       // Runs and planner turns read the defaults when they start; only the tooltip needs refreshing.
       else if (e.affectsConfiguration('agentStream.model') || e.affectsConfiguration('agentStream.effort')) {
         showAuth(manager.status);

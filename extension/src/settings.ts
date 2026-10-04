@@ -40,3 +40,10 @@ export function readSettings(): Settings {
     copilotMaxRequestsPerTurn: intSetting(config.get('copilot.maxRequestsPerTurn', 100), 1, 100, 100),
   };
 }
+
+/** The settings that pick the provider or say where its CLI is: changing one re-checks the provider. */
+export const PROVIDER_SETTINGS: readonly string[] = ['agentStream.provider', 'agentStream.claudePath', 'agentStream.codexPath'];
+
+export function affectsProvider(e: { affectsConfiguration(section: string): boolean }): boolean {
+  return PROVIDER_SETTINGS.some((section) => e.affectsConfiguration(section));
+}

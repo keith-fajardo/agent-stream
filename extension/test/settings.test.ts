@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { readSettings } from '../src/settings';
+import { affectsProvider, readSettings } from '../src/settings';
 
 describe('readSettings', () => {
   it('trims paths and keeps maxParallel within 1–16', () => {
@@ -74,5 +74,25 @@ describe('readSettings', () => {
     expect(readSettings().codexPath).toBe('/opt/codex');
     values.codexPath = undefined;
     expect(readSettings().codexPath).toBe('');
+  });
+});
+
+describe('the Codex settings', () => {
+  it('declares OpenAI Codex as a provider, and its path setting', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const props = manifest.contributes.configuration.properties;
+    expect(props['agentStream.provider'].enum).toEqual(['claude', 'copilot', 'codex']);
+    expect(props['agentStream.provider'].enumDescriptions).toHaveLength(3);
+    expect(props['agentStream.provider'].enumDescriptions[2]).toBe('OpenAI Codex: your ChatGPT subscription through the Codex CLI.');
+    expect(props['agentStream.codexPath']).toMatchObject({ type: 'string', default: '' });
+    expect(manifest.description).toContain('OpenAI Codex');
+  });
+
+  it('re-checks the provider when the provider or a CLI path changes, not for other settings', () => {
+    const changed = (...keys: string[]) => ({ affectsConfiguration: (section: string) => keys.includes(section) });
+    expect(affectsProvider(changed('agentStream.codexPath'))).toBe(true);
+    expect(affectsProvider(changed('agentStream.claudePath'))).toBe(true);
+    expect(affectsProvider(changed('agentStream.provider'))).toBe(true);
+    expect(affectsProvider(changed('agentStream.model', 'agentStream.effort'))).toBe(false);
   });
 });

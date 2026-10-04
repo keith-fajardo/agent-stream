@@ -34,6 +34,16 @@ describe('statusBarText', () => {
   it('shows the check in progress', () => {
     expect(statusBarText(checkingStatus({ id: 'claude', name: 'Claude' })).text).toBe('$(sync~spin) Agent Stream');
   });
+  it('shows Codex with its plan, and why it cannot run', () => {
+    expect(statusBarText({ provider: 'codex', ok: true, label: 'Codex (Plus)', detail: 'Signed in with ChatGPT.' })).toEqual({
+      text: '$(check) Codex (Plus)',
+      tooltip: 'Agent Stream runs on Codex (Plus) (Signed in with ChatGPT.).',
+    });
+    expect(statusBarText({ provider: 'codex', ok: false, label: 'Codex: API key', error: 'Agent Stream uses your ChatGPT subscription for Codex.' })).toEqual({
+      text: '$(warning) Agent Stream: Codex: API key',
+      tooltip: 'Agent Stream uses your ChatGPT subscription for Codex.',
+    });
+  });
 });
 
 describe('sessionStatusText', () => {

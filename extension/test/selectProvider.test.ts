@@ -30,3 +30,19 @@ describe('selectProvider', () => {
     expect(pickSame.recheck).toHaveBeenCalled();
   });
 });
+
+describe('selectProvider with OpenAI Codex', () => {
+  const codex = {
+    id: 'codex' as const,
+    name: 'OpenAI Codex',
+    status: async (): Promise<ProviderStatus> => ({ provider: 'codex', ok: false, label: 'Codex: not signed in', error: 'Run codex login in a terminal and sign in with ChatGPT.' }),
+  };
+
+  it('lists Codex with its status, and writes it when picked', async () => {
+    const pick = vi.fn(async (items: { id: string }[]) => items.find((i) => i.id === 'codex'));
+    const write = vi.fn(async () => {});
+    await selectProvider({ providers: [claude, copilot, codex], current: () => 'claude', pick, write, recheck: vi.fn(async () => {}) } as never);
+    expect(pick.mock.calls[0][0][2]).toEqual({ id: 'codex', label: 'OpenAI Codex', description: 'Codex: not signed in', detail: 'Run codex login in a terminal and sign in with ChatGPT.' });
+    expect(write).toHaveBeenCalledWith('codex');
+  });
+});
