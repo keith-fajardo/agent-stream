@@ -19,7 +19,7 @@ export function parseChain(text: string): { ok: true; ids: string[] } | { ok: fa
   };
   const readRef = (): string | { error: string } => {
     const start = i;
-    while (i < text.length && ID_CHAR_RE.test(text[i]) && !text.startsWith('-->', i)) i++;
+    while (i < text.length && ID_CHAR_RE.test(text[i]) && !(text[i] === '-' && /[-.=]/.test(text[i + 1] ?? ''))) i++;
     if (i === start) return { error: `"${text.slice(i).trim()}" isn't a step id. ${ONLY_ARROWS}` };
     const id = text.slice(start, i);
     const open = text[i];
@@ -43,6 +43,7 @@ export function parseChain(text: string): { ok: true; ids: string[] } | { ok: fa
     if (!text.startsWith('-->', i) || next === '-' || next === '>' || next === '|') return { ok: false, error: `"${text.slice(i).trim()}" isn't supported. ${ONLY_ARROWS}` };
     i += 3;
     skipSpace();
+    if (i >= text.length) return { ok: false, error: 'an arrow at the end of the line has no step after it.' };
   }
 }
 

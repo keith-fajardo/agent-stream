@@ -14,10 +14,19 @@ describe('parseChain', () => {
     expect(parseChain('n1')).toEqual({ ok: true, ids: ['n1'] });
   });
 
+  it('reads arrows written without spaces', () => {
+    for (const text of ['n1-->n2', 'n1 -->n2', 'n1--> n2', 'n1["A"]-->n2["B"]', 'n1("A")-->n2;']) {
+      expect(parseChain(text)).toEqual({ ok: true, ids: ['n1', 'n2'] });
+    }
+    expect(parseChain('a-b-->a-b2-->step_4')).toEqual({ ok: true, ids: ['a-b', 'a-b2', 'step_4'] });
+  });
+
   it('refuses other Mermaid links and shapes', () => {
-    for (const text of ['n1 -.-> n2', 'n1 ==> n2', 'n1 -->|yes| n2', 'n1 --- n2', 'n1 & n2 --> n3', 'n1 ---> n2', 'n1{"x"} --> n2', 'n1 -- text --> n2']) {
+    for (const text of ['n1 -.-> n2', 'n1 ==> n2', 'n1 -->|yes| n2', 'n1 --- n2', 'n1 & n2 --> n3', 'n1 ---> n2', 'n1{"x"} --> n2', 'n1 -- text --> n2', 'n1 <--> n2', 'n1 --o n2', 'n1 --x n2', 'n1:::cls --> n2', 'n1 --> n2; n3', 'n1--->n2', 'n1---n2', 'n1-.->n2', 'n1==>n2', 'n1 --- n2']) {
       expect(parseChain(text)).toMatchObject({ ok: false, error: expect.stringContaining(ONLY_ARROWS) });
     }
+    expect(parseChain('n1 -->')).toEqual({ ok: false, error: 'an arrow at the end of the line has no step after it.' });
+    expect(parseChain('n1 --> ;')).toMatchObject({ ok: false });
     expect(parseChain('n1["open --> n2')).toEqual({ ok: false, error: 'the label after n1 isn\'t closed. Write it as n1["Title"].' });
   });
 });
@@ -49,6 +58,17 @@ describe('parseFlow', () => {
       { line: 20, message: `"==> n3" isn't supported. ${ONLY_ARROWS}` },
     ]);
     expect(r.edges).toEqual([{ from: 'n1', to: 'n2', line: 15 }]);
+  });
+
+  it('refuses the other Mermaid statements by keyword', () => {
+    for (const kw of ['style n1 fill:#f00', 'linkStyle 0 stroke:red', 'click n1 call f()', 'class n1 x', 'direction LR']) {
+      expect(flow('flowchart LR', kw).errors).toEqual([{ line: 12, message: `"${kw.split(' ')[0]}" isn't supported in the Flow. ${ONLY_ARROWS}` }]);
+    }
+  });
+
+  it('reads unspaced arrows in a block, and names an unsupported link rather than an unknown id', () => {
+    expect(flow('flowchart LR', 'n1-->n2').edges).toEqual([{ from: 'n1', to: 'n2', line: 12 }]);
+    expect(flow('flowchart LR', 'n1--->n2').errors).toEqual([{ line: 12, message: `"--->n2" isn't supported. ${ONLY_ARROWS}` }]);
   });
 
   it('asks for the flowchart header, and for content in an empty block', () => {
