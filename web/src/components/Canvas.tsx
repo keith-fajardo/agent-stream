@@ -17,6 +17,8 @@ import {
 import { nextNodeId, type Op, type Position } from '@agent-stream/shared';
 import { changeKey } from '../changeLabels';
 import { buildFlowEdges, buildFlowNodes, GHOST_PREFIX } from '../flowNodes';
+import type { NodeSize } from '../layout';
+import { addsToSelection, deletionOps, MULTI_SELECT_KEYS, selectedForDelete } from '../selection';
 import { actions, registerCanvas } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
@@ -24,6 +26,7 @@ import { dispatch, useStore } from '../store';
 import { StepNode, type StepFlowNode } from './StepNode';
 
 const nodeTypes = { step: StepNode };
+const MULTI_KEY = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 export function Canvas() {
   const graph = useStore((s) => s.graph);
@@ -33,7 +36,7 @@ export function Canvas() {
   const approvals = useStore((s) => s.approvals);
   const selectedId = useStore((s) => s.selectedNodeId);
   const minimap = useStore((s) => s.minimap);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getNodes } = useReactFlow<StepFlowNode, FlowEdge>();
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
@@ -65,8 +68,14 @@ export function Canvas() {
   );
 
   const addInView = useRef<() => void>(() => {});
+  // Tidy lays steps out by their rendered size, so tall steps don't touch.
+  const measuredSizes = useRef(() => {
+    const sizes = new Map<string, NodeSize>();
+    for (const n of getNodes()) if (n.measured?.width && n.measured.height) sizes.set(n.id, { width: n.measured.width, height: n.measured.height });
+    return sizes;
+  });
   useEffect(() => {
-    registerCanvas({ addStepInView: () => addInView.current() });
+    registerCanvas({ addStepInView: () => addInView.current(), measuredSizes: () => measuredSizes.current() });
     return () => registerCanvas(undefined);
   }, []);
 
@@ -84,11 +93,9 @@ export function Canvas() {
     if (r) addAt(screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }));
   };
   addInView.current = addInCenter;
-  const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => {
-    const ids = new Set(deleted.map((n) => n.id));
-    for (const e of removed) if (!ids.has(e.source) && !ids.has(e.target)) op({ type: 'disconnect', from: e.source, to: e.target });
-    for (const id of ids) op({ type: 'deleteNode', id });
-  };
+  const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => deletionOps(deleted.map((n) => n.id), removed).forEach(op);
+  const selection = selectedForDelete(nodes, edges);
+  const deleteSelection = () => deletionOps(selection.nodeIds, selection.edges).forEach(op);
   const stale = runForGraph !== undefined && contentSignature(runForGraph.snapshot) !== contentSignature(graph);
 
   return (
@@ -102,6 +109,12 @@ export function Canvas() {
       <div className="canvas-toolbar">
         <button onClick={actions.addStep}>+ Step</button>
         <button onClick={actions.tidy}>Tidy</button>
+        {selection.count > 0 && (
+          <button className="danger" onClick={deleteSelection} title="Delete the selected steps and connections (Delete or Backspace)">
+            Delete ({selection.count})
+          </button>
+        )}
+        <span className="canvas-hint">{MULTI_KEY}-click or Shift-drag to select several</span>
         {stale && <span className="stale">Graph changed since this run started</span>}
       </div>
       <ReactFlow
@@ -123,13 +136,18 @@ export function Canvas() {
           })
         }
         // A ghost (a removed step or connection) can't be edited: clicking it opens its change instead.
-        onNodeClick={(_e, n) => n.data.ghost ? actions.selectChange(changeKey({ kind: 'node', id: n.data.node.id })) : dispatch({ kind: 'selectNode', id: n.id })}
+        onNodeClick={(e, n) => {
+          if (n.data.ghost) actions.selectChange(changeKey({ kind: 'node', id: n.data.node.id }));
+          // A Cmd/Ctrl/Shift click adds to the selection: React Flow handles it, and the side panel keeps its step.
+          else if (!addsToSelection(e)) dispatch({ kind: 'selectNode', id: n.id });
+        }}
         onEdgeClick={(_e, edge) => {
           if (edge.id.startsWith(GHOST_PREFIX)) actions.selectChange(changeKey({ kind: 'edge', id: edge.id.slice(GHOST_PREFIX.length) }));
         }}
         onPaneClick={() => dispatch({ kind: 'selectNode' })}
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}
+        multiSelectionKeyCode={MULTI_SELECT_KEYS}
         fitView
       >
         <Background />

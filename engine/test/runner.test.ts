@@ -1,6 +1,6 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyOp, emptyGraph, type CheckoutInfo, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
@@ -667,6 +667,35 @@ describe('Runner variant workspaces', () => {
     expect(ctx.prompt).toContain(`You are working in workspace "wh_a" at ${workspaces.wh_a.path}: a separate Git worktree of this repository at 0123456. Change files only there.`);
     fake.finish('n2');
     expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('runs a variant step in the same subfolder of its worktree as the opened folder is of its repository', async () => {
+    const { runner, fake, projectDir } = setup();
+    const workspaces = places('wh_a');
+    // The opened folder is a subfolder (e.g. analytics/dbt) of the repository root.
+    const repo: CheckoutInfo = { git: true, root: realpathSync(dirname(projectDir)), linkedWorktree: false, dirty: false, worktrees: [] };
+    const inWorktree = join(workspaces.wh_a.path, basename(projectDir));
+    mkdirSync(inWorktree);
+    const r = started(runner.start({ ...withRendered(graphOf([inWs('a', 'wh_a'), inWs('b', 'wh_a', 'command'), link('n1', 'n2')])), workspaces, checkout: repo }));
+    await tick();
+    expect(fake.contexts.get('n1')!.cwd).toBe(inWorktree);
+    expect(fake.contexts.get('n1')!.prompt).toContain(`You are working in workspace "wh_a" at ${inWorktree}:`);
+    fake.finish('n1');
+    await tick();
+    expect(fake.contexts.get('n2')!.cwd).toBe(inWorktree);
+    fake.finish('n2');
+    expect((await r.done).status).toBe('succeeded');
+  });
+
+  it('fails a variant step clearly when its subfolder is not in the worktree (not committed)', async () => {
+    const { runner, fake, projectDir } = setup();
+    const workspaces = places('wh_a');
+    const repo: CheckoutInfo = { git: true, root: realpathSync(dirname(projectDir)), linkedWorktree: false, dirty: false, worktrees: [] };
+    const r = started(runner.start({ ...withRendered(graphOf([inWs('a', 'wh_a')])), workspaces, checkout: repo }));
+    const done = await r.done;
+    expect(fake.started).toEqual([]);
+    expect(done.status).toBe('failed');
+    expect(done.nodes.n1.error).toContain(`Workspace "wh_a" has no ${basename(projectDir)} folder`);
   });
 
   it('runs write-capable steps of different workspaces in parallel, one at a time within each', async () => {

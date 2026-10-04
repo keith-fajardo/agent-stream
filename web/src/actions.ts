@@ -1,12 +1,12 @@
 import type { ApprovalRequest, ChangeTarget, HostCommand } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
-import { layoutPositions } from './layout';
+import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
 import type { State, Tab } from './state';
 import { dispatch, getState } from './store';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
-type CanvasActions = { addStepInView(): void };
+type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize> };
 let canvas: CanvasActions | undefined;
 export function registerCanvas(c: CanvasActions | undefined): void {
   canvas = c;
@@ -35,7 +35,7 @@ export const actions = {
   tidy(): void {
     const { graph } = getState();
     if (!graph) return;
-    for (const [id, position] of layoutPositions(graph, false)) send({ type: 'op', graphId: graph.id, op: { type: 'moveNode', id, position } });
+    for (const [id, position] of layoutPositions(graph, false, canvas?.measuredSizes())) send({ type: 'op', graphId: graph.id, op: { type: 'moveNode', id, position } });
   },
   run(): void {
     dispatch({ kind: 'openConfirm', request: {} });
