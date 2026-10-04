@@ -101,6 +101,28 @@ describe('graphFileChanged', () => {
     expect(store.get(id).nodes[0].position).toEqual({ x: 1, y: 1 });
   });
 
+  it.each([
+    ['with Windows line endings', (t: string) => t.replace(/\n/g, '\r\n')],
+    ['formatted by hand', (t: string) => t.replace('## Goal\n\nProve it.', '## Goal\nProve it.')],
+  ])('never writes over a broken hand edit when a step moves, in a file read fresh %s', (_how, reformat) => {
+    const { paths, id, md, text } = setup();
+    writeFileSync(md, reformat(text()));
+    const store = new GraphStore(paths, fixedClock());
+    expect(store.get(id).goal).toBe('Prove it.');
+    const now = readFileSync(md, 'utf8');
+    if (!now.includes('- kind: command')) throw new Error('no command step in the file');
+    const broken = now.replace('- kind: command', '- kind: robot');
+    writeFileSync(md, broken);
+    expect(store.graphFileChanged(id)).toBe('errors');
+    expect(store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 5, y: 6 } }, 'user').ok).toBe(true);
+    expect(readFileSync(md, 'utf8')).toBe(broken);
+    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }]);
+    expect(store.load(id).ok).toBe(true);
+    expect(store.graphFileChanged(id)).toBe('errors');
+    expect(readFileSync(md, 'utf8')).toBe(broken);
+    expect(store.fileErrors(id)).toHaveLength(1);
+  });
+
   it('applies all of an edit or none of it', () => {
     const { store, id, edit, text } = setup();
     const before = store.readOps(id).length;

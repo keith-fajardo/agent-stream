@@ -510,7 +510,8 @@ export class GraphStore extends EventEmitter {
 
   /**
    * Writes the graph in canonical form (spec §4.3), each file as a temp file renamed into place: the side file first,
-   * then the Markdown. A file whose text wouldn't change isn't rewritten, so a move leaves the Markdown alone.
+   * then the Markdown. A file whose text wouldn't change isn't rewritten, so a move leaves the Markdown alone. While the
+   * Markdown file has errors only the side file is written: the user's unfinished hand edit is never overwritten.
    */
   private save(graph: Graph): Graph {
     const g = canonicalGraph(graph);
@@ -520,6 +521,11 @@ export class GraphStore extends EventEmitter {
     const metaPath = this.metaFile(g.id);
     const cached = this.cache.get(g.id);
     if (cached?.metaText !== metaText || !existsSync(metaPath)) writeFileAtomic(metaPath, metaText);
+    if (cached?.broken || this.fileErrors(g.id).length) {
+      // The cache keeps the text and broken state it had, so the file is still told apart from the store's own saves.
+      if (cached) this.cache.set(g.id, { ...cached, graph: g, metaText, meta: stampOf(metaPath) });
+      return g;
+    }
     if (cached?.text !== text || !existsSync(mdPath)) writeFileAtomic(mdPath, text);
     this.written.set(g.id, text);
     this.cache.set(g.id, { graph: g, text, metaText, md: stampOf(mdPath)!, meta: stampOf(metaPath) });
