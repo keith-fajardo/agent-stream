@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { builtinTools, clipResult, readOnlyTools, toolPath, type LoopTool } from '../src/agentLoop/tools';
+import { builtinTools, clipResult, privateFolderDenial, privateFolderWriteDenial, readOnlyTools, toolPath, type LoopTool } from '../src/agentLoop/tools';
 import { createRunShell, type RunShell, type RunShellResult } from '../src/shell';
 
 const signal = new AbortController().signal;
@@ -470,5 +470,16 @@ describe('fix round 1', () => {
     mkdirSync(dir, { recursive: true });
     symlinkSync(join(cwd, '.agent-stream', 'runs', 'r1', 'run.json'), join(dir, 'output.md'));
     expect(await run(cwd, 'Read', { file_path: '.agent-stream/runs/r1/nodes/n1/output.md' })).toEqual(refusal);
+  });
+});
+
+describe('privateFolderWriteDenial', () => {
+  it('refuses writes to an existing upstream output.md that privateFolderDenial lets a step read', () => {
+    const cwd = project({ '.agent-stream/runs/r1/nodes/n1/output.md': 'x' });
+    const out = join(cwd, '.agent-stream', 'runs', 'r1', 'nodes', 'n1', 'output.md');
+    expect(privateFolderDenial(out)).toBeNull();
+    expect(privateFolderWriteDenial(out)).toMatch(/run records and sessions/);
+    expect(privateFolderWriteDenial(join(cwd, '.agent-stream', 'sessions', 's1.json'))).not.toBeNull();
+    expect(privateFolderWriteDenial(join(cwd, 'src', 'a.ts'))).toBeNull();
   });
 });

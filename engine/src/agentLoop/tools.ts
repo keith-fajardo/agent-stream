@@ -90,6 +90,11 @@ export function privateFolderDenial(resolved: string): string | null {
   return refusedFile(resolved) ? PRIVATE_FOLDER : null;
 }
 
+/** Why a resolved path in `.agent-stream/runs` or `.agent-stream/sessions` may not be changed: like Edit and Write, with no upstream output.md exception. */
+export function privateFolderWriteDenial(resolved: string): string | null {
+  return isPrivatePath(resolved) ? PRIVATE_FOLDER : null;
+}
+
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 /** Agent Stream's own private folders, skipped wherever a `.agent-stream` folder is met. */
 const AGENT_STREAM_PRIVATE = new Set(['runs', 'sessions']);

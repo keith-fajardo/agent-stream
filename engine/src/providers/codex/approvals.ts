@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { LoopTool } from '../../agentLoop/tools';
+import { privateFolderWriteDenial, type LoopTool } from '../../agentLoop/tools';
 import type { ToolDecision, ToolGate } from '../toolGate';
 import { CodexRpcError, UNSUPPORTED_REQUEST } from './connection';
 import type {
@@ -66,11 +66,13 @@ export function createServerRequestHandler(c: ApprovalContext): (method: string,
   async function fileChange(p: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse> {
     if (p.grantRoot) return settle(p.itemId, { allow: false, reason: grantRootDeclined(p.grantRoot) });
     const changes = c.fileChanges.get(p.itemId);
-    if (!changes) return settle(p.itemId, { allow: false, reason: UNNAMED_CHANGE });
+    if (!changes || changes.length === 0) return settle(p.itemId, { allow: false, reason: UNNAMED_CHANGE });
     for (const ch of changes) {
       const paths = ch.kind.type === 'update' && ch.kind.move_path ? [ch.path, ch.kind.move_path] : [ch.path];
       for (const path of paths) {
-        const reason = privacy(resolve(c.cwd, path), 'read');
+        const full = resolve(c.cwd, path);
+        // The read rule (values files, run.json) plus the write rule: no upstream output.md exception, like Edit and Write (R26).
+        const reason = privacy(full, 'read') ?? privateFolderWriteDenial(full);
         if (reason) return settle(p.itemId, { allow: false, reason });
       }
     }
@@ -83,10 +85,11 @@ export function createServerRequestHandler(c: ApprovalContext): (method: string,
     const tool = c.tools.get(p.tool);
     if (!tool) return reply(`Unknown tool ${p.tool}.`, false);
     // Step graph tools self-approve (they ask the user with the exact change); planner graph tools pass by name.
-    const d = await c.gate.decide(tool.gateName, p.arguments, c.signal);
+    const args = p.arguments ?? {};
+    const d = await c.gate.decide(tool.gateName, args, c.signal);
     if (!d.allow) return reply(d.reason, false);
     try {
-      const out = await tool.run(p.arguments ?? {}, c.signal);
+      const out = await tool.run(args, c.signal);
       return reply(out.text, out.isError !== true);
     } catch (e) {
       return reply(e instanceof Error ? e.message : String(e), false);

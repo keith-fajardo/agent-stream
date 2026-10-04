@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Decision } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
@@ -169,6 +171,41 @@ describe('file changes', () => {
     expect(broker.pending()).toEqual([]);
   });
 
+  it('declines a change to an upstream output.md and a move into the runs folder without asking (R6a)', async () => {
+    const { gate, broker } = stepGate();
+    // A real file: a step may read an existing upstream output.md, but may not change it.
+    const root = mkdtempSync(join(tmpdir(), 'codex-approvals-'));
+    const out = join(root, '.agent-stream', 'runs', 'r1', 'nodes', 'n1', 'output.md');
+    mkdirSync(join(out, '..'), { recursive: true });
+    writeFileSync(out, 'x');
+    const { handle, fileChanges, declined } = handlerFor(gate, { cwd: root });
+    fileChanges.set('p-out', [{ path: out, kind: { type: 'update', move_path: null }, diff: '' }]);
+    expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p-out' })).toEqual({ decision: 'decline' });
+    expect(declined.get('p-out')).toMatch(/run records and sessions/);
+    fileChanges.set('p-mv', [{ path: resolve(cwd, 'a.ts'), kind: { type: 'update', move_path: resolve(cwd, '.agent-stream', 'runs', 'r1', 'x.md') }, diff: '' }]);
+    expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p-mv' })).toEqual({ decision: 'decline' });
+    expect(declined.has('p-mv')).toBe(true);
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('treats an empty change list as one Codex never named (R6b)', async () => {
+    const { gate, broker } = stepGate();
+    const { handle, fileChanges, declined } = handlerFor(gate);
+    fileChanges.set('empty', []);
+    expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'empty' })).toEqual({ decision: 'decline' });
+    expect(declined.get('empty')).toBe(UNNAMED_CHANGE);
+    expect(broker.pending()).toEqual([]);
+  });
+
+  it('declines a Patch without asking in a read-only step and in the planner', async () => {
+    for (const gate of [stepGate({ readOnly: true }).gate, plannerGate()]) {
+      const { handle, fileChanges, declined } = handlerFor(gate);
+      fileChanges.set('p1', changes);
+      expect(await handle('item/fileChange/requestApproval', { ...at, itemId: 'p1' })).toEqual({ decision: 'decline' });
+      expect(declined.get('p1')).toBeTruthy();
+    }
+  });
+
   it('lists each change with its kind, and a move target', () => {
     expect(
       toPatchChanges([
@@ -202,6 +239,18 @@ describe('other requests', () => {
     run.mockResolvedValueOnce({ text: 'No such step.', isError: true });
     expect(await call('add_step')).toEqual({ contentItems: [{ type: 'inputText', text: 'No such step.' }], success: false });
     expect(await call('nope')).toEqual({ contentItems: [{ type: 'inputText', text: 'Unknown tool nope.' }], success: false });
+  });
+
+  it('passes the same arguments to the gate and the tool, and reports a throw as a failure (R6c)', async () => {
+    const run = vi.fn(async (_input: unknown, _signal: AbortSignal): Promise<{ text: string }> => {
+      throw new Error('boom');
+    });
+    const tool: LoopTool = { spec: { name: 't', description: '', inputSchema: {} }, gateName: 't', run };
+    const gate: ToolGate = { ...plannerGate(['t']), decide: vi.fn(async () => ({ allow: true as const, by: 'graphTool' as const })) };
+    const { handle } = handlerFor(gate, { tools: new Map([['t', tool]]) });
+    expect(await handle('item/tool/call', { ...at, callId: 'c', namespace: null, tool: 't', arguments: null })).toEqual({ contentItems: [{ type: 'inputText', text: 'boom' }], success: false });
+    expect(gate.decide).toHaveBeenCalledWith('t', {}, expect.any(AbortSignal));
+    expect(run).toHaveBeenCalledWith({}, expect.any(AbortSignal));
   });
 
   it("lets the planner gate decide on graph tools by their plain names", async () => {
