@@ -1,7 +1,8 @@
 /**
  * The Codex app-server messages Agent Stream uses (spec §4.1), copied by hand from
  * `codex app-server generate-ts --experimental` for codex-cli 0.160.0. Only the fields we send or read: the server sends
- * more, and other item types, which are ignored. Nothing reads the generated files at runtime.
+ * more, and other item types, which the step log shows by type and a short summary (RF1). Nothing reads the generated
+ * files at runtime.
  */
 export const CODEX_PROTOCOL_VERSION = '0.160.0';
 

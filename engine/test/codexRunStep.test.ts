@@ -7,7 +7,7 @@ import type { NodeContext } from '../src/executors';
 import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from '../src/providers/toolGate';
 import type { GraphTool } from '../src/providers/types';
 import { codexRunStep, stepItemEvents, stepPreamble, type CodexRunDeps } from '../src/providers/codex/runStep';
-import type { CommandAction } from '../src/providers/codex/protocol';
+import type { CommandAction, ThreadItem } from '../src/providers/codex/protocol';
 import {
   agentMessage,
   approvalParams,
@@ -309,6 +309,23 @@ describe('stepItemEvents', () => {
     expect(stepItemEvents('completed', commandItem({ id: 'c3', command: 'x', status: 'failed', output: 'boom', exitCode: 2 }), declined)).toEqual([{ type: 'tool_result', toolUseId: 'c3', content: 'boom\nexit 2', isError: true }]);
     const [long] = stepItemEvents('completed', commandItem({ id: 'c4', command: 'x', status: 'completed', output: 'x'.repeat(40_000), exitCode: 0 }), declined);
     expect(long.type === 'tool_result' && long.content.length).toBeLessThan(31_000);
+  });
+
+  it('logs an item type it does not know as a tool call named after the type, with a short summary, and its end (RF1)', () => {
+    const none = new Map<string, string>();
+    const mcp = { type: 'mcpToolCall', id: 'm1', server: 'files', tool: 'read', status: 'inProgress', arguments: { path: 'x'.repeat(500) }, result: null, error: null } as unknown as ThreadItem;
+    const [call] = stepItemEvents('started', mcp, none);
+    expect(call).toMatchObject({ type: 'tool_call', toolUseId: 'm1', name: 'mcpToolCall' });
+    const summary = call.type === 'tool_call' ? (call.input as { summary: string }).summary : '';
+    expect(summary.startsWith('{"server":"files","tool":"read","arguments":{"path":"xxx')).toBe(true);
+    expect(summary.length).toBeLessThanOrEqual(201);
+    const done = { ...mcp, status: 'completed', result: { content: [{ type: 'text', text: 'SECRETMARK' }] } } as unknown as ThreadItem;
+    expect(stepItemEvents('completed', done, none)).toEqual([{ type: 'tool_result', toolUseId: 'm1', content: 'completed', isError: false }]);
+    const failed = { ...mcp, status: 'failed' } as unknown as ThreadItem;
+    expect(stepItemEvents('completed', failed, none)).toEqual([{ type: 'tool_result', toolUseId: 'm1', content: 'failed', isError: true }]);
+    const search = { type: 'webSearch', id: 'w1', query: 'codex docs' } as unknown as ThreadItem;
+    expect(stepItemEvents('started', search, none)).toEqual([{ type: 'tool_call', toolUseId: 'w1', name: 'webSearch', input: { summary: '{"query":"codex docs"}' } }]);
+    expect(stepItemEvents('completed', search, none)).toEqual([{ type: 'tool_result', toolUseId: 'w1', content: 'done', isError: false }]);
   });
 
   it('skips empty text, other phases and item types it does not show', () => {

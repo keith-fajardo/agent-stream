@@ -43,10 +43,27 @@ function patchResult(item: Extract<ThreadItem, { type: 'fileChange' }>, declined
   return `changed ${item.changes.map((c) => c.path).join(', ')}`;
 }
 
+const SUMMARY_CHARS = 200;
+/** An item type Agent Stream doesn't know (an MCP tool call, a web search): its fields but id, type and status, clipped. Never its whole payload. */
+function itemSummary(item: Record<string, unknown>): string {
+  const { id: _id, type: _type, status: _status, ...rest } = item;
+  const text = JSON.stringify(rest) ?? '';
+  return text.length > SUMMARY_CHARS ? `${text.slice(0, SUMMARY_CHARS)}…` : text;
+}
+
+/** An item Codex ran that Agent Stream doesn't know, logged so nothing runs out of the log's sight (RF1): a tool call named after its type, then how it ended. */
+function unknownItemEvents(phase: 'started' | 'completed', item: Record<string, unknown>): NodeEventBody[] {
+  const id = typeof item.id === 'string' ? item.id : '';
+  const type = typeof item.type === 'string' ? item.type : 'unknown';
+  if (phase === 'started') return [{ type: 'tool_call', toolUseId: id, name: type, input: { summary: itemSummary(item) } }];
+  const status = typeof item.status === 'string' ? item.status : undefined;
+  return [{ type: 'tool_result', toolUseId: id, content: status ?? 'done', isError: status === 'failed' || status === 'declined' }];
+}
+
 /** A change to a private path is logged by path and kind only: Codex builds its diff from the file's current content. */
 const withoutDiff = ({ diff: _diff, ...rest }: PatchChange): Omit<PatchChange, 'diff'> => rest;
 
-/** One item as step log events (spec §4.6): text when an item completes, a tool call when it starts and its result when it completes. */
+/** One item as step log events (spec §4.6): text when an item completes, a tool call when it starts and its result when it completes; an item type it doesn't know too (RF1). */
 export function stepItemEvents(phase: 'started' | 'completed', item: ThreadItem, declined: ReadonlyMap<string, string>, isPrivate: (change: FileUpdateChange) => boolean = () => false): NodeEventBody[] {
   switch (item.type) {
     case 'agentMessage':
@@ -67,8 +84,10 @@ export function stepItemEvents(phase: 'started' | 'completed', item: ThreadItem,
       return phase === 'started'
         ? [{ type: 'tool_call', toolUseId: item.id, name: item.tool, input: item.arguments }]
         : [{ type: 'tool_result', toolUseId: item.id, content: contentText(item.contentItems), isError: item.success === false || item.status === 'failed' }];
-    default:
+    case 'userMessage':
       return [];
+    default:
+      return unknownItemEvents(phase, item as unknown as Record<string, unknown>);
   }
 }
 
