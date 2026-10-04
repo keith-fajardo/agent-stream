@@ -15,3 +15,4 @@ export * from './freeText';
 export * from './graphMarkdownParse';
 export * from './graphMeta';
 export * from './graphMarkdownWrite';
+export * from './diffToOps';
