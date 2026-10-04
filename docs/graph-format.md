@@ -70,7 +70,12 @@ The file is read line by line. A `#` inside a fenced code block is never read as
 
 - **`# <name>`:** the first line that isn't blank. It is the graph's name. A file has exactly one `#` heading, and nothing goes between it and the first `##` section.
 - **`## Goal`** and **`## Instructions`:** free Markdown, trimmed. Both are optional; a missing one is empty.
-- **`## Variables`:** one variable per bullet, `` - `name`: description ``, or `` - `name` `` without a description. Names use letters, digits and `_` and start with a letter or `_`. Values never appear in the file: they stay on your machine.
+  - A line that would read as a `#` or `##` heading, the opening of a code fence that is never closed, or a fence line that already starts with a backslash is written with one leading backslash (`\## Notes`). Agent Stream removes that backslash when it reads the file, and Markdown shows the line as you wrote it.
+- **`## Variables`:** one variable per bullet, `` - `name`: description ``, or `` - `name` `` without a description. Values never appear in the file: they stay on your machine.
+  - Names use letters, digits and `_`, start with a letter or `_`, and have at most 64 characters.
+  - A name can't be a reserved word: template keywords such as `true`, `none`, `if`, `for`, `set`, `raw`, `loop` and `self`, and names the template engine blocks, such as `constructor` and `__proto__`.
+  - A name can't look like a step id (`n` and a number, such as `n1`): those are kept for step outputs, such as `{{ n1.model }}`.
+  - A variable listed twice is an error.
 - **`## Flow`:** exactly one ```` ```mermaid ```` block with the connections (below). Without a Flow section no step is connected.
 - **Every other `##` heading is a step.**
 
@@ -80,12 +85,16 @@ Goal, Instructions, Variables and Flow may come in any order, before or between 
 
 A step heading is `## <id> · <title>`: the separator is a space, a middle dot (`·`, U+00B7) and a space. Ids use letters, digits, `-` and `_`, up to 64 characters; they can't contain `--` or end with `-` (Mermaid reads those as arrows). A heading without an id, `## <title>`, is a new step: Agent Stream gives it the next free id, `n<number>` above every id already in the file (`n7`, say), and writes the id into the heading. Ids are never reused. A step with an id and the title `Goal` is still a step.
 
+- Whenever the text before the first ` · ` could be an id, it is one: `## Build · test` is step `Build` with the title `test`. A title that contains ` · ` needs an id in front of it: `## n5 · Build · test`.
+- Some ids are reserved, because ids also key objects and name folders: `__proto__`, `constructor` and the other names built into JavaScript objects (such as `toString`), and Windows device names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`, `lpt1` to `lpt9`, in any letter case).
+- The same id on two steps is an error.
+
 A step section holds, in this order:
 
 1. **Fields**, one bullet each, `- key: value`:
    - `kind`: `agent` or `command`. Agent Stream always writes it. When it's missing, a ```` ```prompt ```` block means an agent step and a ```` ```sh ```` block a command step.
-   - `access`: `read` for an agent step that only reads and reports. Missing (or `write`) means it can change files. Command steps can always change files.
-   - `workspace`: a variant workspace name (lowercase letters, digits, `-` and `_`, starting with a letter). Steps with the same workspace share one worktree per run. Missing means this checkout.
+   - `access`: `read` for an agent step that only reads and reports. Missing (or `write`) means it can change files. Command steps can always change files, so `access: read` on a command step is an error.
+   - `workspace`: a variant workspace name (lowercase letters, digits, `-` and `_`, starting with a letter, at most 40 characters). Steps with the same workspace share one worktree per run. Missing means this checkout.
    - `timeout`: a whole number of seconds, from 1 to 2147483.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
 3. **Exactly one code block:**
@@ -113,7 +122,8 @@ flowchart LR
 - Blank lines and `%%` comments are ignored. A step id alone on a line adds no connection.
 - Anything else Mermaid offers (`-.->`, `==>`, `---`, `--->`, link text such as `-->|text|`, subgraphs, `&`, `classDef`, `style`) is an error with its line number, so the file never holds connections Agent Stream can't show. Spaces around `-->` are optional: `a-->b` works.
 - Every id needs a step section, and the arrows can't loop back to an earlier step.
-- Mermaid can't draw a node whose id is `end`: give such a step another id.
+- The same arrow twice is an error, and so is an arrow from a step to itself (`n1 --> n1`).
+- A line can't start with a Mermaid keyword, so a step whose id is `end`, `subgraph`, `class`, `classDef`, `style`, `linkStyle`, `click` or `direction` can't start a Flow line. Give such a step another id.
 
 ## When the file has errors
 
