@@ -53,6 +53,15 @@ describe('menus', () => {
     expect(items(base({ graph: undefined }), 'edit')['Add step'].enabled).toBe(false);
   });
 
+  it('enables the canvas-only Edit items only while the canvas area shows the graph', () => {
+    const graphMode = items(base({ selectedNodeId: 'n1' }), 'edit');
+    expect([graphMode['Add step'].enabled, graphMode['Tidy layout'].enabled]).toEqual([true, true]);
+    const markdown = items(base({ selectedNodeId: 'n1', canvasMode: 'markdown' }), 'edit');
+    expect([markdown['Add step'].enabled, markdown['Tidy layout'].enabled]).toEqual([false, false]);
+    // Deleting the selected step needs no canvas.
+    expect(markdown['Delete selected step'].enabled).toBe(true);
+  });
+
   it('has Refine items in Edit: the selected step needs content and a provider, the changed count is user-edited refinable steps', () => {
     const planned = { ...step('n2'), prompt: undefined, description: 'Compare', updatedBy: 'agent' as const };
     const withNodes = { ...graph, nodes: [step('n1'), { ...step('n3'), prompt: undefined }, planned, { ...step('n4'), updatedBy: 'user' as const }] };

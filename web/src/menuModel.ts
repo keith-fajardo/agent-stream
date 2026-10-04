@@ -25,6 +25,8 @@ function variableItems(s: State): MenuEntry[] {
 /** The menu bar (spec §4.3): items that don't apply right now are disabled, never hidden. */
 export function buildMenus(s: State): Menu[] {
   const hasGraph = !!s.graph;
+  /** The graph canvas is on screen (not the Markdown editor): actions that need its viewport work. */
+  const onCanvas = hasGraph && s.canvasMode === 'graph';
   const running = s.run?.status === 'running';
   const signedIn = !!s.status?.ok;
   const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
@@ -54,9 +56,9 @@ export function buildMenus(s: State): Menu[] {
       id: 'edit',
       label: 'Edit',
       items: [
-        item('Add step', hasGraph, actions.addStep),
+        item('Add step', onCanvas, actions.addStep),
         item('Delete selected step', selected, actions.deleteSelectedStep),
-        item('Tidy layout', hasGraph, actions.tidy),
+        item('Tidy layout', onCanvas, actions.tidy),
         SEPARATOR,
         item('Refine selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.refine([selectedNode!.id])),
         item('Split selected step', signedIn && !!selectedNode && refinable(selectedNode), () => actions.split(selectedNode!.id)),

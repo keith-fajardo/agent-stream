@@ -275,3 +275,36 @@ describe('the graph file', () => {
     expect(reduce(gone, opened(graph('a'))).graphGone).toBe(false);
   });
 });
+
+describe('Markdown editor state', () => {
+  const FILE = '# G\n';
+  const THEIRS = '# G changed\n';
+  const shown = (...more: Action[]) => apply(opened(graph('g')), server({ type: 'graphMarkdown', graphId: 'g', text: FILE }), ...more);
+
+  it('starts a draft from the text the editor showed, so an edit landing after a newer file still sees the change', () => {
+    // The file changed, but the keystroke was typed into the text rendered before it arrived.
+    const s = shown(server({ type: 'graphMarkdown', graphId: 'g', text: THEIRS }), { kind: 'markdownEdited', text: '# Mine\n', from: FILE });
+    expect(s.markdown).toMatchObject({ draft: '# Mine\n', base: FILE, conflict: true, disk: THEIRS });
+    // Typed into the current text: no conflict.
+    expect(shown({ kind: 'markdownEdited', text: '# Mine\n', from: FILE }).markdown).toMatchObject({ draft: '# Mine\n', base: FILE, conflict: false });
+  });
+
+  it('never leaves a save waiting for good: hello, a lost connection, an error, Reload and Discard all end it', () => {
+    const saving = shown({ kind: 'markdownEdited', text: '# Mine\n', from: FILE }, { kind: 'markdownSaving', thenGraph: false });
+    expect(saving.markdown.saving).toEqual({ thenGraph: false });
+    const hello = server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
+    for (const action of [hello, { kind: 'disconnected' } as Action, server({ type: 'error', message: 'Invalid message' }), { kind: 'markdownReload' } as Action]) {
+      expect(reduce(saving, action).markdown.saving).toBeUndefined();
+    }
+    const afterError = reduce(saving, server({ type: 'error', message: 'Invalid message' }));
+    expect(afterError.markdown.draft).toBe('# Mine\n');
+    expect(afterError.toast).toBe('Invalid message');
+  });
+
+  it('keeps the draft and shows the reason when a save fails', () => {
+    const s = shown({ kind: 'setCanvasMode', mode: 'markdown' }, { kind: 'markdownEdited', text: '# Mine\n', from: FILE }, { kind: 'markdownSaving', thenGraph: true }, server({ type: 'graphMarkdownSaved', graphId: 'g', ok: false, error: 'Could not save g.md (EACCES).' }));
+    expect(s.markdown).toMatchObject({ draft: '# Mine\n', base: FILE, saving: undefined });
+    expect(s.toast).toBe('Could not save g.md (EACCES).');
+    expect(s.canvasMode).toBe('markdown');
+  });
+});

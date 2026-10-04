@@ -8,6 +8,8 @@ Agent Stream saves each graph as a Markdown file, `.agent-stream/graphs/<id>.md`
 
 Open it from a graph tab with **File › Open as Markdown**, from a graph's right-click menu in the Graphs sidebar, or with **Agent Stream: Open Graph as Markdown**.
 
+You can also edit it in place: the **Graph | Markdown** switch at the left of the canvas toolbar (or **View › Show as Markdown**) turns the canvas into a text editor showing the file. **Save** (or ⌘S / Ctrl+S) saves your text to the file, which is then read like any other edit. If the file has errors, they are listed under the editor with their line numbers, and clicking one moves the cursor to that line. While you have unsaved edits, changes from elsewhere (the canvas, the planner, Git, another editor) don't replace your text: instead the editor says "The file changed since you started editing." Choose **Reload** to drop your edits and show the file, or **Save anyway** to overwrite it. Switching back to Graph with unsaved edits asks whether to **Save**, **Discard** or **Keep editing**.
+
 ## A full example
 
 `````markdown

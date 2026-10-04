@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { refinable, type GraphNode, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { changedSentence, changeKey } from '../changeLabels';
-import { post, send } from '../bridge';
+import { send } from '../bridge';
+import { reportDraft } from '../draftState';
 import { dispatch, useStore } from '../store';
 
 type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; prompt: string; command: string; timeoutSec: string };
@@ -56,9 +57,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const dirty = !sameDraft(draft, base.draft);
   const canRefine = refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   useEffect(() => {
-    post({ type: 'draftState', dirty });
+    reportDraft('node', dirty);
   }, [dirty]);
-  useEffect(() => () => post({ type: 'draftState', dirty: false }), []);
+  useEffect(() => () => reportDraft('node', false), []);
   const changedUnderneath = node.updatedAt !== base.at;
 
   useEffect(() => {

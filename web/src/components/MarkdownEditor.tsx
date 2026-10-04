@@ -79,8 +79,8 @@ export function MarkdownEditor() {
           spellCheck={false}
           wrap="off"
           value={text}
-          readOnly={!loaded || !!m.saving}
-          onChange={(e) => dispatch({ kind: 'markdownEdited', text: e.target.value })}
+          readOnly={(!loaded && !dirty) || !!m.saving}
+          onChange={(e) => dispatch({ kind: 'markdownEdited', text: e.target.value, from: text })}
           onKeyDown={onKeyDown}
           onScroll={(e) => {
             if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;

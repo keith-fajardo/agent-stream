@@ -129,11 +129,13 @@ export type Action =
   | { kind: 'startRequested'; start: StartRequest }
   | { kind: 'closeBlocked' }
   | { kind: 'setCanvasMode'; mode: CanvasMode }
-  | { kind: 'markdownEdited'; text: string }
+  /** `from`: the text the editor showed when the edit was typed, the base when a draft starts. */
+  | { kind: 'markdownEdited'; text: string; from: string }
   | { kind: 'markdownSaving'; thenGraph: boolean }
   /** Drops the unsaved edits: the editor shows the file again. */
   | { kind: 'markdownReload' }
-  | { kind: 'confirmLeaveMarkdown'; open: boolean };
+  | { kind: 'confirmLeaveMarkdown'; open: boolean }
+  | { kind: 'showToast'; message: string };
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
@@ -146,7 +148,8 @@ const forTarget = (s: State, graphId: string, sessionId: string) => s.chatTarget
 export function reduce(state: State, action: Action): State {
   switch (action.kind) {
     case 'disconnected':
-      return { ...state, connected: false };
+      // No answer will come for a save on its way.
+      return { ...state, connected: false, markdown: { ...state.markdown, saving: undefined } };
     case 'selectNode':
       return { ...state, selectedNodeId: action.id, tab: action.id ? 'node' : state.tab };
     case 'setTab':
@@ -190,17 +193,21 @@ export function reduce(state: State, action: Action): State {
     case 'markdownEdited': {
       const m = state.markdown;
       if (m.disk === undefined && m.draft === undefined) return state;
-      const base = m.draft === undefined ? m.disk : m.base;
+      // A draft starts from the text the editor showed: a newer file that arrived before the keystroke is a conflict.
+      const base = m.draft === undefined ? action.from : m.base;
+      const conflict = m.draft === undefined ? m.disk !== undefined && m.disk !== base : m.conflict;
       // Typed back to the file's text: nothing unsaved, so the editor follows the file again.
-      if (action.text === base && !m.conflict) return { ...state, markdown: { ...m, draft: undefined, base: undefined } };
-      return { ...state, markdown: { ...m, draft: action.text, base } };
+      if (action.text === base && !conflict) return { ...state, markdown: { ...m, draft: undefined, base: undefined } };
+      return { ...state, markdown: { ...m, draft: action.text, base, conflict } };
     }
     case 'markdownSaving':
       return { ...state, markdown: { ...state.markdown, saving: { thenGraph: action.thenGraph }, confirmLeave: false } };
     case 'markdownReload':
-      return { ...state, markdown: { ...state.markdown, draft: undefined, base: undefined, conflict: false, confirmLeave: false } };
+      return { ...state, markdown: { ...state.markdown, draft: undefined, base: undefined, conflict: false, confirmLeave: false, saving: undefined } };
     case 'confirmLeaveMarkdown':
       return { ...state, markdown: { ...state.markdown, confirmLeave: action.open } };
+    case 'showToast':
+      return { ...state, toast: action.message };
     case 'server':
       return reduceServer(state, action.msg);
   }
@@ -219,8 +226,8 @@ function reduceServer(state: State, msg: HostMessage): State {
   const current = state.graph?.id;
   switch (msg.type) {
     case 'hello':
-      // A new engine connection follows no file yet: the Markdown editor asks for it again.
-      return { ...state, connected: true, status: msg.status, project: msg.project, graphs: msg.graphs, approvals: msg.approvals, markdown: { ...state.markdown, disk: undefined } };
+      // A new engine connection follows no file yet, and won't answer an earlier save: the Markdown editor asks for the file again.
+      return { ...state, connected: true, status: msg.status, project: msg.project, graphs: msg.graphs, approvals: msg.approvals, markdown: { ...state.markdown, disk: undefined, saving: undefined } };
     case 'auth':
       return { ...state, status: msg.status };
     case 'graphs':
@@ -336,7 +343,8 @@ function reduceServer(state: State, msg: HostMessage): State {
       // The extension saves the report itself; a tab has nothing to show.
       return state;
     case 'error':
-      return { ...state, toast: msg.message };
+      // A save the engine or the extension refused before it could answer (a message too large, a throw) is over too.
+      return { ...state, toast: msg.message, ...(state.markdown.saving && { markdown: { ...state.markdown, saving: undefined } }) };
     case 'revealNode':
       return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, selectedNodeId: msg.nodeId, tab: 'node' } : state;
     case 'openRunDialog':

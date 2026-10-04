@@ -10,11 +10,13 @@ vi.mock('../src/components/Canvas', async () => {
   const { CanvasModeToggle } = await import('../src/components/CanvasModeToggle');
   return { Canvas: () => createElement('div', { className: 'graph-stand-in' }, createElement(CanvasModeToggle)) };
 });
-const { send, loadViewState, saveViewState } = await import('../src/bridge');
+const { send, post, loadViewState, saveViewState } = await import('../src/bridge');
 const { dispatch, getState, resetStoreForTests } = await import('../src/store');
 const { CanvasArea } = await import('../src/components/CanvasArea');
 const { buildMenus } = await import('../src/menuModel');
 const { restoreCanvasMode } = await import('../src/panelLayout');
+const { reportDraft } = await import('../src/draftState');
+const { MAX_IMPORT_CHARS } = await import('@agent-stream/shared');
 type MenuAction = import('../src/menuModel').MenuAction;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -217,6 +219,45 @@ describe('Markdown editor, after a save with errors or a new engine connection',
     await server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
     expect(sent('getGraphMarkdown')).toEqual([{ type: 'getGraphMarkdown', graphId: 'g' }]);
     expect(editor()!.value).toBe(`${FILE}x`);
+  });
+});
+
+describe('Markdown editor, when a save gets no answer', () => {
+  it('is editable again after a server error or a new engine connection while a save was on its way', async () => {
+    await showMarkdown();
+    await act(async () => typeInto(editor()!, `${FILE}x`));
+    await click('Save');
+    expect(editor()!.readOnly).toBe(true);
+    await server({ type: 'error', message: 'Invalid message from the graph tab.' });
+    expect(editor()!.readOnly).toBe(false);
+    expect(editor()!.value).toBe(`${FILE}x`);
+    expect(button('Save')!.disabled).toBe(false);
+    await click('Save');
+    expect(editor()!.readOnly).toBe(true);
+    await server({ type: 'hello', status: { provider: 'claude', ok: true, label: 'Claude Max' }, project: '/p', graphs: [], approvals: [] });
+    expect(editor()!.readOnly).toBe(false);
+    expect(editor()!.value).toBe(`${FILE}x`);
+  });
+
+  it('refuses a draft larger than 1 MB itself, with the reason, and sends nothing', async () => {
+    await showMarkdown();
+    await act(async () => typeInto(editor()!, 'x'.repeat(MAX_IMPORT_CHARS + 1)));
+    await click('Save');
+    expect(sent('saveGraphMarkdown')).toEqual([]);
+    expect(getState().toast).toBe("This Markdown is larger than 1 MB, so it can't be saved.");
+    expect(editor()!.readOnly).toBe(false);
+  });
+
+  it('counts unsaved Markdown as unsaved work in the tab, together with a step’s unsaved edits', async () => {
+    await showMarkdown();
+    await act(async () => typeInto(editor()!, `${FILE}x`));
+    expect(vi.mocked(post)).toHaveBeenLastCalledWith({ type: 'draftState', dirty: true });
+    // A step editor turning clean doesn't hide the Markdown draft.
+    reportDraft('node', false);
+    expect(vi.mocked(post)).toHaveBeenLastCalledWith({ type: 'draftState', dirty: true });
+    await click('Save');
+    await server({ type: 'graphMarkdownSaved', graphId: 'g', ok: true, text: `${FILE}x\n` });
+    expect(vi.mocked(post)).toHaveBeenLastCalledWith({ type: 'draftState', dirty: false });
   });
 });
 

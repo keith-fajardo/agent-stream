@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ChangeTarget, HostCommand } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, type ApprovalRequest, type ChangeTarget, type HostCommand } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
@@ -129,6 +129,9 @@ export const actions = {
   saveMarkdown(o: { force?: boolean; thenGraph?: boolean } = {}): void {
     const { graph, markdown: m } = getState();
     if (!graph || m.draft === undefined || m.base === undefined || m.saving) return;
+    // The engine reads no message this large: refused here, with the reason, rather than left without an answer.
+    if (m.draft.length > MAX_IMPORT_CHARS) return dispatch({ kind: 'showToast', message: "This Markdown is larger than 1 MB, so it can't be saved." });
+    if (m.base.length > MAX_IMPORT_CHARS) return dispatch({ kind: 'showToast', message: "The file is larger than 1 MB, so it can't be saved from here." });
     send({ type: 'saveGraphMarkdown', graphId: graph.id, text: m.draft, base: m.base, ...(o.force && { force: true }) });
     dispatch({ kind: 'markdownSaving', thenGraph: !!o.thenGraph });
   },
