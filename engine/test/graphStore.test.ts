@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewNodeInput } from '@agent-stream/shared';
@@ -12,6 +12,30 @@ describe('GraphStore', () => {
     expect(store.create('dbt Parity: orders!').id).toBe('dbt-parity-orders');
     expect(store.create('dbt parity orders').id).toBe('dbt-parity-orders-2');
     expect(store.list().map((g) => g.id)).toEqual(['dbt-parity-orders-2', 'dbt-parity-orders']);
+  });
+
+  it("never gives a new graph the id of a deleted file's leftover side file, baseline or history", () => {
+    const paths = tmpProject();
+    const store = new GraphStore(paths, fixedClock());
+    const { id } = store.create('Tests');
+    store.apply(id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'agent');
+    expect(store.agentChanges(id)).toHaveLength(1);
+    rmSync(join(paths.graphsDir, `${id}.md`));
+    expect(store.graphFileDeleted(id)).toBe('deleted');
+    const fresh = store.create('Tests');
+    expect(fresh.id).toBe('tests-2');
+    expect(store.agentChanges(fresh.id)).toEqual([]);
+    expect(store.readOps(fresh.id)).toEqual([]);
+    expect(store.importGraph('# Tests\n').ok && store.list().map((g) => g.id).sort()).toEqual(['tests-2', 'tests-3']);
+    // Each leftover file on its own keeps the id taken.
+    for (const [i, suffix] of ['.meta.json', '.baseline.json', '.ops.jsonl'].entries()) {
+      writeFileSync(join(paths.graphsDir, `only-${i}${suffix}`), '{}\n');
+      expect(store.create(`Only ${i}`).id).toBe(`only-${i}-2`);
+    }
+    // The file coming back still brings its graph back.
+    writeFileSync(join(paths.graphsDir, `${id}.md`), '# Tests\n');
+    expect(store.graphFileChanged(id)).toBe('added');
+    expect(store.get(id).name).toBe('Tests');
   });
 
   it('applies ops, persists them, logs them and emits changes', () => {

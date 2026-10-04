@@ -127,10 +127,15 @@ export class GraphStore extends EventEmitter {
     return join(this.paths.graphsDir, `${id}${BASELINE_SUFFIX}`);
   }
 
+  /** Whether any of the id's files is on disk: a graph file, or what a deleted one left (its side file, baseline, history). */
+  private taken(id: string): boolean {
+    return [this.file(id), this.legacyFile(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id)].some((f) => existsSync(f));
+  }
+
   private uniqueId(name: string): string {
     const base = slugify(name);
     let id = base;
-    for (let i = 2; existsSync(this.file(id)) || existsSync(this.legacyFile(id)); i++) id = `${base}-${i}`;
+    for (let i = 2; this.taken(id); i++) id = `${base}-${i}`;
     return id;
   }
 
