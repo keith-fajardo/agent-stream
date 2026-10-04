@@ -25,7 +25,8 @@ export function edgeId(from: string, to: string): string {
   return `${from}->${to}`;
 }
 
-function seqOf(id: string): number {
+/** The number in an `n<number>` step id; 0 for any other id. */
+export function seqOf(id: string): number {
   const m = /^n(\d+)$/.exec(id);
   return m ? Number(m[1]) : 0;
 }
@@ -85,7 +86,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
     case 'updateNode': {
       const node = graph.nodes.find((n) => n.id === op.id);
       if (!node) return fail(`node ${op.id} does not exist`);
-      const { access, workspace, ...patch } = definedOnly<NodePatch>(op.patch);
+      const { access, workspace, timeoutSec, ...patch } = definedOnly<NodePatch>(op.patch);
       if (patch.title !== undefined) {
         patch.title = patch.title.trim();
         if (!patch.title) return fail('a node needs a title');
@@ -102,10 +103,13 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       }
       // A command step can always change files, so becoming one drops `access` (spec §3.1).
       const nextAccess = kind === 'command' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
-      const { access: _access, workspace: _workspace, ...base } = node;
+      // 0 clears the timeout; a missing one keeps it.
+      const nextTimeout = timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
+      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, ...base } = node;
       const updated: GraphNode = {
         ...base,
         ...patch,
+        ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),
         updatedBy: by,

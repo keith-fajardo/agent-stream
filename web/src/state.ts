@@ -6,6 +6,7 @@ import type {
   EffortLevel,
   CheckoutInfo,
   Graph,
+  GraphFileError,
   GraphListItem,
   HostMessage,
   LeaseHolder,
@@ -34,6 +35,10 @@ export type State = {
   project?: string;
   graphs: GraphListItem[];
   graph?: Graph;
+  /** Problems in the graph's Markdown file: the graph shown is the last good version (Markdown graph files spec §6.3). */
+  fileErrors: GraphFileError[];
+  /** The graph's Markdown file was deleted (spec §6.5): the tab stays open and shows the graph again when the file returns. */
+  graphGone?: boolean;
   /** The user's accepted version of the graph, and what agents changed since (spec §3). */
   baseline?: Graph;
   changes: AgentChange[];
@@ -79,7 +84,7 @@ function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
   return { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId, ...(msg.requestedBy && { requestedBy: msg.requestedBy }) };
 }
 
-export const initialState: State = { connected: false, graphs: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -175,10 +180,14 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, status: msg.status };
     case 'graphs':
       return { ...state, graphs: msg.graphs };
-    case 'graphDeleted':
-      return msg.graphId === current
-        ? { ...state, ...reviewing(state, []), graph: undefined, baseline: undefined, changes: [], run: undefined, runs: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined, toast: 'This graph was deleted.' }
-        : state;
+    case 'graphDeleted': {
+      if (msg.graphId !== current) return state;
+      // A deleted file shows a notice that stays (the graph may come back); a deleted graph's tab closes.
+      const gone = msg.reason === 'file' ? { graphGone: true } : { toast: 'This graph was deleted.' };
+      return { ...state, ...reviewing(state, []), ...gone, graph: undefined, baseline: undefined, changes: [], fileErrors: [], run: undefined, runs: [], logs: {}, selectedNodeId: undefined, confirm: undefined, preview: undefined, previewRequestId: undefined };
+    }
+    case 'graphFileErrors':
+      return msg.graphId === current ? { ...state, fileErrors: msg.errors } : state;
     case 'graphOpened':
       return {
         ...state,
@@ -186,6 +195,8 @@ function reduceServer(state: State, msg: HostMessage): State {
         // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
         ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined }),
         graph: msg.graph,
+        graphGone: false,
+        fileErrors: msg.fileErrors ?? [],
         baseline: msg.baseline,
         changes: msg.changes,
         runs: msg.runs,

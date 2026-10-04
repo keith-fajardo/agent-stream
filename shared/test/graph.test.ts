@@ -379,3 +379,16 @@ describe('step access and workspace', () => {
     expect(reusableNodeIds(g, { snapshot: g, nodes: allOk })).toEqual(new Set(['n1']));
   });
 });
+
+describe('updateNode timeouts', () => {
+  it('sets a timeout, keeps it when the patch has none, and clears it with 0', () => {
+    const g = build([cmd('a', 'make')]);
+    const set = applyOp(g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 30 } }, 'user', T2);
+    if (!set.ok) throw new Error(set.error);
+    expect(set.graph.nodes[0].timeoutSec).toBe(30);
+    const kept = applyOp(set.graph, { type: 'updateNode', id: 'n1', patch: { title: 'b' } }, 'user', T2);
+    expect(kept.ok && kept.graph.nodes[0].timeoutSec).toBe(30);
+    const cleared = applyOp(set.graph, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 0 } }, 'user', T2);
+    expect(cleared.ok && 'timeoutSec' in cleared.graph.nodes[0]).toBe(false);
+  });
+});

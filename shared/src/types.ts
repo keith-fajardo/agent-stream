@@ -62,6 +62,7 @@ export type NodePatch = {
   description?: string;
   prompt?: string;
   command?: string;
+  /** 0 clears the timeout (a hand edit removed it from the graph's Markdown file). */
   timeoutSec?: number;
   /** 'read': an agent step that only reads and reports (spec §3.1). Missing means it can change files. */
   access?: NodeAccess;
@@ -89,7 +90,11 @@ export type Op =
 /** Which agent made an edit: the planner (in a work session) or an agent step during a run. */
 export type ChangeSource = { kind: 'planner'; sessionId?: string } | { kind: 'step'; runId: string; nodeId: string };
 
-export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource };
+/** `via: 'file'`: the edit came from the graph's Markdown file (Markdown graph files spec §6.3). A history label only. */
+export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; via?: 'file' };
+
+/** One problem in a graph's Markdown file: its 1-based line and a message that says how to fix it. */
+export type GraphFileError = { line: number; message: string };
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
@@ -301,9 +306,12 @@ export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
   | { type: 'hello'; status: ProviderStatus; project: string; graphs: GraphListItem[]; approvals: ApprovalRequest[] }
   | { type: 'graphs'; graphs: GraphListItem[] }
-  | { type: 'graphDeleted'; graphId: string }
+  /** `reason: 'file'`: the graph's Markdown file disappeared (deleted, or a branch switch); the tab stays open and the graph comes back with the file. */
+  | { type: 'graphDeleted'; graphId: string; reason?: 'file' }
   /** `baseline` is the user's graph before pending agent changes (absent when there are none); `changes` lists them. */
-  | { type: 'graphOpened'; graph: Graph; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string>; baseline?: Graph; changes: AgentChange[] }
+  | { type: 'graphOpened'; graph: Graph; runs: RunSummary[]; run?: RunMeta; variableValues: Record<string, string>; baseline?: Graph; changes: AgentChange[]; fileErrors?: GraphFileError[] }
+  /** The graph's Markdown file has these problems, so the graph shown is the last good version; [] when they are fixed. */
+  | { type: 'graphFileErrors'; graphId: string; errors: GraphFileError[] }
   | { type: 'graph'; graph: Graph; baseline?: Graph; changes: AgentChange[] }
   | { type: 'opRejected'; graphId: string; error: string }
   | { type: 'runs'; graphId: string; runs: RunSummary[] }
@@ -366,7 +374,7 @@ export type ClientMessage =
 /** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
 export type ChatTarget = { graphId: string; graphName: string; sessionId: string; sessionName: string };
 
-export type HostCommand = 'newGraph' | 'openGraph' | 'importGraph' | 'exportGraph' | 'renameGraph' | 'duplicateGraph' | 'deleteGraph' | 'showSidebar' | 'focusChat';
+export type HostCommand = 'newGraph' | 'openGraph' | 'importGraph' | 'exportGraph' | 'renameGraph' | 'duplicateGraph' | 'deleteGraph' | 'showSidebar' | 'focusChat' | 'openGraphMarkdown';
 
 /** Messages a graph tab sends that the extension handles itself (not the engine). */
 export type WebviewHostMessage =

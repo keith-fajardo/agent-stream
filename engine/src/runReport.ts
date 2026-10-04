@@ -1,4 +1,4 @@
-import { fmtDuration, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { fenceFor, fmtDuration, longestRun, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -25,11 +25,9 @@ function cut(text: string, max: number): { text: string; cut: boolean } {
   return { text: `${text.slice(0, end)}…`, cut: true };
 }
 
-const longestRun = (text: string, ch: string): number => Math.max(0, ...[...text.matchAll(new RegExp(`\\${ch}+`, 'g'))].map((m) => m[0].length));
-
 /** A fenced code block whose fence is longer than any backtick run inside, so the content can't close it. */
 export function fenced(content: string, indent = ''): string {
-  const fence = '`'.repeat(Math.max(3, longestRun(content, '`') + 1));
+  const fence = fenceFor(content);
   const body = content.replace(/\r\n?/g, '\n').replace(/\n$/, '');
   return [fence, ...body.split('\n'), fence].map((line) => (line ? indent + line : line)).join('\n');
 }

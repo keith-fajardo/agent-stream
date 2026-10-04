@@ -206,3 +206,9 @@ describe('parseGraph step access and workspace', () => {
     expect(parseWebviewMessage({ type: 'op', graphId: 'g', op: { type: 'addNode', node: { title: 't', kind: 'agent', access: 'maybe' } } }).ok).toBe(false);
   });
 });
+
+describe('Open as Markdown', () => {
+  it('is a host command a graph tab may send', () => {
+    expect(parseWebviewMessage({ type: 'host', command: 'openGraphMarkdown' })).toEqual({ ok: true, kind: 'host', msg: { type: 'host', command: 'openGraphMarkdown' } });
+  });
+});

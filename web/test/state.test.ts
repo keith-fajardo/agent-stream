@@ -255,3 +255,23 @@ describe('checkout and blocked runs', () => {
     expect(apply(opened(graph('b')), server(blocked)).blocked).toBeUndefined();
   });
 });
+
+describe('the graph file', () => {
+  const errors = [{ line: 4, message: 'kind is "robot"; use agent or command.' }];
+
+  it("keeps the open graph's file errors until they clear or another graph opens", () => {
+    const s = apply(opened(graph('a')), server({ type: 'graphFileErrors', graphId: 'a', errors }));
+    expect(s.fileErrors).toEqual(errors);
+    expect(reduce(s, server({ type: 'graphFileErrors', graphId: 'b', errors: [] })).fileErrors).toEqual(errors);
+    expect(reduce(s, server({ type: 'graphFileErrors', graphId: 'a', errors: [] })).fileErrors).toEqual([]);
+    expect(reduce(s, opened(graph('a'), { fileErrors: errors })).fileErrors).toEqual(errors);
+    expect(reduce(s, opened(graph('b'))).fileErrors).toEqual([]);
+  });
+
+  it('marks the graph gone, without a toast, when its file is deleted; opening it again clears that', () => {
+    const s = apply(opened(graph('a', ['n1'])), server({ type: 'graphFileErrors', graphId: 'a', errors }));
+    const gone = reduce(s, server({ type: 'graphDeleted', graphId: 'a', reason: 'file' }));
+    expect([gone.graph, gone.graphGone, gone.fileErrors, gone.toast]).toEqual([undefined, true, [], undefined]);
+    expect(reduce(gone, opened(graph('a'))).graphGone).toBe(false);
+  });
+});
