@@ -6,7 +6,8 @@ import { ApprovalsView, approvalsBadge } from './approvalsView';
 import { ChatViewController, ChatViewProvider, type ChatSource } from './chatView';
 import { graphCommands } from './commands';
 import { EngineManager, isChecking, type EngineEvents, type Folder } from './engines';
-import { folderFor, workspaceFolders } from './folders';
+import { folderFor, folderUri, workspaceFolders } from './folders';
+import { GRAPH_FILES_GLOB, GraphFileWatcher, publishGraphFileErrors } from './graphFiles';
 import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, graphTarget, graphUri, hostCommandArgs, openAndSend, openGraphTab, type GraphPanel } from './graphEditor';
 import { FolderItem, GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
@@ -33,6 +34,9 @@ export async function activate(context: vscode.ExtensionContext) {
     status.show();
   };
 
+  const output = vscode.window.createOutputChannel('Agent Stream');
+  const diagnostics = vscode.languages.createDiagnosticCollection('agent-stream');
+  context.subscriptions.push(output, diagnostics);
   // Views and tabs replace these no-ops as they are wired up below.
   const events: EngineEvents = {
     graphs: () => {},
@@ -42,6 +46,8 @@ export async function activate(context: vscode.ExtensionContext) {
     sessions: () => {},
     auth: showAuth,
     warning: (message) => void vscode.window.showWarningMessage(message),
+    log: (message) => output.appendLine(message),
+    graphFileErrors: (folder, graphId, errors) => publishGraphFileErrors(diagnostics, folder, graphId, errors),
   };
   const manager = new EngineManager({
     settings: readSettings,
@@ -137,12 +143,23 @@ export async function activate(context: vscode.ExtensionContext) {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
     if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId, ...(requestedBy && { requestedBy }) });
   };
-  events.graphDeleted = (folder, graphId) => {
+  events.graphDeleted = (folder, graphId, reason) => {
+    publishGraphFileErrors(diagnostics, folder, graphId, []);
+    // A deleted file (or a branch switch) leaves the tab open: it shows the graph again when the file comes back.
+    if (reason === 'file') return;
     const panel = panels.get(folder.key, graphId);
     if (!panel) return;
     panel.view.close();
     void vscode.window.showInformationMessage(`The graph ${graphId} was deleted, so its tab was closed.`);
   };
+
+  // Edits to graph files made outside Agent Stream reach the folder's engine (Markdown graph files spec §6.2).
+  const fileWatcher = new GraphFileWatcher({
+    engine: (folder) => (manager.has(folder.key) ? manager.get(folder) : undefined),
+    watch: (folder) => vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folderUri(folder), GRAPH_FILES_GLOB)),
+  });
+  fileWatcher.sync(workspaceFolders());
+  context.subscriptions.push(fileWatcher, vscode.workspace.onDidChangeWorkspaceFolders(() => fileWatcher.sync(workspaceFolders())));
 
   // Work sessions: each folder's set of graph tabs (sessions spec §5).
   const sessionStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
@@ -245,8 +262,8 @@ export async function activate(context: vscode.ExtensionContext) {
     chat.refresh(graphSources());
   };
   const baseDeleted = events.graphDeleted;
-  events.graphDeleted = (folder, graphId) => {
-    baseDeleted(folder, graphId);
+  events.graphDeleted = (folder, graphId, reason) => {
+    baseDeleted(folder, graphId, reason);
     chat.refresh(graphSources());
   };
   chat.activate(activeGraphSource(), graphSources());

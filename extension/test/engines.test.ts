@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -311,5 +311,26 @@ describe('the Codex provider', () => {
     expect(manager.providerFor('codex').name).toBe('OpenAI Codex');
     expect(await manager.checkProvider()).toEqual({ provider: 'codex', ok: false, label: 'Codex: not found', error: 'no codex here' });
     expect(findCodex).toHaveBeenCalledWith(expect.objectContaining({ platform: 'darwin', env: {}, setting: '/tools/codex' }));
+  });
+});
+
+describe('EngineManager and graph files', () => {
+  it('logs graphs converted on startup, and passes file errors and deleted files on', () => {
+    const { manager, events } = setup();
+    events.log = vi.fn();
+    events.graphFileErrors = vi.fn();
+    const f = folder('md');
+    const graphs = join(f.path, '.agent-stream', 'graphs');
+    mkdirSync(graphs, { recursive: true });
+    writeFileSync(join(graphs, 'old.json'), JSON.stringify({ id: 'old', name: 'Old', nodes: [], edges: [] }));
+    const app = manager.get(f);
+    expect(events.log).toHaveBeenCalledWith('Converted the graph "Old" to old.md; the old file is kept as old.json.bak.');
+    writeFileSync(join(graphs, 'old.md'), 'no name\n');
+    app.graphFileChanged('old');
+    expect(events.graphFileErrors).toHaveBeenLastCalledWith(f, 'old', [{ line: 1, message: 'the file must start with the graph\'s name, as "# Name".' }]);
+    rmSync(join(graphs, 'old.md'));
+    app.graphFileDeleted('old');
+    expect(events.graphFileErrors).toHaveBeenLastCalledWith(f, 'old', []);
+    expect(events.graphDeleted).toHaveBeenLastCalledWith(f, 'old', 'file');
   });
 });

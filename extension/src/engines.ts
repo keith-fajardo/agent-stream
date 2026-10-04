@@ -16,7 +16,7 @@ import {
   type GitExec,
   type WriteLeases,
 } from '@agent-stream/engine';
-import type { ApprovalRequest, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
+import type { ApprovalRequest, GraphFileError, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
 import { createCopilotProvider, type LmAccess } from './providers/copilot';
 import { parseProviderSetting } from './providers/registry';
 import type { Settings } from './settings';
@@ -29,7 +29,12 @@ export type EngineEvents = {
   graphs(folder: Folder, graphs: GraphListItem[]): void;
   approvals(): void;
   confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string, requestedBy?: 'planner'): void;
-  graphDeleted(folder: Folder, graphId: string): void;
+  /** `reason: 'file'`: the graph's Markdown file disappeared; the graph comes back with it (Markdown graph files spec §6.5). */
+  graphDeleted(folder: Folder, graphId: string, reason?: 'file'): void;
+  /** The graph's Markdown file has these problems; [] once they are fixed (spec §6.3). */
+  graphFileErrors?(folder: Folder, graphId: string, errors: GraphFileError[]): void;
+  /** A line for the Agent Stream output channel: each graph converted to Markdown on startup (spec §5.2). */
+  log?(message: string): void;
   /** A folder's work sessions: sent on connect and after every change. */
   sessions(folder: Folder, sessions: SessionListItem[]): void;
   auth(status: ProviderStatus): void;
@@ -192,6 +197,7 @@ export class EngineManager {
     this.engines.set(folder.key, entry);
     entry.detach = app.connect({ send: (msg) => this.observe(folder, msg) });
     for (const warning of app.startupWarnings()) this.d.events.warning(warning);
+    for (const note of app.startupNotes()) this.d.events.log?.(note);
     return app;
   }
 
@@ -226,7 +232,9 @@ export class EngineManager {
       case 'confirmRun':
         return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId, msg.requestedBy);
       case 'graphDeleted':
-        return this.d.events.graphDeleted(folder, msg.graphId);
+        return this.d.events.graphDeleted(folder, msg.graphId, msg.reason);
+      case 'graphFileErrors':
+        return this.d.events.graphFileErrors?.(folder, msg.graphId, msg.errors);
       case 'sessions':
         return this.d.events.sessions(folder, msg.sessions);
     }
