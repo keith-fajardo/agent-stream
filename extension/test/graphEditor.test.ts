@@ -228,6 +228,7 @@ describe('hostCommandArgs', () => {
     expect(hostCommandArgs('newGraph', panel)).toEqual([{ folder: f }]);
     expect(hostCommandArgs('importGraph', panel)).toEqual([{ folder: f }]);
     expect(hostCommandArgs('deleteGraph', panel)).toEqual([{ folder: f, graphId: 'g' }]);
+    expect(hostCommandArgs('openGraphMarkdown', panel)).toEqual([{ folder: f, graphId: 'g' }]);
   });
 });
 
@@ -237,6 +238,9 @@ describe('graphIdFromPath', () => {
     expect(graphIdFromPath('C:\\w\\.agent-stream\\graphs\\x.json')).toBe('x');
     expect(graphIdFromPath('/w/other/x.json')).toBeUndefined();
     expect(graphIdFromPath('/w/.agent-stream/graphs/Bad Name.json')).toBeUndefined();
+    expect(graphIdFromPath('/w/.agent-stream/graphs/dbt-parity.md')).toBe('dbt-parity');
+    expect(graphIdFromPath('C:\\w\\.agent-stream\\graphs\\x.md')).toBe('x');
+    expect(graphIdFromPath('/w/.agent-stream/graphs/x.meta.json')).toBeUndefined();
   });
 });
 
@@ -248,11 +252,15 @@ describe('graphTarget', () => {
     expect(graphTarget('/ws', '/ws/node_modules/p/.agent-stream/graphs/x.json')).toBeUndefined();
     expect(graphTarget('/ws', '/ws/.agent-stream/graphs/Bad Name.json')).toBeUndefined();
     expect(graphTarget('/ws', '/other/.agent-stream/graphs/g.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/.agent-stream/graphs/g.md')).toBe('g');
+    expect(graphTarget('C:\\ws', 'C:\\ws\\.agent-stream\\graphs\\g.md')).toBe('g');
+    expect(graphTarget('/ws', '/ws/.agent-stream/graphs/g.meta.json')).toBeUndefined();
+    expect(graphTarget('/ws', '/ws/sub/.agent-stream/graphs/x.md')).toBeUndefined();
   });
 });
 
 describe('notGraphText', () => {
-  const generic = "This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use \"Reopen Editor With… → Text Editor\" to see it as JSON.";
+  const generic = "This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use \"Reopen Editor With… → Text Editor\" to see it as text.";
   const baseline = 'This is the agent-change baseline for a graph (your accepted version). Use "Reopen Editor With… → Text Editor" to see it as JSON.';
 
   it('explains a baseline file, which the graph editor selector also matches', () => {

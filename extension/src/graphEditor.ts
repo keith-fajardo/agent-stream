@@ -9,24 +9,27 @@ import { escapeHtml, webviewHtml } from './webviewHtml';
 
 export const GRAPH_VIEW_TYPE = 'agentStream.graph';
 
-/** `<folder>/.agent-stream/graphs/<id>.json` → id; undefined for any other file. */
+/** `<folder>/.agent-stream/graphs/<id>.md` (or a tab's older `<id>.json`) → id; undefined for any other file. */
 export function graphIdFromPath(p: string): string | undefined {
-  const m = /[\\/]\.agent-stream[\\/]graphs[\\/]([^\\/]+)\.json$/.exec(p);
+  const m = /[\\/]\.agent-stream[\\/]graphs[\\/]([^\\/]+)\.(?:md|json)$/.exec(p);
   return m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
-/** The graph id when `filePath` is exactly `<folderPath>/.agent-stream/graphs/<id>.json`; nested copies belong to no engine. */
+/**
+ * The graph id when `filePath` is exactly `<folderPath>/.agent-stream/graphs/<id>.md`; nested copies belong to no
+ * engine. A tab restored from before Markdown graph files still points at `<id>.json`, which names the same graph.
+ */
 export function graphTarget(folderPath: string, filePath: string): string | undefined {
   const segments = (p: string) => p.replace(/\\/g, '/').split('/').filter(Boolean);
   const base = segments(folderPath);
   const file = segments(filePath);
   if (file.length !== base.length + 3 || !base.every((seg, i) => seg === file[i])) return undefined;
   const [dir, graphs, name] = file.slice(base.length);
-  const m = /^(.+)\.json$/.exec(name);
+  const m = /^(.+)\.(?:md|json)$/.exec(name);
   return dir === '.agent-stream' && graphs === 'graphs' && m && isGraphId(m[1]) ? m[1] : undefined;
 }
 
-const GENERIC_NOT_GRAPH = `This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as JSON.`;
+const GENERIC_NOT_GRAPH = `This file isn't a graph in this workspace folder. Graphs live in .agent-stream/graphs at the folder's root. Use "Reopen Editor With… → Text Editor" to see it as text.`;
 const BASELINE_NOT_GRAPH = 'This is the agent-change baseline for a graph (your accepted version). Use "Reopen Editor With… → Text Editor" to see it as JSON.';
 
 /** Why a file the graph editor was asked to open isn't shown as a graph. The editor selector also matches `<id>.baseline.json`. */
@@ -256,7 +259,7 @@ export function hostCommandArgs(command: HostCommand, panel: { folder: Folder; g
 }
 
 export function graphUri(folder: Folder, graphId: string): vscode.Uri {
-  return vscode.Uri.joinPath(folderUri(folder), '.agent-stream', 'graphs', `${graphId}.json`);
+  return vscode.Uri.joinPath(folderUri(folder), '.agent-stream', 'graphs', `${graphId}.md`);
 }
 
 export async function openGraphTab(folder: Folder, graphId: string): Promise<void> {

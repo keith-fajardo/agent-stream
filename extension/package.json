@@ -23,6 +23,7 @@
   ],
   "main": "./dist/extension.cjs",
   "activationEvents": [
+    "workspaceContains:.agent-stream/graphs/*.md",
     "workspaceContains:.agent-stream/graphs/*.json"
   ],
   "contributes": {
@@ -99,10 +100,10 @@
         "displayName": "Agent Stream Graph",
         "selector": [
           {
-            "filenamePattern": "**/.agent-stream/graphs/*.json"
+            "filenamePattern": "**/.agent-stream/graphs/*.md"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "viewsContainers": {
@@ -207,6 +208,11 @@
       {
         "command": "agentStream.exportRunReport",
         "title": "Export Run Report",
+        "category": "Agent Stream"
+      },
+      {
+        "command": "agentStream.openGraphMarkdown",
+        "title": "Open Graph as Markdown",
         "category": "Agent Stream"
       },
       {
@@ -349,6 +355,11 @@
           "command": "agentStream.openGraph",
           "when": "view == agentStream.graphs && viewItem == graph",
           "group": "1_open@1"
+        },
+        {
+          "command": "agentStream.openGraphMarkdown",
+          "when": "view == agentStream.graphs && viewItem =~ /^graph/",
+          "group": "1_open@2"
         },
         {
           "command": "agentStream.renameGraph",

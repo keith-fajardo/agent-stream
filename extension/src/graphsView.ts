@@ -25,6 +25,8 @@ export class GraphItem extends vscode.TreeItem {
       this.tooltip = graph.error;
       this.contextValue = 'graphUnreadable';
       this.iconPath = new vscode.ThemeIcon('warning');
+      // Its errors are in the Problems panel; the file is where to fix them.
+      this.command = { command: 'agentStream.openGraphMarkdown', title: 'Open as Markdown', arguments: [{ folder, graphId: graph.id }] };
       return;
     }
     const lastRun = graph.lastRun ? `${statusLabel(graph.lastRun.status)} · ${relativeTime(graph.lastRun.startedAt, now)}` : 'Never run';

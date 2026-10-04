@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -48,15 +48,17 @@ function setup(folders: Folder[] = [folder('a')]) {
     infoAction: vi.fn(),
   } satisfies Record<keyof Ui, unknown>;
   const opened: GraphTarget[] = [];
+  const texts: GraphTarget[] = [];
   let active: GraphTarget | undefined;
   const { commands, pickGraph } = graphCommands({
     engines: manager,
     folders: () => folders,
     ui: ui as unknown as Ui,
     open: async (t) => void opened.push(t),
+    openText: async (t) => void texts.push(t),
     activeTarget: () => active,
   });
-  return { manager, ui, opened, commands, pickGraph, folders, gate, setActive: (t: GraphTarget) => (active = t) };
+  return { manager, ui, opened, texts, commands, pickGraph, folders, gate, setActive: (t: GraphTarget) => (active = t) };
 }
 
 describe('graph commands', () => {
@@ -266,5 +268,42 @@ describe('graph commands', () => {
     s.setActive({ folder: s.folders[0], graphId: g.id });
     await s.commands.duplicateGraph();
     expect(s.manager.get(s.folders[0]).listGraphs().map((x) => x.name).sort()).toEqual(['Parity', 'Parity copy']);
+  });
+});
+
+describe('Open Graph as Markdown', () => {
+  it('opens the Markdown of the given graph, else the active tab’s', async () => {
+    const s = setup();
+    const f = s.folders[0];
+    const g = s.manager.get(f).createGraph('Parity');
+    await s.commands.openGraphMarkdown({ folder: f, graphId: g.id });
+    s.setActive({ folder: f, graphId: 'other' });
+    await s.commands.openGraphMarkdown();
+    expect(s.texts).toEqual([
+      { folder: f, graphId: g.id },
+      { folder: f, graphId: 'other' },
+    ]);
+  });
+
+  it('offers graphs whose file has errors too, since the file is where to fix them', async () => {
+    const s = setup();
+    const f = s.folders[0];
+    s.manager.get(f).createGraph('Parity');
+    writeFileSync(join(f.path, '.agent-stream', 'graphs', 'broken.md'), 'no name\n');
+    s.ui.pickGraph.mockResolvedValueOnce({ folder: f, graphId: 'broken' });
+    await s.commands.openGraphMarkdown();
+    expect(s.ui.pickGraph.mock.calls[0][0].map((i: { label: string }) => i.label)).toEqual(['Parity', 'broken']);
+    expect(s.texts).toEqual([{ folder: f, graphId: 'broken' }]);
+  });
+});
+
+describe('manifest: graph files', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+  it('opens a graph file as a graph tab only when asked, and offers Open Graph as Markdown', () => {
+    expect(manifest.contributes.customEditors).toEqual([{ viewType: 'agentStream.graph', displayName: 'Agent Stream Graph', selector: [{ filenamePattern: '**/.agent-stream/graphs/*.md' }], priority: 'option' }]);
+    expect(manifest.activationEvents).toEqual(['workspaceContains:.agent-stream/graphs/*.md', 'workspaceContains:.agent-stream/graphs/*.json']);
+    expect(manifest.contributes.commands).toContainEqual({ command: 'agentStream.openGraphMarkdown', title: 'Open Graph as Markdown', category: 'Agent Stream' });
+    expect(manifest.contributes.menus['view/item/context']).toContainEqual({ command: 'agentStream.openGraphMarkdown', when: 'view == agentStream.graphs && viewItem =~ /^graph/', group: '1_open@2' });
   });
 });

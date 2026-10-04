@@ -89,6 +89,7 @@ export async function activate(context: vscode.ExtensionContext) {
     folders: workspaceFolders,
     ui: vscodeUi,
     open: (t) => openGraphTab(t.folder, t.graphId),
+    openText: async (t) => void (await vscode.window.showTextDocument(graphUri(t.folder, t.graphId), { viewColumn: vscode.ViewColumn.Beside, preview: false })),
     activeTarget: () => {
       const p = panels.active();
       return p && { folder: p.folder, graphId: p.graphId };

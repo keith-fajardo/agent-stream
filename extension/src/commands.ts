@@ -35,6 +35,8 @@ export type CommandDeps = {
   folders(): Folder[];
   ui: Ui;
   open(target: GraphTarget): Promise<void>;
+  /** Opens the graph's `<id>.md` in a text editor beside the graph tab (Markdown graph files spec §7). */
+  openText(target: GraphTarget): Promise<void>;
   activeTarget(): GraphTarget | undefined;
 };
 
@@ -51,12 +53,13 @@ export function graphCommands(d: CommandDeps) {
     return r.ok ? r.graph.name : t.graphId;
   };
 
-  async function pickGraph(): Promise<GraphTarget | undefined> {
+  /** `withUnreadable`: graphs whose file can't be read are offered too (Open as Markdown is how to fix them). */
+  async function pickGraph(withUnreadable = false): Promise<GraphTarget | undefined> {
     const folders = d.folders();
     const items = folders.flatMap((folder) =>
       app(folder)
         .listGraphs()
-        .filter((g) => !g.error)
+        .filter((g) => withUnreadable || !g.error)
         .map((g) => ({ label: g.name, description: folders.length > 1 ? folder.name : undefined, target: { folder, graphId: g.id } })),
     );
     return d.ui.pickGraph(items);
@@ -139,6 +142,11 @@ export function graphCommands(d: CommandDeps) {
       if (!file) return;
       await file.write(r.markdown);
       await file.open();
+    },
+
+    async openGraphMarkdown(target?: GraphTarget): Promise<void> {
+      const t = target?.graphId ? target : (d.activeTarget() ?? (await pickGraph(true)));
+      if (t) await d.openText(t);
     },
 
     async renameGraph(target?: GraphTarget): Promise<void> {

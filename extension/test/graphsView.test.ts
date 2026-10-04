@@ -25,7 +25,7 @@ describe('GraphsView', () => {
     ]);
     expect(items[0].command).toEqual({ command: 'agentStream.openGraph', title: 'Open', arguments: [{ folder: a, graphId: 'p' }] });
     expect([items[0].folder, items[0].graphId]).toEqual([a, 'p']);
-    expect(items[2].command).toBeUndefined();
+    expect(items[2].command).toEqual({ command: 'agentStream.openGraphMarkdown', title: 'Open as Markdown', arguments: [{ folder: a, graphId: 'x' }] });
     expect(items[2].tooltip).toBe('invalid JSON: Unexpected end');
   });
 
