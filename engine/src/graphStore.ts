@@ -5,6 +5,7 @@ import {
   applyOp,
   canonicalGraph,
   diffGraphs,
+  diffToOps,
   edgeId,
   emptyGraph,
   formatFileErrors,
@@ -12,12 +13,14 @@ import {
   legacyGraphForMarkdown,
   MAX_IMPORT_CHARS,
   nextNodeId,
+  opLine,
   parseExportFile,
   parseGraph,
   parseGraphMarkdown,
   parseGraphMeta,
   serializeGraphMarkdown,
   serializeGraphMeta,
+  withMeta,
   type Actor,
   type AgentChange,
   type ChangeSource,
@@ -49,8 +52,10 @@ const BASELINE_SUFFIX = '.baseline.json';
 
 /** A file's modification time and size: a cached graph is valid while both of its files keep theirs. */
 type Stamp = { mtimeMs: number; size: number };
-/** A graph as last read or written, with the exact text of its two files. */
-type Cached = { graph: Graph; text: string; metaText?: string; md: Stamp; meta?: Stamp };
+/** A graph as last read or written, with the exact text of its two files. `broken`: the Markdown file now on disk, which doesn't parse. */
+type Cached = { graph: Graph; text: string; metaText?: string; md: Stamp; meta?: Stamp; broken?: Stamp };
+/** What graphFileChanged and graphFileDeleted did. */
+export type FileSync = 'unchanged' | 'applied' | 'meta' | 'added' | 'errors' | 'deleted';
 
 function stampOf(path: string): Stamp | undefined {
   const s = statSync(path, { throwIfNoEntry: false });
@@ -85,6 +90,8 @@ export class GraphStore extends EventEmitter {
   private failed = new Map<string, { md: Stamp; meta?: Stamp; error: string }>();
   /** The problems in each graph's Markdown file. */
   private errors = new Map<string, GraphFileError[]>();
+  /** The exact text this store last wrote to each graph's Markdown file: its own saves, which the file watcher reports too. */
+  private written = new Map<string, string>();
 
   constructor(
     private paths: ProjectPaths,
@@ -145,15 +152,20 @@ export class GraphStore extends EventEmitter {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     const md = stampOf(this.file(id));
     if (!md) {
-      this.forget(id);
+      this.graphFileDeleted(id);
       return { ok: false, error: `graph "${id}" not found` };
     }
     const meta = stampOf(this.metaFile(id));
     const cached = this.cache.get(id);
-    if (cached && sameStamp(cached.md, md) && sameStamp(cached.meta, meta)) return { ok: true, graph: cached.graph };
+    if (cached) {
+      if ((sameStamp(cached.md, md) || sameStamp(cached.broken, md)) && sameStamp(cached.meta, meta)) return { ok: true, graph: cached.graph };
+      // Changed outside Agent Stream, and noticed here before the file watcher: the same handling as the watcher's.
+      this.graphFileChanged(id);
+      const after = this.cache.get(id);
+      return after ? { ok: true, graph: after.graph } : { ok: false, error: `graph "${id}" not found` };
+    }
     const failed = this.failed.get(id);
-    if (!cached && failed && sameStamp(failed.md, md) && sameStamp(failed.meta, meta)) return { ok: false, error: failed.error };
-    // The files changed on disk (hand edit, git checkout, ...) or were never read: read them.
+    if (failed && sameStamp(failed.md, md) && sameStamp(failed.meta, meta)) return { ok: false, error: failed.error };
     return this.read(id, md, meta);
   }
 
@@ -172,8 +184,99 @@ export class GraphStore extends EventEmitter {
     const graph = canonicalGraph(graphFromDoc(parsed.doc, parseGraphMeta(metaText), id, this.clock()));
     this.cache.set(id, { graph, text, metaText, md, meta });
     this.failed.delete(id);
+    this.written.delete(id);
     this.setErrors(id, []);
     return { ok: true, graph };
+  }
+
+  /**
+   * The graph's Markdown or side file changed outside Agent Stream (Markdown graph files spec §6.2-§6.4). The store's
+   * own saves are recognised by their exact text and ignored. A Markdown edit becomes user operations, applied all or
+   * nothing and recorded `via: 'file'`, and the file is written back in canonical form. A Markdown file that doesn't
+   * parse changes nothing: the last good graph stays and its problems wait in fileErrors(). A side file change only
+   * re-reads positions and bookkeeping.
+   */
+  graphFileChanged(id: string): FileSync {
+    if (!isGraphId(id)) return 'unchanged';
+    const md = stampOf(this.file(id));
+    if (!md) return this.graphFileDeleted(id);
+    const meta = stampOf(this.metaFile(id));
+    const cached = this.cache.get(id);
+    if (!cached) {
+      // A new file, a deleted one that came back, or one that didn't parse until now.
+      const r = this.read(id, md, meta);
+      if (!r.ok) return 'errors';
+      if (this.cache.get(id)?.text !== serializeGraphMarkdown(r.graph)) this.save(r.graph);
+      return 'added';
+    }
+    const text = readFileSync(this.file(id), 'utf8');
+    const metaText = readIfExists(this.metaFile(id));
+    if (text === cached.text || text === this.written.get(id)) {
+      this.setErrors(id, []);
+      if (metaText === cached.metaText) {
+        this.cache.set(id, { ...cached, md, meta, broken: undefined });
+        return 'unchanged';
+      }
+      const graph = withMeta(cached.graph, parseGraphMeta(metaText), this.clock());
+      this.cache.set(id, { graph, text: cached.text, metaText, md, meta });
+      this.emit('changed', graph);
+      return 'meta';
+    }
+    const parsed = parseGraphMarkdown(text);
+    if (!parsed.ok) return this.refuseFile(id, cached, md, meta, parsed.errors);
+    const at = this.clock();
+    // A branch switch changes both files: the side file's bookkeeping first, then the edit on top of it.
+    const current = metaText === cached.metaText ? cached.graph : withMeta(cached.graph, parseGraphMeta(metaText), at);
+    const ops = diffToOps(current, parsed.doc);
+    let draft = current;
+    for (const op of ops) {
+      const r = applyOp(draft, op, 'user', at, { rewriteReferences: renameReferences });
+      if (!r.ok) return this.refuseFile(id, cached, md, meta, [{ line: opLine(parsed.doc, op), message: `${r.error}. Nothing from this edit was applied.` }]);
+      draft = r.graph;
+    }
+    let graph = current;
+    const applied: Op[] = [];
+    for (const op of ops) {
+      const r = this.applyOne(graph, op, 'user', at);
+      if (!r.ok) throw new Error(r.error); // the same operations just succeeded on a copy
+      graph = r.graph;
+      applied.push(r.op);
+    }
+    if (parsed.doc.name !== graph.name) graph = { ...graph, name: parsed.doc.name, updatedAt: at };
+    this.setErrors(id, []);
+    // What is on disk now, so save() writes the canonical text back (new steps get their ids) when it differs.
+    this.cache.set(id, { graph: current, text, metaText, md, meta });
+    const saved = this.save(graph);
+    this.dropBaselineIfSame(saved);
+    for (const op of applied) this.record(id, { at, by: 'user', op, via: 'file' });
+    this.emit('changed', saved);
+    for (const op of applied) this.emit('op', id, op);
+    return 'applied';
+  }
+
+  /** The graph's Markdown file is gone (spec §6.5): the graph leaves the list. Its side file, history and baseline stay. */
+  graphFileDeleted(id: string): FileSync {
+    if (!isGraphId(id)) return 'unchanged';
+    // An editor's save by rename can read as a delete and a create: a file that is there is a change.
+    if (existsSync(this.file(id))) return this.graphFileChanged(id);
+    const known = this.cache.has(id) || this.failed.has(id);
+    this.forget(id);
+    if (!known) return 'unchanged';
+    this.emit('fileDeleted', id);
+    return 'deleted';
+  }
+
+  /** Keeps the last good graph and changes no file; the problems wait in fileErrors() until the file reads again. */
+  private refuseFile(id: string, cached: Cached, md: Stamp, meta: Stamp | undefined, errors: GraphFileError[]): FileSync {
+    this.cache.set(id, { ...cached, meta, broken: md });
+    this.setErrors(id, errors);
+    return 'errors';
+  }
+
+  /** While the Markdown file has errors, edits that would rewrite it are refused, so a half-finished hand edit is never lost. */
+  private brokenFile(id: string): string | null {
+    const errors = this.fileErrors(id);
+    return errors.length ? `The file ${id}.md has errors (${formatFileErrors(errors)}). Fix it first: until then this graph can't be changed here.` : null;
   }
 
   /** Writes a graph converted from a file in the old JSON format (spec §5.2), in canonical form. */
@@ -197,6 +300,7 @@ export class GraphStore extends EventEmitter {
   private forget(id: string): void {
     this.cache.delete(id);
     this.failed.delete(id);
+    this.written.delete(id);
     this.setErrors(id, []);
   }
 
@@ -217,6 +321,8 @@ export class GraphStore extends EventEmitter {
     if (!trimmed) return { ok: false, error: 'A graph needs a name.' };
     const r = this.load(id);
     if (!r.ok) return r;
+    const broken = this.brokenFile(id);
+    if (broken) return { ok: false, error: broken };
     const graph = this.save({ ...r.graph, name: trimmed, updatedAt: this.clock() });
     this.emit('changed', graph);
     return { ok: true, graph };
@@ -275,29 +381,38 @@ export class GraphStore extends EventEmitter {
     }
     const current = this.load(graphId);
     if (!current.ok) return current;
+    // A move only rewrites the side file, so it is allowed while the Markdown file has errors.
+    const broken = op.type === 'moveNode' ? null : this.brokenFile(graphId);
+    if (broken) return { ok: false, error: broken };
     const at = this.clock();
-    const resolved: Op =
-      op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(current.graph) } } : op;
-    const r = applyOp(current.graph, resolved, by, at, { rewriteReferences: renameReferences });
+    const r = this.applyOne(current.graph, op, by, at);
+    if (!r.ok) return r;
+    const saved = this.save(r.graph);
+    if (r.op.type !== 'moveNode') {
+      this.dropBaselineIfSame(saved);
+      this.record(graphId, { at, by, op: r.op, ...(source && { source }) });
+    }
+    this.emit('changed', saved);
+    this.emit('op', graphId, r.op);
+    return { ok: true, graph: saved };
+  }
+
+  /** One edit on `current`, keeping the baseline rules; saves nothing. Returns the op as recorded: an added step gets its id. */
+  private applyOne(current: Graph, op: Op, by: Actor, at: string): { ok: true; graph: Graph; op: Op } | { ok: false; error: string } {
+    const resolved: Op = op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(current) } } : op;
+    const r = applyOp(current, resolved, by, at, { rewriteReferences: renameReferences });
     if (!r.ok) return r;
     // Positions are layout, not content: moves never touch the baseline.
     if (resolved.type !== 'moveNode') {
-      const base = this.baseline(graphId);
-      if (by === 'agent' && base.ok && !base.graph) this.writeBaseline(current.graph);
+      const base = this.baseline(current.id);
+      if (by === 'agent' && base.ok && !base.graph) this.writeBaseline(current);
       if (by === 'user' && base.ok && base.graph) {
         // An edit that doesn't fit the baseline (renaming a step an agent added) leaves it as it is.
         const mirrored = applyOp(base.graph, resolved, 'user', at, { rewriteReferences: renameReferences });
         if (mirrored.ok) this.writeBaseline(mirrored.graph);
       }
     }
-    const saved = this.save(r.graph);
-    if (resolved.type !== 'moveNode') {
-      this.dropBaselineIfSame(saved);
-      this.record(graphId, { at, by, op: resolved, ...(source && { source }) });
-    }
-    this.emit('changed', saved);
-    this.emit('op', graphId, resolved);
-    return { ok: true, graph: saved };
+    return { ok: true, graph: r.graph, op: resolved };
   }
 
   /** The user's graph before pending agent changes: none when the file is absent. */
@@ -334,6 +449,8 @@ export class GraphStore extends EventEmitter {
   private reviewOp(graphId: string, op: ReviewOp): GraphResult {
     const current = this.load(graphId);
     if (!current.ok) return current;
+    const broken = op.type === 'revertChange' ? this.brokenFile(graphId) : null;
+    if (broken) return { ok: false, error: broken };
     const graph = current.graph;
     const at = this.clock();
     const base = this.baseline(graphId);
@@ -396,6 +513,7 @@ export class GraphStore extends EventEmitter {
     const cached = this.cache.get(g.id);
     if (cached?.metaText !== metaText || !existsSync(metaPath)) writeFileAtomic(metaPath, metaText);
     if (cached?.text !== text || !existsSync(mdPath)) writeFileAtomic(mdPath, text);
+    this.written.set(g.id, text);
     this.cache.set(g.id, { graph: g, text, metaText, md: stampOf(mdPath)!, meta: stampOf(metaPath) });
     this.failed.delete(g.id);
     return g;
