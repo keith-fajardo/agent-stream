@@ -264,7 +264,8 @@ export class GraphStore extends EventEmitter {
     this.dropBaselineIfSame(saved);
     for (const op of applied) this.record(id, { at, by: 'user', op, via: 'file' });
     this.emit('changed', saved);
-    for (const op of applied) this.emit('op', id, op);
+    // `via: 'file'`: listeners keep machine-local state (saved variable values) that a branch switch would otherwise lose.
+    for (const op of applied) this.emit('op', id, op, 'file');
     return 'applied';
   }
 

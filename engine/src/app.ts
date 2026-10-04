@@ -24,6 +24,7 @@ import {
   type NodeStatus,
   type NodeRunState,
   type Op,
+  type OpRecord,
   type RunMeta,
   type ServerMessage,
   type Session,
@@ -327,9 +328,10 @@ export function createApp(d: AppDeps) {
   }
 
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
-  graphStore.on('op', (graphId: string, op: Op) => {
+  graphStore.on('op', (graphId: string, op: Op, via?: OpRecord['via']) => {
     if (op.type === 'renameVariable') values.rename(graphId, op.name, op.newName);
-    if (op.type === 'deleteVariable') values.delete(graphId, op.name);
+    // A file edit (a branch switch, a hand edit) never deletes a saved value: the variable may come back with the file.
+    if (op.type === 'deleteVariable' && via !== 'file') values.delete(graphId, op.name);
   });
   /** Each graph's agent-change count as last broadcast, so the graphs list follows it. */
   const agentChangeCounts = new Map<string, number>();

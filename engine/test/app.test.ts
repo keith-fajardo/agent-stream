@@ -1710,13 +1710,19 @@ describe('graph files changed outside Agent Stream', () => {
     expect(app.graphFileChanged(graphId)).toBe('unchanged');
   });
 
-  it('forgets the value of a variable the file removed', () => {
-    const { app, graphId, edit } = withFile();
+  it('keeps the value of a variable the file removed, so it is there again when the file brings the variable back', () => {
+    const { app, graphId, md, edit } = withFile();
     app.values.set(graphId, 'schema', 'dev');
+    const original = readFileSync(md, 'utf8');
     edit('## Variables\n\n- `schema`\n\n', '');
     edit('make {{ schema }}', 'make');
     expect(app.graphFileChanged(graphId)).toBe('applied');
-    expect(app.values.get(graphId)).toEqual({});
+    expect(app.graphStore.get(graphId).variables).toEqual([]);
+    expect(app.values.get(graphId)).toEqual({ schema: 'dev' });
+    writeFileSync(md, original);
+    expect(app.graphFileChanged(graphId)).toBe('applied');
+    expect(app.graphStore.get(graphId).variables.map((v) => v.name)).toEqual(['schema']);
+    expect(app.values.get(graphId)).toEqual({ schema: 'dev' });
   });
 
   it('publishes file errors, includes them when the graph opens, and clears them when fixed', async () => {
