@@ -85,6 +85,11 @@ function isUpstreamOutput(resolved: string): boolean {
 /** Private, and not an upstream output.md that a step is told to read (which must be a regular file, not a folder of that name). */
 const refusedFile = (resolved: string) => isPrivatePath(resolved) && !(isUpstreamOutput(resolved) && lstatOf(resolved)?.isFile());
 
+/** Why a resolved path in `.agent-stream/runs` or `.agent-stream/sessions` may not be read (an upstream output.md may), or null. */
+export function privateFolderDenial(resolved: string): string | null {
+  return refusedFile(resolved) ? PRIVATE_FOLDER : null;
+}
+
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 /** Agent Stream's own private folders, skipped wherever a `.agent-stream` folder is met. */
 const AGENT_STREAM_PRIVATE = new Set(['runs', 'sessions']);
