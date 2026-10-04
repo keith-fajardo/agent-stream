@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isEffortLevel, modelLine, supportsEffort } from '../src/format';
 import { defaultEffortsFor, findModel, menuModels } from '../src/models';
-import type { ModelChoice } from '../src/types';
+import { EFFORT_LEVELS, type ModelChoice } from '../src/types';
 import { parseWebviewMessage } from '../src/schemas';
 
 describe('supportsEffort', () => {
@@ -66,5 +66,34 @@ describe('model lookup', () => {
   });
   it("leaves Claude Code's own default row out of the menus: our Default stands for it", () => {
     expect(menuModels(MODELS).map((m) => m.value)).toEqual(['sonnet', 'claude-opus-4-6', 'haiku']);
+  });
+});
+
+describe('the ultra effort level', () => {
+  it('is a level, after max, and a planner model choice may use it', () => {
+    expect(isEffortLevel('ultra')).toBe(true);
+    expect(EFFORT_LEVELS.at(-1)).toBe('ultra');
+    const msg = { type: 'setPlannerModel', graphId: 'g', sessionId: 's', model: 'gpt-x', effort: 'ultra' };
+    expect(parseWebviewMessage(msg)).toEqual({ ok: true, kind: 'engine', msg });
+  });
+});
+
+describe('defaultEffortsFor with a provider-marked default model', () => {
+  it('uses the model marked isDefault when there is no default row and no configured model (Codex)', () => {
+    const models: ModelChoice[] = [
+      { value: 'gpt-a', label: 'A', efforts: ['low', 'high'] },
+      { value: 'gpt-b', label: 'B', efforts: ['low', 'ultra'], isDefault: true },
+    ];
+    expect(defaultEffortsFor(models, undefined)).toEqual(['low', 'ultra']);
+    expect(defaultEffortsFor(models, 'gpt-a')).toEqual(['low', 'high']);
+    expect(defaultEffortsFor([{ value: 'gpt-a', label: 'A', efforts: ['low'] }], undefined)).toEqual([]);
+  });
+
+  it("still prefers Claude Code's default row", () => {
+    const models: ModelChoice[] = [
+      { value: 'default', label: 'Default', efforts: ['high'] },
+      { value: 'gpt-b', label: 'B', efforts: ['low'], isDefault: true },
+    ];
+    expect(defaultEffortsFor(models, undefined)).toEqual(['high']);
   });
 });

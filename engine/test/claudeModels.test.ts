@@ -5,7 +5,7 @@ import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext } from '../src/executors';
 import { PLANNER_APPEND } from '../src/planner';
 import { createClaudeProvider } from '../src/providers/claude';
-import { fetchModels } from '../src/providers/claude/models';
+import { fetchModels, modelOptions } from '../src/providers/claude/models';
 import type { ModelQueryFn, QueryFn } from '../src/providers/claude/sdk';
 import { createPlannerGate, createStepGate } from '../src/providers/toolGate';
 import type { PlannerTurn } from '../src/providers/types';
@@ -212,5 +212,14 @@ describe('Claude provider: listModels', () => {
     const hang: ModelQueryFn = () => ({ supportedModels: () => new Promise(() => {}), close });
     await expect(fetchModels(hang, '/bin/claude', {}, 10)).rejects.toThrow('did not answer');
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("modelOptions and Codex's ultra level", () => {
+  it('drops ultra for Claude with a line, even when the model list is unknown (R31)', () => {
+    const warn = vi.fn();
+    expect(modelOptions({ model: 'opus', effort: 'ultra' }, undefined, warn)).toEqual({ model: 'opus' });
+    expect(warn).toHaveBeenCalledWith('opus|ultra', '[agent-stream] Claude has no "ultra" effort level; running without an effort level.');
+    expect(modelOptions({ effort: 'ultra' }, [], warn)).toEqual({});
   });
 });

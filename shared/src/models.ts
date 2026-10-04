@@ -8,9 +8,13 @@ export function findModel(models: readonly ModelChoice[] | undefined, id: string
   return models?.find((m) => m.value === id) ?? models?.find((m) => m.resolved === id);
 }
 
-/** The levels our Default offers: the configured default model's, else Claude Code's default row's; [] when unknown. */
+/**
+ * The levels our Default offers: the configured default model's, else Claude Code's default row's, else the model the
+ * provider marks as its default (Codex); [] when unknown.
+ */
 export function defaultEffortsFor(models: readonly ModelChoice[], defaultModel: string | undefined): EffortLevel[] {
-  return (defaultModel ? findModel(models, defaultModel) : models.find((m) => m.value === CLI_DEFAULT_MODEL))?.efforts ?? [];
+  if (defaultModel) return findModel(models, defaultModel)?.efforts ?? [];
+  return (models.find((m) => m.value === CLI_DEFAULT_MODEL) ?? models.find((m) => m.isDefault))?.efforts ?? [];
 }
 
 /** The models a menu lists after its own Default: Claude Code's default row is left out, since Default stands for it. */

@@ -56,4 +56,15 @@ describe('readSettings', () => {
     expect(props['agentStream.copilot.maxRequestsPerTurn']).toMatchObject({ type: 'integer', default: 100, minimum: 1, maximum: 100 });
     expect(JSON.stringify(props['agentStream.provider'])).not.toContain('preview');
   });
+
+  it('reads the ultra effort, and the manifest offers it with a description', () => {
+    const values: Record<string, unknown> = { effort: 'ultra' };
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: (key: string, fallback: unknown) => values[key] ?? fallback } as never);
+    expect(readSettings().effort).toBe('ultra');
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const effort = manifest.contributes.configuration.properties['agentStream.effort'];
+    expect(effort.enum).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+    expect(effort.enumDescriptions).toHaveLength(effort.enum.length);
+    expect(effort.enumDescriptions.at(-1)).toBe('Ultra');
+  });
 });

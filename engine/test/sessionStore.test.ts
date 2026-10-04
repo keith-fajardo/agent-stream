@@ -104,6 +104,13 @@ describe('SessionStore', () => {
     store.removeGraph('g1');
     expect(store.transcripts(a.id).load('g1', 'copilot', 'c')).toBeUndefined();
   });
+
+  it('keeps an ultra effort choice across a reload', () => {
+    const { paths, store } = setup();
+    const a = store.create('A');
+    store.setPlannerState(a.id, 'g1', { effort: 'ultra' });
+    expect(new SessionStore(paths, fixedClock()).plannerState(a.id, 'g1')).toEqual({ effort: 'ultra' });
+  });
 });
 
 describe('ensureDefault with an unreadable default session', () => {

@@ -262,14 +262,15 @@ export type ChatEntry = { at: string; role: ChatRole; text: string };
 export type ProviderId = 'claude' | 'copilot';
 export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
 
-/** How hard the model thinks: the Claude Agent SDK's levels. */
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** How hard the model thinks: the Claude Agent SDK's levels, plus Codex's `ultra`. A model offers only some of them. */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 /**
  * A model a provider offers. `efforts` is empty when the model has no effort levels; `unavailable` when the provider can't
- * run it yet; `resolved` the full id an alias row stands for (sonnet → claude-sonnet-5).
+ * run it yet; `resolved` the full id an alias row stands for (sonnet → claude-sonnet-5); `isDefault` the model the provider
+ * runs when none is chosen (Codex marks one; Claude Code has a `default` row instead).
  */
-export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string };
+export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string; isDefault?: boolean };
 /** A model and effort choice; an absent field means Default. */
 export type ModelSelection = { model?: string; effort?: EffortLevel };
 

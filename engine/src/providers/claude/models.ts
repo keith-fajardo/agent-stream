@@ -55,10 +55,14 @@ export function modelOptions(choice: { model?: string; effort?: EffortLevel }, k
   if (choice.effort) {
     // No model: Claude Code's default runs, so its own default row says which levels there are.
     const id = choice.model ?? CLI_DEFAULT_MODEL;
+    const effort = choice.effort;
     const entry = findModel(known, id);
-    if (entry && !entry.efforts.includes(choice.effort)) {
-      warn(`${id}|${choice.effort}`, `[agent-stream] ${entry.label} (${id}) has no "${choice.effort}" effort level; running without an effort level.`);
-    } else out.effort = choice.effort;
+    if (effort === 'ultra') {
+      // Codex's level: Claude Code has none above max (R31).
+      warn(`${id}|ultra`, '[agent-stream] Claude has no "ultra" effort level; running without an effort level.');
+    } else if (entry && !entry.efforts.includes(effort)) {
+      warn(`${id}|${effort}`, `[agent-stream] ${entry.label} (${id}) has no "${effort}" effort level; running without an effort level.`);
+    } else out.effort = effort;
   }
   return out;
 }

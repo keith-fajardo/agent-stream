@@ -56,11 +56,11 @@
         },
         "agentStream.effort": {
           "type": "string",
-          "enum": ["", "low", "medium", "high", "xhigh", "max"],
+          "enum": ["", "low", "medium", "high", "xhigh", "max", "ultra"],
           "default": "",
           "enumDescriptions": [
             "Default: the model's own effort level.",
-            "Low", "Medium", "High", "Extra high", "Max"
+            "Low", "Medium", "High", "Extra high", "Max", "Ultra"
           ],
           "description": "The effort level for agent steps in runs and for planner conversations that haven't chosen their own. Leave empty for the model's default. Ignored for a model that doesn't offer the level."
         },
