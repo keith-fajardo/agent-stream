@@ -51,8 +51,10 @@ export function connect(): void {
     const wasListed = listsOwnGraph(getState().graphs);
     dispatch({ kind: 'server', msg });
     if (msg.type === 'hello') send({ type: 'openGraph', graphId: bootGraphId() });
-    // The graph's file came back, or reads again (Markdown graph files spec §6.5): open it again.
-    if (msg.type === 'graphs' && !getState().graph && !wasListed && listsOwnGraph(msg.graphs)) send({ type: 'openGraph', graphId: bootGraphId() });
+    // The graph's file came back, or reads again (Markdown graph files spec §6.5): open it again. Only for a graph that
+    // went (graphGone), so a tab still opening doesn't ask twice.
+    const reopen = msg.type === 'graphs' && getState().graphGone && !getState().graph && !wasListed && listsOwnGraph(msg.graphs);
+    if (reopen) send({ type: 'openGraph', graphId: bootGraphId() });
     if (msg.type === 'graphOpened') post({ type: 'opened', graphId: msg.graph.id });
   });
   // The checkout can change while the tab is hidden (a branch switch in a terminal): ask again when it shows (spec §7).
