@@ -35,10 +35,11 @@ export function edgeId(from: string, to: string): string {
   return `${from}->${to}`;
 }
 
-/** The number in an `n<number>` step id; 0 for any other id. */
+/** The number in an `n<number>` step id; 0 for any other id, and for a number too large to count on exactly. */
 export function seqOf(id: string): number {
   const m = /^n(\d+)$/.exec(id);
-  return m ? Number(m[1]) : 0;
+  const n = m ? Number(m[1]) : 0;
+  return Number.isSafeInteger(n) ? n : 0;
 }
 
 export function nextNodeId(graph: Graph): string {

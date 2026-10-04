@@ -35,7 +35,8 @@ const graphSchema = z.object({
   variables: z.array(z.object({ name: z.string(), description: z.string().default('') })).default([]),
   nodes: z.array(graphNodeSchema).default([]),
   edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
-  nodeSeq: z.number().int().nonnegative().default(0),
+  // A stored counter too large to count on exactly (from a huge step id) is read as 0: the step ids still count.
+  nodeSeq: z.preprocess((v) => (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v) ? 0 : v), z.number().int().nonnegative().default(0)),
   updatedAt: z.string().default(''),
 });
 

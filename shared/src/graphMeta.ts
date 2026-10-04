@@ -24,6 +24,7 @@ const metaNodeSchema = z.object({
 });
 const metaSchema = z.object({
   version: z.literal(1),
+  // int() refuses a number that isn't a safe integer, so a counter too large to count on exactly reads as 0.
   nodeSeq: z.number().int().optional().catch(undefined),
   updatedAt: z.string().optional().catch(undefined),
   nodes: z.record(z.string(), metaNodeSchema.nullable().catch(null)).optional().catch(undefined),

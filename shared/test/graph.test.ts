@@ -8,11 +8,15 @@ import {
   nodeIdProblem,
   refinable,
   reusableNodeIds,
+  seqOf,
   topoOrder,
   upstream,
   validateRunnable,
   wouldCreateCycle,
 } from '../src/graph';
+import { EXPORT_FORMAT, EXPORT_VERSION, parseExportFile } from '../src/exportFile';
+import { canonicalGraph } from '../src/graphDoc';
+import { parseGraphMeta } from '../src/graphMeta';
 import { parseGraph } from '../src/schemas';
 import type { Graph, GraphNode, NodeRunState, Op, RenderedRun } from '../src/types';
 
@@ -52,6 +56,31 @@ describe('applyOp', () => {
     const g = build([agent('a'), agent('b'), { type: 'deleteNode', id: 'n2' }, agent('c')]);
     expect(g.nodes.map((n) => n.id)).toEqual(['n1', 'n3']);
     expect(nextNodeId(g)).toBe('n4');
+  });
+
+  it('counts only n<number> ids whose number is a safe integer, so a huge one never stops new steps', () => {
+    const huge = 'n99999999999999999999';
+    expect([seqOf('n12'), seqOf('n9007199254740991'), seqOf('n9007199254740992'), seqOf(huge), seqOf('step')]).toEqual([12, 9007199254740991, 0, 0, 0]);
+    let g = build([{ type: 'addNode', node: { id: huge, title: 'big', kind: 'agent' } }]);
+    expect(g.nodeSeq).toBe(0);
+    for (const title of ['a', 'b']) {
+      const r = applyOp(g, { type: 'addNode', node: { id: nextNodeId(g), title, kind: 'agent' } }, 'user', T2);
+      if (!r.ok) throw new Error(r.error);
+      g = r.graph;
+    }
+    expect(g.nodes.map((n) => n.id)).toEqual([huge, 'n1', 'n2']);
+    expect(canonicalGraph({ ...g, nodeSeq: 0 }).nodeSeq).toBe(2);
+  });
+
+  it('reads a stored nodeSeq that is not a safe integer as 0', () => {
+    const huge = 100000000000000000000;
+    expect(parseGraphMeta(`{"version":1,"nodeSeq":${huge}}`)?.nodeSeq).toBe(0);
+    const r = parseGraph({ ...emptyGraph('g', 'G', T), nodeSeq: huge });
+    expect(r.ok && r.graph.nodeSeq).toBe(0);
+    expect(parseGraph({ ...emptyGraph('g', 'G', T), nodeSeq: 1.5 }).ok).toBe(false);
+    const file = JSON.stringify({ format: EXPORT_FORMAT, version: EXPORT_VERSION, graph: { name: 'G', nodes: [{ id: 'n99999999999999999999', title: 'big', kind: 'agent' }] } });
+    const imported = parseExportFile(file, 'g', T);
+    expect(imported.ok && imported.graph.nodeSeq).toBe(0);
   });
 
   it('rejects duplicate ids, invalid ids and blank titles', () => {

@@ -38,6 +38,18 @@ describe('GraphStore', () => {
     expect(store.get(id).name).toBe('Tests');
   });
 
+  it('keeps adding steps to a graph with a 20-digit step id and a huge stored nodeSeq', () => {
+    const paths = tmpProject();
+    writeFileSync(join(paths.graphsDir, 'big.md'), '# Big\n\n## n99999999999999999999 · Huge\n\n- kind: agent\n\n```prompt\nGo.\n```\n');
+    writeFileSync(join(paths.graphsDir, 'big.meta.json'), '{"version":1,"nodeSeq":100000000000000000000}\n');
+    const store = new GraphStore(paths, fixedClock());
+    for (const title of ['a', 'b']) {
+      const r = store.apply('big', { type: 'addNode', node: { title, kind: 'agent', prompt: 'p' } }, 'user');
+      if (!r.ok) throw new Error(r.error);
+    }
+    expect(new GraphStore(paths, fixedClock()).get('big').nodes.map((n) => n.id)).toEqual(['n99999999999999999999', 'n1', 'n2']);
+  });
+
   it('applies ops, persists them, logs them and emits changes', () => {
     const paths = tmpProject();
     const store = new GraphStore(paths, fixedClock());

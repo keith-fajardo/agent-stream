@@ -1,4 +1,4 @@
-import { edgeId } from './graph';
+import { edgeId, seqOf } from './graph';
 import { parseGraph } from './schemas';
 import type { Graph, GraphNode, GraphResult, VariableDef } from './types';
 
@@ -67,6 +67,6 @@ export function parseExportFile(content: string, id: string, now: string): Graph
     updatedAt: now,
   });
   if (!r.ok) return { ok: false, error: `The graph in this file is invalid: ${r.error}` };
-  const nodeSeq = r.graph.nodes.reduce((max, n) => (/^n\d+$/.test(n.id) ? Math.max(max, Number(n.id.slice(1))) : max), 0);
+  const nodeSeq = r.graph.nodes.reduce((max, n) => Math.max(max, seqOf(n.id)), 0);
   return { ok: true, graph: { ...r.graph, nodeSeq } };
 }
