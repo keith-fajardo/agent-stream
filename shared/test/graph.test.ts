@@ -13,8 +13,10 @@ import {
   validateRunnable,
   wouldCreateCycle,
 } from '../src/graph';
+import { parseGraph } from '../src/schemas';
 import type { Graph, GraphNode, NodeRunState, Op, RenderedRun } from '../src/types';
 
+const ID_RULE = 'Step ids use letters, digits, - and _ (at most 64), with no "--" and not ending in "-".';
 const T = '2026-10-02T00:00:00.000Z';
 const T2 = '2026-10-02T00:00:05.000Z';
 
@@ -294,16 +296,16 @@ describe('addNode ids', () => {
     const g = emptyGraph('g', 'G', 't');
     const add = (id: string) => applyOp(g, { type: 'addNode', node: { id, title: 'a', kind: 'agent', prompt: 'p' } }, 'user', 't');
     expect(add('constructor')).toEqual({ ok: false, error: `"constructor" can't be used as a step id.` });
-    expect(add('a b')).toEqual({ ok: false, error: 'invalid node id "a b"' });
+    expect(add('a b')).toEqual({ ok: false, error: `invalid node id "a b". ${ID_RULE}` });
     for (const id of ['n1', 'build_old', 'my-step']) expect(add(id).ok).toBe(true);
   });
 
   it('rejects ids the Flow could not write: "--" inside, or "-" at the end', () => {
     const g = emptyGraph('g', 'G', 't');
     const add = (id: string) => applyOp(g, { type: 'addNode', node: { id, title: 'a', kind: 'agent', prompt: 'p' } }, 'user', 't');
-    for (const id of ['a--b', 'a---b', '--a', 'a-', 'n1-']) expect(add(id)).toEqual({ ok: false, error: `invalid node id "${id}"` });
+    for (const id of ['a--b', 'a---b', '--a', 'a-', 'n1-']) expect(add(id)).toEqual({ ok: false, error: `invalid node id "${id}". ${ID_RULE}` });
     for (const id of ['n12', 'step_4', 'a-b', 'a_-_b', '-a', 'a-b-c']) expect(add(id).ok).toBe(true);
-    expect(nodeIdProblem('a--b')).toBe('invalid node id "a--b"');
+    expect(nodeIdProblem('a--b')).toBe(`invalid node id "a--b". ${ID_RULE}`);
     expect(nodeIdProblem('a-b')).toBeNull();
   });
 });
@@ -400,5 +402,16 @@ describe('updateNode timeouts', () => {
     expect(kept.ok && kept.graph.nodes[0].timeoutSec).toBe(30);
     const cleared = applyOp(set.graph, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 0 } }, 'user', T2);
     expect(cleared.ok && 'timeoutSec' in cleared.graph.nodes[0]).toBe(false);
+  });
+});
+
+describe('legacy ids', () => {
+  it('parseGraph still loads old graphs with ids like "fix-" and "a--b"; new ids are strict', () => {
+    const node = (id: string) => ({ id, title: id, kind: 'agent' as const, prompt: 'p' });
+    const g = { id: 'g', name: 'G', nodes: [node('fix-'), node('a--b')], edges: [{ id: 'e1', from: 'fix-', to: 'a--b' }] };
+    expect(parseGraph(g).ok).toBe(true);
+    expect(parseGraph({ ...g, nodes: [node('a b')], edges: [] })).toMatchObject({ ok: false });
+    const r = applyOp(emptyGraph('g', 'G', 't'), { type: 'addNode', node: node('fix-') }, 'user', 't');
+    expect(r).toEqual({ ok: false, error: `invalid node id "fix-". ${ID_RULE}` });
   });
 });

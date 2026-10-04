@@ -4,16 +4,25 @@ import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op,
 
 /** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
 const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
+/** What graph files written before the Markdown format could hold: any 1 to 64 letters, digits, - and _. */
+const LEGACY_NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOWS_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
-/** Why `id` can't be a step id, or null. Ids key plain objects and become folder names under runs/. */
-export function nodeIdProblem(id: string): string | null {
-  if (!NODE_ID_RE.test(id)) return `invalid node id "${id}"`;
+const NODE_ID_RULE = 'Step ids use letters, digits, - and _ (at most 64), with no "--" and not ending in "-".';
+
+function idProblem(id: string, pattern: RegExp): string | null {
+  if (!pattern.test(id)) return `invalid node id "${id}". ${NODE_ID_RULE}`;
   if (id === '__proto__' || Object.prototype.hasOwnProperty.call(Object.prototype, id) || WINDOWS_DEVICE_RE.test(id)) {
     return `"${id}" can't be used as a step id.`;
   }
   return null;
 }
+
+/** Why `id` can't be a new step id, or null. Ids key plain objects and become folder names under runs/. */
+export const nodeIdProblem = (id: string): string | null => idProblem(id, NODE_ID_RE);
+
+/** Like `nodeIdProblem`, but for graphs that already exist: ids with "--" or a trailing "-" still load (`parseGraph`). */
+export const legacyNodeIdProblem = (id: string): string | null => idProblem(id, LEGACY_NODE_ID_RE);
 
 /** A step with something for the planner to refine: a description, a prompt or a command. */
 export const refinable = (n: GraphNode): boolean => !!(n.description?.trim() || n.prompt?.trim() || n.command?.trim());

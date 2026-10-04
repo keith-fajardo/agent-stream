@@ -32,6 +32,11 @@ function stepHeading(text: string): { id?: string; title: string } {
 }
 
 const infoWord = (item: CodeItem) => item.info.split(/\s+/)[0].toLowerCase();
+/** An error when a step or Flow block's info string has more than its one word: the rest would be dropped on the next save. */
+function extraInfo(item: CodeItem, expected: string, errors: GraphFileError[]): void {
+  const info = item.info.trim();
+  if (/\s/.test(info)) errors.push({ line: item.line, message: `the code block's first line should be just ${expected}, with nothing after it (found "${info}").` });
+}
 
 /** Headings and fenced blocks, line by line. A "#" inside a fenced block is never a heading. */
 function sectionsOf(lines: string[], errors: GraphFileError[]): { preamble: Item[]; sections: Section[] } {
@@ -103,6 +108,7 @@ function readFlow(section: Section, stepIds: ReadonlySet<string>, errors: GraphF
   if (!blocks.length) errors.push({ line: section.line, message: '"## Flow" needs a ```mermaid block. Add one, or remove the section when no step is connected.' });
   const block = mermaid[0];
   if (!block) return [];
+  extraInfo(block, '"mermaid"', errors);
   const r = parseFlow(
     block.content.map((text, k) => ({ line: block.line + 1 + k, text })),
     stepIds,
@@ -119,7 +125,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
   const label = id ?? `"${title}"`;
   if (id) {
     const problem = nodeIdProblem(id);
-    if (problem) fail(section.line, `${problem.replace(/\.$/, '')}. Step ids use letters, digits, - and _ (at most 64).`);
+    if (problem) fail(section.line, problem.startsWith('invalid') ? problem : `${problem} Step ids use letters, digits, - and _ (at most 64).`);
   }
   if (!title) fail(section.line, id ? `step ${id} needs a title after "${STEP_SEPARATOR.trim()}".` : 'this step needs a title after "##".');
   const fields = new Map<string, { value: string; line: number }>();
@@ -166,6 +172,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
   else if (AGENT_INFOS.has(infoWord(code))) blockKind = 'agent';
   else if (COMMAND_INFOS.has(infoWord(code))) blockKind = 'command';
   else fail(code.line, `the code block of step ${label} needs the info string prompt (agent step) or sh (command step), as in \`\`\`prompt.`);
+  if (code && blockKind) extraInfo(code, '"prompt" or "sh"', errors);
   if (code && kind && blockKind && kind !== blockKind) {
     fail(code.line, `step ${label} is kind ${kind}, but its block is ${blockKind === 'agent' ? 'a prompt' : 'a command (sh)'}. Use a \`\`\`${kind === 'agent' ? 'prompt' : 'sh'} block, or change kind to ${blockKind}.`);
   }
@@ -225,7 +232,7 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
   const h1 = sections[0]?.level === 1 ? sections[0] : undefined;
   if (!h1 && !stray) errors.push({ line: sections[0]?.line ?? 1, message: START });
   for (const s of sections) {
-    if (s.level === 1 && s !== h1) errors.push({ line: s.line, message: 'a graph file has one "# Name" heading, and this is a second one. Use "##" for sections and steps.' });
+    if (h1 && s.level === 1 && s !== h1) errors.push({ line: s.line, message: 'a graph file has one "# Name" heading, and this is a second one. Use "##" for sections and steps.' });
   }
   if (h1 && !h1.title) errors.push({ line: h1.line, message: 'the graph needs a name after "#".' });
   const intro = h1?.items.find((item) => !isBlank(item));

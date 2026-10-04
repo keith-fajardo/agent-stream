@@ -17,6 +17,7 @@ function errors(text: string): GraphFileError[] {
   return r.errors;
 }
 const FENCE = '```';
+const START_MSG = 'the file must start with the graph\'s name, as "# Name".';
 
 /** The spec's example (§2), with the n3 section it leaves out. */
 const EXAMPLE = md(
@@ -237,8 +238,36 @@ describe('parseGraphMarkdown: errors', () => {
     expect(errors(md('# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', 'n1', FENCE, '## n1 · A', '- kind: robot', FENCE + 'sh', FENCE))).toEqual([{ line: 8, message: 'kind is "robot"; use agent or command.' }]);
   });
 
+  it('says the whole id rule for a bad id', () => {
+    const rule = 'Step ids use letters, digits, - and _ (at most 64), with no "--" and not ending in "-".';
+    expect(errors(md('# G', '## a-- · A', FENCE + 'sh', FENCE))).toEqual([{ line: 2, message: `invalid node id "a--". ${rule}` }]);
+    expect(errors(md('# G', '## a- · A', FENCE + 'sh', FENCE))).toEqual([{ line: 2, message: `invalid node id "a-". ${rule}` }]);
+  });
+
+  it('reports a "# Name" after a section as the missing name, not as a second one', () => {
+    expect(errors(md('## Goal', 'x', '# G'))).toEqual([{ line: 1, message: START_MSG }]);
+  });
+
+  it('refuses extra words in the info string of a step block or the Flow block', () => {
+    expect(errors(md('# G', '## n1 · A', FENCE + 'prompt extra', FENCE))).toEqual([
+      { line: 3, message: `the code block's first line should be just "prompt" or "sh", with nothing after it (found "prompt extra").` },
+    ]);
+    expect(errors(md('# G', '## Flow', FENCE + 'mermaid theme=dark', 'flowchart LR', FENCE))).toEqual([
+      { line: 3, message: `the code block's first line should be just "mermaid", with nothing after it (found "mermaid theme=dark").` },
+    ]);
+  });
+
   it('reports every problem at once, in line order', () => {
     expect(errors(md('# G', '## n1 · A', '- kind: robot', '## Goal', 'x', '## Goal', '## n2 · B')).map((e) => e.line)).toEqual([2, 3, 6, 7]);
+  });
+});
+
+describe('free text fences', () => {
+  it('keeps indented and ~~~ fences in Goal and Instructions exactly', () => {
+    const goal = md('Before.', '   ' + FENCE + 'sql', '## not a section', '   ' + FENCE, '~~~ md extra', '# not a name', '~~~', 'After.');
+    const d = doc(md('# G', '## Goal', goal, '## Instructions', '~~~', '## kept', '~~~'));
+    expect(d.goal).toBe(goal);
+    expect(d.instructions).toBe(md('~~~', '## kept', '~~~'));
   });
 });
 
