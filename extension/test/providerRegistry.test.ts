@@ -12,3 +12,9 @@ describe('parseProviderSetting', () => {
     expect(parseProviderSetting('gemini')).toEqual({ id: 'claude', warning: "Unknown agentStream.provider 'gemini'; using Claude." });
   });
 });
+
+describe('parseProviderSetting and Codex', () => {
+  it('accepts codex', () => {
+    expect(parseProviderSetting('codex')).toEqual({ id: 'codex' });
+  });
+});

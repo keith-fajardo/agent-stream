@@ -7,7 +7,7 @@ describe('readSettings', () => {
   it('trims paths and keeps maxParallel within 1–16', () => {
     const values: Record<string, unknown> = { claudePath: ' /opt/claude ', gitBashPath: '', maxParallel: 40, provider: ' copilot ' };
     vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: (key: string, fallback: unknown) => values[key] ?? fallback } as never);
-    expect(readSettings()).toEqual({ claudePath: '/opt/claude', gitBashPath: '', maxParallel: 16, provider: 'copilot', model: '', effort: '', copilotMaxRequestsPerStep: 100, copilotMaxRequestsPerTurn: 100 });
+    expect(readSettings()).toEqual({ claudePath: '/opt/claude', codexPath: '', gitBashPath: '', maxParallel: 16, provider: 'copilot', model: '', effort: '', copilotMaxRequestsPerStep: 100, copilotMaxRequestsPerTurn: 100 });
     values.maxParallel = 'many';
     expect(readSettings().maxParallel).toBe(3);
   });
@@ -66,5 +66,13 @@ describe('readSettings', () => {
     expect(effort.enum).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
     expect(effort.enumDescriptions).toHaveLength(effort.enum.length);
     expect(effort.enumDescriptions.at(-1)).toBe('Ultra');
+  });
+
+  it('reads agentStream.codexPath, trimmed', () => {
+    const values: Record<string, unknown> = { codexPath: '  /opt/codex ' };
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: (key: string, fallback: unknown) => values[key] ?? fallback } as never);
+    expect(readSettings().codexPath).toBe('/opt/codex');
+    values.codexPath = undefined;
+    expect(readSettings().codexPath).toBe('');
   });
 });

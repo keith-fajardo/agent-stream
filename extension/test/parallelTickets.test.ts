@@ -66,7 +66,7 @@ function setup(r: Repo = repo(), git: GitExec = gitFor(r).exec) {
   // Steps wait until they are stopped, so a test can hold a run open.
   const held = (ctx: { signal: AbortSignal }) => new Promise<NodeOutcome>((resolve) => ctx.signal.addEventListener('abort', () => resolve({ ok: false, output: '', error: 'cancelled' })));
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
+    settings: () => ({ claudePath: '', codexPath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
     platform: 'darwin',
     env: {},
     home,

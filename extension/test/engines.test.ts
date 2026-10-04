@@ -14,7 +14,7 @@ const folder = (name: string): Folder => {
   return { key: `file://${path}`, name, path };
 };
 
-const defaults = { claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 };
+const defaults = { claudePath: '', codexPath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 };
 function baseDeps(events: Partial<EngineEvents> = {}) {
   return {
     platform: 'darwin' as const,
@@ -34,7 +34,7 @@ function setup(o: { found?: boolean } = {}) {
   const checkAuth = vi.fn(async () => auth);
   const apps: App[] = [];
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
+    settings: () => ({ claudePath: '', codexPath: '', gitBashPath: '', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
     platform: 'darwin',
     env: {},
     home,
@@ -171,7 +171,7 @@ describe('EngineManager', () => {
       const findGitBash = vi.fn(() => found);
       const seen: AppDeps[] = [];
       const manager = new EngineManager({
-        settings: () => ({ claudePath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
+        settings: () => ({ claudePath: '', codexPath: '', gitBashPath: 'X', maxParallel: 2, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
         platform,
         env: {},
         home: mkdtempSync(join(tmpdir(), 'cs-home-')),
@@ -301,5 +301,15 @@ describe('engines and the default model', () => {
     const spies = apps.map((a) => vi.spyOn(a, 'modelDefaultsChanged'));
     manager.modelDefaultsChanged();
     for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the Codex provider', () => {
+  it('finds Codex with agentStream.codexPath and reports its status', async () => {
+    const findCodex = vi.fn((): Found => ({ ok: false, error: 'no codex here' }));
+    const manager = new EngineManager({ ...baseDeps(), settings: () => ({ ...defaults, provider: 'codex', codexPath: '/tools/codex' }), findCodex });
+    expect(manager.providerFor('codex').name).toBe('OpenAI Codex');
+    expect(await manager.checkProvider()).toEqual({ provider: 'codex', ok: false, label: 'Codex: not found', error: 'no codex here' });
+    expect(findCodex).toHaveBeenCalledWith(expect.objectContaining({ platform: 'darwin', env: {}, setting: '/tools/codex' }));
   });
 });

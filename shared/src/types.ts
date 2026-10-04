@@ -259,8 +259,8 @@ export type GraphChangeRequest = { summary: string; detail: string };
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'error' | 'note';
 export type ChatEntry = { at: string; role: ChatRole; text: string };
 
-export type ProviderId = 'claude' | 'copilot';
-export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot'];
+export type ProviderId = 'claude' | 'copilot' | 'codex';
+export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot', 'codex'];
 
 /** How hard the model thinks: the Claude Agent SDK's levels, plus Codex's `ultra`. A model offers only some of them. */
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
@@ -281,7 +281,7 @@ export type Session = { id: string; name: string; createdAt: string; updatedAt: 
 export type SessionListItem = { id: string; name: string; updatedAt?: string; tabCount: number; problem?: string };
 export type SessionResult = { ok: true; session: Session } | { ok: false; error: string };
 /** Display names, for places that only have a ProviderId (run records). */
-export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: 'Claude', copilot: 'GitHub Copilot' };
+export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: 'Claude', copilot: 'GitHub Copilot', codex: 'OpenAI Codex' };
 
 export type ProviderStatus = {
   provider: ProviderId;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isEffortLevel, modelLine, supportsEffort } from '../src/format';
 import { defaultEffortsFor, findModel, menuModels } from '../src/models';
-import { EFFORT_LEVELS, type ModelChoice } from '../src/types';
+import { EFFORT_LEVELS, PROVIDER_IDS, PROVIDER_NAMES, type ModelChoice } from '../src/types';
 import { parseWebviewMessage } from '../src/schemas';
 
 describe('supportsEffort', () => {
@@ -95,5 +95,14 @@ describe('defaultEffortsFor with a provider-marked default model', () => {
       { value: 'gpt-b', label: 'B', efforts: ['low'], isDefault: true },
     ];
     expect(defaultEffortsFor(models, undefined)).toEqual(['high']);
+  });
+});
+
+describe('the codex provider id', () => {
+  it('is a provider with its display name, and honours effort', () => {
+    expect(PROVIDER_IDS).toEqual(['claude', 'copilot', 'codex']);
+    expect(PROVIDER_NAMES.codex).toBe('OpenAI Codex');
+    expect(supportsEffort('codex')).toBe(true);
+    expect(modelLine({ provider: 'codex', effort: 'ultra' })).toBe('Model: Default · Effort: ultra');
   });
 });

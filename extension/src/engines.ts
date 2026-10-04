@@ -2,9 +2,11 @@ import { join } from 'node:path';
 import {
   createApp as realCreateApp,
   createClaudeProvider,
+  createCodexProvider,
   createRunShell,
   createWriteLeases,
   findClaude as realFindClaude,
+  findCodex as realFindCodex,
   findGitBash as realFindGitBash,
   legacyValuesFileFor,
   valuesFileFor,
@@ -44,6 +46,7 @@ export type EngineManagerDeps = {
   events: EngineEvents;
   checkAuth?: (claudePath: string) => Promise<ProviderStatus>;
   findClaude?: typeof realFindClaude;
+  findCodex?: typeof realFindCodex;
   findGitBash?: typeof realFindGitBash;
   /** context.languageModelAccessInformation: whether Copilot requests need the user's consent first. */
   languageModelAccess?: LmAccess;
@@ -104,6 +107,13 @@ export class EngineManager {
               const s = d.settings();
               return { maxRequestsPerStep: s.copilotMaxRequestsPerStep, maxRequestsPerTurn: s.copilotMaxRequestsPerTurn };
             },
+          }),
+        codex: () =>
+          createCodexProvider({
+            // Found per status check, so a changed agentStream.codexPath is used from the next check on.
+            findCodex: () => (d.findCodex ?? realFindCodex)({ platform: d.platform, env: d.env, home: d.home, setting: d.settings().codexPath }),
+            env: d.env,
+            platform: d.platform,
           }),
         ...d.providers,
       };

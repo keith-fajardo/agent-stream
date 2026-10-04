@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { EFFORT_LEVELS, type Session, type SessionListItem, type SessionPlannerState, type SessionResult, type SessionTab } from '@agent-stream/shared';
+import { EFFORT_LEVELS, PROVIDER_IDS, type Session, type SessionListItem, type SessionPlannerState, type SessionResult, type SessionTab } from '@agent-stream/shared';
 import { ChatLog } from './chatLog';
 import { systemClock, type Clock } from './clock';
 import { writeFileAtomic } from './fsutil';
@@ -23,7 +23,7 @@ const sessionSchema = z.object({
     z.string(),
     z.object({
       sessionId: z.string().optional(),
-      provider: z.enum(['claude', 'copilot']).optional(),
+      provider: z.enum(PROVIDER_IDS).optional(),
       opCursor: z.number().int().nonnegative().optional(),
       model: z.string().optional(),
       // An effort level this version doesn't know reads as Default rather than making the whole session unreadable.

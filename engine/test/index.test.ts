@@ -21,4 +21,10 @@ describe('engine public API', () => {
     expect(typeof engine.lastAssistantText).toBe('function');
     expect(new engine.ChatModelError('other', 'x')).toBeInstanceOf(Error);
   });
+
+  it('exports the Codex provider and its finder', () => {
+    expect(typeof engine.createCodexProvider).toBe('function');
+    expect(typeof engine.findCodex).toBe('function');
+    expect(engine.CODEX_MISSING).toContain('agentStream.codexPath');
+  });
 });

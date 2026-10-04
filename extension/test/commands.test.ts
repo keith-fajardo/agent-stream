@@ -20,7 +20,7 @@ function setup(folders: Folder[] = [folder('a')]) {
   const gate = { release: () => {} };
   const held = () => new Promise<NodeOutcome>((resolve) => (gate.release = () => resolve({ ok: true, output: '' })));
   const manager = new EngineManager({
-    settings: () => ({ claudePath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
+    settings: () => ({ claudePath: '', codexPath: '', gitBashPath: '', maxParallel: 1, provider: 'claude', model: '', effort: '' as const, copilotMaxRequestsPerStep: 25, copilotMaxRequestsPerTurn: 10 }),
     platform: 'darwin',
     env: {},
     home: mkdtempSync(join(tmpdir(), 'cs-home-')),

@@ -111,6 +111,13 @@ describe('SessionStore', () => {
     store.setPlannerState(a.id, 'g1', { effort: 'ultra' });
     expect(new SessionStore(paths, fixedClock()).plannerState(a.id, 'g1')).toEqual({ effort: 'ultra' });
   });
+
+  it('keeps a Codex conversation across a reload (R23)', () => {
+    const { paths, store } = setup();
+    const a = store.create('A');
+    store.setPlannerState(a.id, 'g1', { sessionId: 'thread-1', provider: 'codex', opCursor: 2 });
+    expect(new SessionStore(paths, fixedClock()).plannerState(a.id, 'g1')).toEqual({ sessionId: 'thread-1', provider: 'codex', opCursor: 2 });
+  });
 });
 
 describe('ensureDefault with an unreadable default session', () => {

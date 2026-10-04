@@ -4,6 +4,8 @@ import { isEffortLevel, type EffortLevel } from '@agent-stream/shared';
 /** `model` and `effort`: the defaults for runs and for planner conversations without their own choice ('' = Default). */
 export type Settings = {
   claudePath: string;
+  /** agentStream.codexPath: the Codex CLI's full path, or '' to find it. */
+  codexPath: string;
   gitBashPath: string;
   maxParallel: number;
   provider: string;
@@ -28,6 +30,7 @@ export function readSettings(): Settings {
   const effort = config.get<unknown>('effort', '');
   return {
     claudePath: String(config.get('claudePath', '')).trim(),
+    codexPath: String(config.get('codexPath', '') ?? '').trim(),
     gitBashPath: String(config.get('gitBashPath', '')).trim(),
     provider: String(config.get('provider', 'claude')).trim(),
     maxParallel: intSetting(config.get('maxParallel', 3), 1, 16, 3),
