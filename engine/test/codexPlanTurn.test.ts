@@ -6,7 +6,7 @@ import { createPlannerGate } from '../src/providers/toolGate';
 import type { GraphTool, PlannerEvent, PlannerTurn } from '../src/providers/types';
 import { codexPlanTurn, CODEX_RESUME_FAILED } from '../src/providers/codex/planTurn';
 import type { CodexRunDeps } from '../src/providers/codex/runStep';
-import { agentMessage, approvalParams, fakeCodex, FakeRpcError, readAction, toolCallItem, turnHandlers, waitFor, type FakeHandler, type Msg, type TurnScript } from './codexFake';
+import { agentMessage, approvalParams, fakeCodex, FakeRpcError, mcpConfig, readAction, toolCallItem, turnHandlers, waitFor, type FakeHandler, type Msg, type TurnScript } from './codexFake';
 
 const cwd = resolve('/', 'work', 'proj');
 const values = resolve('/', 'h', '.agent-stream', 'values', 'abc.json');
@@ -65,6 +65,17 @@ describe('codexPlanTurn', () => {
     expect(proc.paramsOf('turn/start')).toMatchObject({ threadId: 'thread-7', input: [{ type: 'text', text: 'Add a test step', text_elements: [] }] });
     expect(p.events).toEqual([{ type: 'text', text: 'Added it.' }]);
     expect(proc.killed).toBe(true);
+  });
+
+  it('starts and resumes threads on a Codex started with the MCP servers of its folder turned off (RF1)', async () => {
+    for (const resume of [undefined, 'thread-7']) {
+      const p = setup({ ...turnHandlers({ script: (t) => t.end() }), 'config/read': mcpConfig({ files: { command: 'x' } }) }, { resume });
+      expect((await p.run()).ok).toBe(true);
+      expect(p.fake.procs).toHaveLength(2);
+      expect(p.fake.procs[0].paramsOf('config/read')).toEqual({ includeLayers: false, cwd });
+      expect(p.fake.procs[1].args).toContain('mcp_servers.files.enabled=false');
+      expect(p.fake.procs[1].methods()).toContain(resume ? 'thread/resume' : 'thread/start');
+    }
   });
 
   it('resumes with the safety settings sent again', async () => {

@@ -132,11 +132,22 @@ export class FakeProc implements CodexProcess {
   }
 }
 
-/** A SpawnCodex that starts a FakeProc answering `initialize` and `handlers`. */
+/**
+ * A `config/read` answer whose user config has these MCP servers, each turned off when the process was started with
+ * `-c mcp_servers.<name>.enabled=false`, as Codex 0.160.0 does (RF1 probe).
+ */
+export function mcpConfig(servers: Record<string, object>): FakeHandler {
+  return (_params, proc) => {
+    const off = new Set(proc.args.flatMap((a) => /^mcp_servers\.([^.]+)\.enabled=false$/.exec(a)?.[1] ?? []));
+    return { config: { mcp_servers: Object.fromEntries(Object.entries(servers).map(([name, s]) => [name, off.has(name) ? { ...s, enabled: false } : s])) }, origins: {} };
+  };
+}
+
+/** A SpawnCodex that starts a FakeProc answering `initialize`, `config/read` (no MCP servers) and `handlers`. */
 export function fakeCodex(handlers: Record<string, FakeHandler> = {}) {
   const procs: FakeProc[] = [];
   const spawn: SpawnCodex = (codexPath, args, env) => {
-    const p = new FakeProc(codexPath, args, env, { initialize: () => INIT_RESULT, ...handlers });
+    const p = new FakeProc(codexPath, args, env, { initialize: () => INIT_RESULT, 'config/read': mcpConfig({}), ...handlers });
     procs.push(p);
     return p;
   };

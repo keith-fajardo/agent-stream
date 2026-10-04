@@ -33,6 +33,10 @@ export type Model = {
 export type ModelListParams = { cursor?: string | null; limit?: number | null; includeHidden?: boolean | null };
 export type ModelListResponse = { data: Model[]; nextCursor: string | null };
 
+// config/read: only which MCP servers the effective config (with the folder's project layers) turns on (RF1)
+export type ConfigReadParams = { includeLayers?: boolean; cwd?: string | null };
+export type ConfigReadResponse = { config: { mcp_servers?: Record<string, { enabled?: boolean } | null> | null } };
+
 // thread/start, thread/resume
 export type AskForApproval = 'untrusted' | 'on-request' | 'never';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';

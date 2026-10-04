@@ -4,12 +4,15 @@ import {
   CodexRpcError,
   codexSpawnSpec,
   errorMessage,
+  mcpServerNotOff,
+  mcpServersUnread,
   openCodex,
+  openCodexForThreads,
   sanitizedCodexEnv,
   UNSUPPORTED_REQUEST,
   windowsQuote,
 } from '../src/providers/codex/connection';
-import { fakeCodex, FakeRpcError, waitFor, type FakeHandler } from './codexFake';
+import { fakeCodex, FakeRpcError, mcpConfig, waitFor, type FakeHandler } from './codexFake';
 
 const never = () => new Promise<never>(() => {});
 
@@ -51,6 +54,49 @@ describe('openCodex', () => {
 
     const missing = fakeCodex({ initialize: (_p, proc) => { void proc.failToStart(new Error('spawn /bin/codex ENOENT')); return never(); } });
     await expect(openCodex({ codexPath: '/bin/codex', spawn: missing.spawn })).rejects.toThrow("Codex didn't start: spawn /bin/codex ENOENT");
+  });
+});
+
+describe('openCodexForThreads', () => {
+  const open = (fake: ReturnType<typeof fakeCodex>) => openCodexForThreads({ codexPath: '/bin/codex', spawn: fake.spawn, env: {}, cwd: '/w' });
+
+  it('reads which MCP servers the config turns on for the folder, and keeps the one process when there are none (RF1)', async () => {
+    const fake = fakeCodex();
+    const conn = await open(fake);
+    expect(fake.procs).toHaveLength(1);
+    expect(fake.last().args).toEqual(CODEX_ARGS);
+    expect(fake.last().paramsOf('config/read')).toEqual({ includeLayers: false, cwd: '/w' });
+    expect(fake.last().killed).toBe(false);
+    conn.close();
+  });
+
+  it("starts Codex again with every MCP server the config turns on turned off, so their tools can't run outside the gate (RF1)", async () => {
+    const fake = fakeCodex({ 'config/read': mcpConfig({ files: { command: 'x', enabled: true }, off: { command: 'y', enabled: false }, 'my-db_2': { url: 'https://example.com' } }) });
+    const conn = await open(fake);
+    expect(fake.procs).toHaveLength(2);
+    expect(fake.procs[0].killed).toBe(true);
+    expect(fake.procs[1].args).toEqual([...CODEX_ARGS, '-c', 'mcp_servers.files.enabled=false', '-c', 'mcp_servers.my-db_2.enabled=false']);
+    expect(fake.procs[1].methods()).toEqual(['initialize', 'initialized', 'config/read']);
+    expect(fake.procs[1].killed).toBe(false);
+    conn.close();
+  });
+
+  it("refuses to start when an MCP server can't be turned off, or the config can't be read, and leaves no process behind (RF1)", async () => {
+    const dotted = fakeCodex({ 'config/read': mcpConfig({ 'a.b': { command: 'x' } }) });
+    await expect(open(dotted)).rejects.toThrow(mcpServerNotOff('a.b'));
+    expect(dotted.procs).toHaveLength(1);
+    expect(dotted.last().killed).toBe(true);
+
+    const stuck = fakeCodex({ 'config/read': () => ({ config: { mcp_servers: { files: { command: 'x' } } } }) });
+    await expect(open(stuck)).rejects.toThrow(mcpServerNotOff('files'));
+    expect(stuck.procs).toHaveLength(2);
+    expect(stuck.procs.every((p) => p.killed)).toBe(true);
+
+    const unread = fakeCodex({ 'config/read': () => { throw new FakeRpcError(-32601, 'unknown method'); } });
+    await expect(open(unread)).rejects.toThrow(mcpServersUnread('unknown method'));
+    expect(unread.last().killed).toBe(true);
+    expect(mcpServerNotOff('a.b')).toBe(`Codex didn't start: Agent Stream can't turn off the MCP server "a.b" from your Codex config. Its tools would run without asking, so Codex isn't used until the server is renamed (letters, digits, - and _) or removed.`);
+    expect(mcpServersUnread('x')).toBe("Codex didn't start: Agent Stream couldn't read which MCP servers your Codex config turns on (x).");
   });
 });
 

@@ -15,6 +15,7 @@ import {
   fakeCodex,
   FakeRpcError,
   fileChangeItem,
+  mcpConfig,
   readAction,
   reasoning,
   toolCallItem,
@@ -104,6 +105,17 @@ describe('codexRunStep', () => {
     expect(s.events[0]).toEqual({ type: 'start', kind: 'agent', cwd, prompt: 'FULL PROMPT' });
     expect(stepPreamble(cwd)).toBe(`You are an agent running one step of a workflow in ${cwd}. Do the work, then reply with a summary of what you did.`);
     expect(proc.killed).toBe(true);
+  });
+
+  it('runs the thread on a Codex started with the MCP servers of its folder turned off (RF1)', async () => {
+    const s = setup({ ...turnHandlers({ script: (t) => t.end() }), 'config/read': mcpConfig({ files: { command: 'x' } }) });
+    expect(await s.run()).toEqual({ ok: true, output: '' });
+    expect(s.fake.procs).toHaveLength(2);
+    expect(s.fake.procs[0].paramsOf('config/read')).toEqual({ includeLayers: false, cwd });
+    expect(s.fake.procs[0].methods()).not.toContain('thread/start');
+    expect(s.fake.procs[1].args).toContain('mcp_servers.files.enabled=false');
+    expect(s.fake.procs[1].methods()).toContain('thread/start');
+    expect(s.fake.procs.every((p) => p.killed)).toBe(true);
   });
 
   it('starts a read-only step in the read-only sandbox, without graph tools', async () => {

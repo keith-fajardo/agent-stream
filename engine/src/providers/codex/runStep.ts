@@ -4,7 +4,7 @@ import { clipResult } from '../../agentLoop/tools';
 import type { NodeContext, NodeOutcome } from '../../executors';
 import { STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../toolGate';
 import { changePrivacyReason, createServerRequestHandler, toPatchChanges, type PatchChange } from './approvals';
-import { errorMessage, openCodex, type CodexConnection, type SpawnCodex } from './connection';
+import { errorMessage, openCodexForThreads, type CodexConnection, type SpawnCodex } from './connection';
 import { codexEffort } from './models';
 import { pathPrivacy } from './readOnlyCommand';
 import type { DynamicToolContentItem, FileUpdateChange, ThreadItem, ThreadResponse, ThreadStartParams } from './protocol';
@@ -110,7 +110,7 @@ export function codexRunStep(deps: CodexRunDeps) {
     const cancelled = (): NodeOutcome => ({ ok: false, output: '', error: 'cancelled', ...(usage && { usage }) });
     try {
       if (ctx.signal.aborted) return cancelled();
-      conn = await openCodex({ codexPath, spawn: deps.spawn, env: deps.env, log: deps.log });
+      conn = await openCodexForThreads({ codexPath, spawn: deps.spawn, env: deps.env, log: deps.log, cwd: ctx.cwd });
       conn.onExit(() => ended.abort());
       conn.onServerRequest(
         createServerRequestHandler({

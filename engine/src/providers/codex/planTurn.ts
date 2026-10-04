@@ -1,7 +1,7 @@
 import { toLoopTools } from '../../agentLoop/graphLoopTools';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { createServerRequestHandler } from './approvals';
-import { CodexRpcError, errorMessage, openCodex, type CodexConnection } from './connection';
+import { CodexRpcError, errorMessage, openCodexForThreads, type CodexConnection } from './connection';
 import { codexEffort } from './models';
 import type { ThreadResponse, ThreadResumeParams, ThreadStartParams } from './protocol';
 import type { CodexRunDeps } from './runStep';
@@ -29,7 +29,7 @@ export function codexPlanTurn(deps: CodexRunDeps) {
     };
     try {
       if (turn.signal.aborted) return stopped();
-      conn = await openCodex({ codexPath, spawn: deps.spawn, env: deps.env, log: deps.log });
+      conn = await openCodexForThreads({ codexPath, spawn: deps.spawn, env: deps.env, log: deps.log, cwd: turn.cwd });
       conn.onExit(() => ended.abort());
       conn.onServerRequest(
         createServerRequestHandler({

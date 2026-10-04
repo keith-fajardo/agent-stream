@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { envValue, killTree } from '../../platform';
-import type { InitializeParams } from './protocol';
+import type { ConfigReadParams, ConfigReadResponse, InitializeParams } from './protocol';
 
 /** `codex app-server`, signed in with ChatGPT only (spec §4.2). The quotes are part of the value Codex parses. */
 export const CODEX_ARGS: readonly string[] = ['app-server', '-c', 'forced_login_method="chatgpt"'];
@@ -294,11 +294,21 @@ function startReason(e: unknown, timeoutMs: number): string {
  * Starts `codex app-server` and completes the handshake (spec §4.2): `initialize`, then `initialized`. A failure or
  * timeout rejects with `Codex didn't start: <reason>` and leaves no process behind.
  */
-export async function openCodex(o: { codexPath: string; spawn?: SpawnCodex; env?: NodeJS.ProcessEnv; initTimeoutMs?: number; log?: (message: string) => void }): Promise<CodexConnection> {
+export type OpenCodexOptions = {
+  codexPath: string;
+  spawn?: SpawnCodex;
+  env?: NodeJS.ProcessEnv;
+  initTimeoutMs?: number;
+  log?: (message: string) => void;
+  /** More `-c` overrides after CODEX_ARGS (RF1). */
+  extraArgs?: readonly string[];
+};
+
+export async function openCodex(o: OpenCodexOptions): Promise<CodexConnection> {
   const timeoutMs = o.initTimeoutMs ?? INIT_TIMEOUT_MS;
   let conn: CodexConnection;
   try {
-    conn = connect((o.spawn ?? realSpawnCodex)(o.codexPath, CODEX_ARGS, sanitizedCodexEnv(o.env ?? process.env)), o.log ?? ((m) => console.warn(m)));
+    conn = connect((o.spawn ?? realSpawnCodex)(o.codexPath, [...CODEX_ARGS, ...(o.extraArgs ?? [])], sanitizedCodexEnv(o.env ?? process.env)), o.log ?? ((m) => console.warn(m)));
   } catch (e) {
     throw new Error(`Codex didn't start: ${errorMessage(e)}`);
   }
@@ -310,5 +320,57 @@ export async function openCodex(o: { codexPath: string; spawn?: SpawnCodex; env?
     throw new Error(`Codex didn't start: ${startReason(e, timeoutMs)}`);
   }
   conn.notify('initialized');
+  return conn;
+}
+
+const CONFIG_TIMEOUT_MS = 30_000;
+/** The MCP server names a `-c mcp_servers.<name>.enabled=false` override can reach: Codex splits the key at every dot. */
+const MCP_SERVER_NAME = /^[A-Za-z0-9_-]+$/;
+export const mcpServersUnread = (reason: string) => `Codex didn't start: Agent Stream couldn't read which MCP servers your Codex config turns on (${reason}).`;
+export const mcpServerNotOff = (name: string) =>
+  `Codex didn't start: Agent Stream can't turn off the MCP server ${JSON.stringify(name)} from your Codex config. Its tools would run without asking, so Codex isn't used until the server is renamed (letters, digits, - and _) or removed.`;
+
+/** The MCP servers Codex's effective config for `cwd` (user and project layers, and our overrides) turns on. */
+async function mcpServersOn(conn: CodexConnection, cwd: string): Promise<string[]> {
+  const params: ConfigReadParams = { includeLayers: false, cwd };
+  let r: ConfigReadResponse | null | undefined;
+  try {
+    r = await conn.request<ConfigReadResponse | null>('config/read', params, AbortSignal.timeout(CONFIG_TIMEOUT_MS));
+  } catch (e) {
+    throw new Error(mcpServersUnread(errorMessage(e)));
+  }
+  const servers = r?.config?.mcp_servers;
+  if (servers === undefined || servers === null) return [];
+  if (typeof servers !== 'object') throw new Error(mcpServersUnread('mcp_servers is not a table'));
+  return Object.entries(servers).flatMap(([name, s]) => (s?.enabled === false ? [] : [name]));
+}
+
+/**
+ * Codex for a thread (spec §6, RF1): the MCP servers in the user's or the folder's Codex config are turned off, since an
+ * MCP tool call is no command or file change and would run without the ToolGate. `-c mcp_servers={}` merges and leaves
+ * them on (0.160.0 probe), so Codex is asked which servers are on and, if any are, started again with each one turned
+ * off by name, then checked. A server that can't be turned off, or a config that can't be read, fails the start.
+ */
+export async function openCodexForThreads(o: OpenCodexOptions & { cwd: string }): Promise<CodexConnection> {
+  const first = await openCodex(o);
+  let on: string[];
+  try {
+    on = await mcpServersOn(first, o.cwd);
+  } catch (e) {
+    first.close();
+    throw e;
+  }
+  if (on.length === 0) return first;
+  first.close();
+  const unreachable = on.find((name) => !MCP_SERVER_NAME.test(name));
+  if (unreachable !== undefined) throw new Error(mcpServerNotOff(unreachable));
+  const conn = await openCodex({ ...o, extraArgs: [...(o.extraArgs ?? []), ...on.flatMap((name) => ['-c', `mcp_servers.${name}.enabled=false`])] });
+  try {
+    const still = await mcpServersOn(conn, o.cwd);
+    if (still.length > 0) throw new Error(mcpServerNotOff(still[0]));
+  } catch (e) {
+    conn.close();
+    throw e;
+  }
   return conn;
 }
