@@ -4,6 +4,21 @@ Agent Stream is an independent project. It is not made, endorsed or supported by
 
 A VS Code extension where you and an AI planner co-create a workflow as a graph, then run it step by step on your own AI subscription. Agent Stream is **provider-agnostic**: agent steps and the planner run on the provider you choose. That is **Claude** (your Claude subscription through Claude Code), **GitHub Copilot** (your Copilot plan through VS Code's Language Model API) or **OpenAI Codex** (your ChatGPT subscription through the Codex CLI). Every file edit, shell command or other non-read-only action an agent step attempts waits for your approval, whichever provider runs it, and every step keeps its own logs.
 
+## Why Agent Stream
+
+Handing a real task to an AI agent usually means one long chat: a big prompt goes in, a lot happens, and you get a result you have to take on trust. It's hard to see what the agent did, check it step by step, rerun one part, or run two pieces of work at once without them colliding.
+
+Agent Stream turns that into a plan you can see and audit:
+
+- **Break work into steps.** The planner turns your goal into a graph with one step per action or scenario, in the order they depend on each other. You can review, edit or split any step before anything runs.
+- **Stay in control.** Every file edit or command an agent attempts waits for your approval. Steps that only read can run alongside each other.
+- **Audit everything.** Each step keeps its own logs, and **Export Run Report** saves one Markdown record of a run: what ran, every approval and its decision, each step's output, and the branch, commit, provider and model.
+- **Work in parallel safely.** Run separate tickets side by side, each in its own Git worktree, so their changes never collide.
+- **Compare alternatives.** Run the same steps in separate workspaces and compare the results in one graph. For example, run a dbt model on two warehouses to see which is faster and cheaper.
+- **Use the subscription you have.** Claude, GitHub Copilot or OpenAI Codex.
+
+**Example:** "Test that my SCD2 model works." The planner builds steps that check the target table doesn't exist, run the model, check the table now exists, add a new source row, run again, check the row arrived, change the row, and check the old version was closed. You approve the runs and get a report you can hand to a reviewer.
+
 ## Requirements
 
 - VS Code **1.106** or newer, on macOS or Windows. Linux works the same way as macOS.
@@ -184,6 +199,7 @@ Agent Stream runs agent steps and the planner on your ChatGPT subscription throu
 - **Read-only steps** run in Codex's read-only sandbox. Anything that isn't a plain read is declined without asking.
 - **Privacy:** reads of the variable values file and of `.agent-stream/runs` and `.agent-stream/sessions` are declined without asking (a step may read its upstream `output.md`).
 - **MCP servers:** the MCP servers in your Codex config (yours or the project's) are turned off for Agent Stream's steps and planner, because their tools wouldn't go through approvals. A server named with anything other than letters, digits, `-` and `_` can't be turned off, so Codex isn't started until you rename or remove it. Anything else Codex does that Agent Stream doesn't know shows in the step's log by its type.
+- **Codex's built-in extras:** Codex's own apps and plugins, web search, and browser or computer use don't go through Agent Stream's approvals. When a step uses one, its log shows it by type; planner turns don't log them. If you don't want Codex to use them, check your Codex settings.
 - **Request cap:** none. Codex runs its own loop; a step is bounded by your plan and by Stop. Each step's log shows its tokens. Usage shows tokens only, with no cost, for a ChatGPT plan.
 - **Planner chat:** each conversation is a Codex thread, so it continues after a VS Code reload. **New chat** starts a new thread.
 - **Limitation, shell startup files:** Codex runs commands through a login shell (for example `zsh -lc`), so your shell startup files apply. If they export settings such as `RIPGREP_CONFIG_PATH` or `GREP_OPTIONS`, or define aliases, that make `rg` or `grep` search hidden or ignored folders, a search that runs without asking could read past run records. Agent Stream removes those variables from Codex's own environment but can't undo what your startup files set.
