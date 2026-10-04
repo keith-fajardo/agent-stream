@@ -98,6 +98,13 @@ describe('describeApprovalInput for a Codex Patch', () => {
     }
   });
 
+  it("doesn't take an inherited property name such as constructor for a change kind (M4)", () => {
+    for (const kind of ['constructor', 'toString', '__proto__']) {
+      const input = { changes: [{ path: 'a', kind, diff: 'x' }] };
+      expect(describeApprovalInput('Patch', input)).toEqual({ primary: [], warnings: [], rest: json(input) });
+    }
+  });
+
   it('marks added and removed diff lines, leaving headers and context plain', () => {
     expect(patchLineClass('+new')).toBe('patch-add');
     expect(patchLineClass('-old')).toBe('patch-del');

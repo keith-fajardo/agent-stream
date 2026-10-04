@@ -32,7 +32,7 @@ type PatchChangeInput = { path: string; kind: string; diff: string; movePath?: s
 const isPatchChange = (c: unknown): c is PatchChangeInput => {
   if (typeof c !== 'object' || c === null) return false;
   const r = c as Record<string, unknown>;
-  return typeof r.path === 'string' && typeof r.kind === 'string' && r.kind in PATCH_VERBS && typeof r.diff === 'string' && (r.movePath === undefined || typeof r.movePath === 'string');
+  return typeof r.path === 'string' && typeof r.kind === 'string' && Object.hasOwn(PATCH_VERBS, r.kind) && typeof r.diff === 'string' && (r.movePath === undefined || typeof r.movePath === 'string');
 };
 
 /** How a line of a unified diff is shown: added, removed, or as it is (the +++ and --- headers stay plain). */
