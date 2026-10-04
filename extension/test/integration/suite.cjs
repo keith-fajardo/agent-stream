@@ -41,7 +41,7 @@ async function checkAgentStep(app) {
 exports.run = async function run() {
   const live = process.env.AGENT_STREAM_LIVE === '1';
   if (!live) console.log('Skipping the agent-step check (set AGENT_STREAM_LIVE=1)');
-  const ext = vscode.extensions.getExtension('agent-stream-local.agent-stream');
+  const ext = vscode.extensions.getExtension('keithfajardo.agent-stream');
   assert.ok(ext, 'the extension is installed');
   const api = await ext.activate();
   const [wf] = vscode.workspace.workspaceFolders;
