@@ -284,9 +284,9 @@ function reduceServer(state: State, msg: HostMessage): State {
       const m = { ...state.markdown, saving: undefined };
       if (msg.conflict) return { ...state, markdown: { ...m, conflict: true } };
       if (msg.error !== undefined) return { ...state, markdown: m, toast: msg.error };
-      // Written (with or without errors): the editor shows the file as it is now.
+      // Written (with or without errors): the editor shows the file as it is now. Saved without errors: a toast says so (spec §6a.1).
       const markdown = { ...m, disk: msg.text ?? m.disk, draft: undefined, base: undefined, conflict: false };
-      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode };
+      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode, ...(msg.ok && { toast: 'Saved.' }) };
     }
     case 'opRejected':
       return msg.graphId === current ? { ...state, toast: msg.error } : state;

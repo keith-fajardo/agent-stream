@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
-import { actions } from '../actions';
+import { actions, registerNodeDraft } from '../actions';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
@@ -147,6 +147,10 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     send({ type: 'op', graphId, op: { type: 'updateNode', id: node.id, patch } });
     setBase({ draft, at: node.updatedAt });
   };
+  // ⌘S saves this draft exactly as the Save button does (spec §6a.1).
+  const draftRef = useRef({ dirty, save });
+  draftRef.current = { dirty, save };
+  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), [node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
 

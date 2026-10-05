@@ -14,12 +14,12 @@ import {
   type OnDelete,
   type XYPosition,
 } from '@xyflow/react';
-import { nextNodeId, type Op, type Position } from '@agent-stream/shared';
+import { movedLabel, nextNodeId, type Op, type Position } from '@agent-stream/shared';
 import { changeKey } from '../changeLabels';
 import { buildFlowEdges, buildFlowNodes, GHOST_PREFIX } from '../flowNodes';
 import type { NodeSize } from '../layout';
-import { addsToSelection, deletionOps, MULTI_SELECT_KEYS, selectedForDelete } from '../selection';
-import { actions, registerCanvas } from '../actions';
+import { addsToSelection, deletionEdit, MULTI_SELECT_KEYS, selectedForDelete } from '../selection';
+import { actions, registerCanvas, sendEdit } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
 import { dispatch, useStore } from '../store';
@@ -92,8 +92,10 @@ export function Canvas() {
     for (const n of getNodes()) if (n.measured?.width && n.measured.height) sizes.set(n.id, { width: n.measured.width, height: n.measured.height });
     return sizes;
   });
+  // ⌘S sends again any move the engine hasn't confirmed yet (spec §6a.1); a move that already landed changes nothing.
+  const flushMoves = useRef(() => {});
   useEffect(() => {
-    registerCanvas({ addStepInView: () => addInView.current(), measuredSizes: () => measuredSizes.current() });
+    registerCanvas({ addStepInView: () => addInView.current(), measuredSizes: () => measuredSizes.current(), flushMoves: () => flushMoves.current() });
     return () => registerCanvas(undefined);
   }, []);
 
@@ -111,9 +113,16 @@ export function Canvas() {
     if (r) addAt(screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }));
   };
   addInView.current = addInCenter;
-  const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => deletionOps(deleted.map((n) => n.id), removed).forEach(op);
+  const moves = (list: [string, Position][]) => sendEdit(graphId, list.map(([id, position]): Op => ({ type: 'moveNode', id, position })), movedLabel(list.map(([id]) => id)));
+  flushMoves.current = () => moves([...pendingMoves.current]);
+  // Deleting a selection is one action, so one undo step (spec §6a.2).
+  const remove = (nodeIds: string[], removed: FlowEdge[]) => {
+    const edit = deletionEdit(nodeIds, removed);
+    sendEdit(graphId, edit.ops, edit.label);
+  };
+  const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => remove(deleted.map((n) => n.id), removed);
   const selection = selectedForDelete(nodes, edges);
-  const deleteSelection = () => deletionOps(selection.nodeIds, selection.edges).forEach(op);
+  const deleteSelection = () => remove(selection.nodeIds, selection.edges);
   const stale = runForGraph !== undefined && contentSignature(runForGraph.snapshot) !== contentSignature(graph);
 
   return (
@@ -146,14 +155,16 @@ export function Canvas() {
         onConnect={(c: Connection) => op({ type: 'connect', from: c.source, to: c.target })}
         onDelete={onDelete}
         onNodeDragStart={(_e, _n, ns) => ns.forEach((n) => dragging.current.add(n.id))}
-        onNodeDragStop={(_e, _n, ns) =>
-          ns.forEach((n) => {
+        onNodeDragStop={(_e, _n, ns) => {
+          // One drag is one action, even with several steps selected (spec §6a.2).
+          const dropped = ns.map((n): [string, Position] => {
             dragging.current.delete(n.id);
             const position = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
             pendingMoves.current.set(n.id, position);
-            op({ type: 'moveNode', id: n.id, position });
-          })
-        }
+            return [n.id, position];
+          });
+          moves(dropped);
+        }}
         // A ghost (a removed step or connection) can't be edited: clicking it opens its change instead.
         onNodeClick={(e, n) => {
           if (n.data.ghost) actions.selectChange(changeKey({ kind: 'node', id: n.data.node.id }));

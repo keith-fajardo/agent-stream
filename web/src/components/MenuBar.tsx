@@ -50,6 +50,8 @@ export function MenuBar() {
                     role="menuitem"
                     disabled={!entry.enabled}
                     className={entry.warn ? 'warn' : ''}
+                    data-shortcut={entry.shortcut}
+                    aria-keyshortcuts={entry.shortcut?.replace('⌘', 'Meta+')}
                     onClick={() => {
                       setOpen(undefined);
                       entry.run();

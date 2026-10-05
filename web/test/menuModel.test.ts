@@ -36,6 +36,7 @@ describe('menus', () => {
       ['New graph…', true],
       ['Open…', true],
       ['Import…', true],
+      ['Save', true],
       ['Export…', true],
       ['Open as Markdown', true],
       ['Rename…', true],

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Graph } from '@agent-stream/shared';
-import { send } from '../bridge';
+import type { Graph, Op } from '@agent-stream/shared';
+import { sendEdit } from '../actions';
 import { useStore } from '../store';
 
 type Draft = { goal: string; instructions: string };
@@ -33,8 +33,11 @@ function GraphEditor({ graph }: { graph: Graph }) {
     setDraft(current);
   };
   const save = () => {
-    if (draft.goal !== base.goal) send({ type: 'op', graphId: graph.id, op: { type: 'setGoal', goal: draft.goal } });
-    if (draft.instructions !== base.instructions) send({ type: 'op', graphId: graph.id, op: { type: 'setInstructions', instructions: draft.instructions } });
+    const ops: Op[] = [];
+    if (draft.goal !== base.goal) ops.push({ type: 'setGoal', goal: draft.goal });
+    if (draft.instructions !== base.instructions) ops.push({ type: 'setInstructions', instructions: draft.instructions });
+    // One Save, one undo step (step model spec §6a.2).
+    sendEdit(graph.id, ops, 'edited the goal and instructions');
     setBase(draft);
   };
 

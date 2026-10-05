@@ -1,4 +1,4 @@
-import type { Op } from '@agent-stream/shared';
+import { deletedLabel, type Op } from '@agent-stream/shared';
 
 type SelectableNode = { id: string; selected?: boolean; data: { ghost?: boolean } };
 type SelectableEdge = { id: string; source: string; target: string; selected?: boolean; deletable?: boolean };
@@ -21,4 +21,12 @@ export function deletionOps(nodeIds: string[], edges: SelectableEdge[]): Op[] {
   for (const e of edges) if (!ids.has(e.source) && !ids.has(e.target)) ops.push({ type: 'disconnect', from: e.source, to: e.target });
   for (const id of ids) ops.push({ type: 'deleteNode', id });
   return ops;
+}
+
+/** Deleting a selection as one edit, with the label Edit › Undo names it by. */
+export function deletionEdit(nodeIds: string[], edges: SelectableEdge[]): { ops: Op[]; label: string } {
+  const ops = deletionOps(nodeIds, edges);
+  const deleted = ops.flatMap((o) => (o.type === 'deleteNode' ? [o.id] : []));
+  const disconnected = ops.flatMap((o) => (o.type === 'disconnect' ? [{ from: o.from, to: o.to }] : []));
+  return { ops, label: deletedLabel(deleted, disconnected) };
 }

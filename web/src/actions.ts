@@ -1,4 +1,4 @@
-import { MAX_IMPORT_CHARS, type ApprovalRequest, type ChangeTarget, type HostCommand } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, TIDY_LABEL, type ApprovalRequest, type ChangeTarget, type HostCommand, type Op } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
@@ -6,11 +6,34 @@ import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
-type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize> };
+type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize>; flushMoves(): void };
 let canvas: CanvasActions | undefined;
 export function registerCanvas(c: CanvasActions | undefined): void {
   canvas = c;
 }
+
+/** The Node panel's open step and its unsaved edits, for ⌘S (step model spec §6a.1); the panel registers it while it shows a step. */
+export type NodeDraft = { nodeId: string; dirty(): boolean; save(): void };
+let nodeDraft: NodeDraft | undefined;
+/** Registers the open step's draft; the returned function unregisters it (if it is still the one registered). */
+export function registerNodeDraft(d: NodeDraft): () => void {
+  nodeDraft = d;
+  return () => {
+    if (nodeDraft === d) nodeDraft = undefined;
+  };
+}
+
+/** Sends edits that are one user action as one undo step (spec §6a.2); a single edit goes as it is. */
+export function sendEdit(graphId: string, ops: Op[], label: string): void {
+  if (ops.length === 1) send({ type: 'op', graphId, op: ops[0] });
+  else if (ops.length > 1) send({ type: 'ops', graphId, ops, label });
+}
+
+/** The toasts of ⌘S (spec §6a.1). */
+export const stepSavedToast = (id: string) => `Step ${id} saved.`;
+export const GRAPH_SAVED = 'Graph saved.';
+export const MARKDOWN_SAVED = 'Saved.';
+export const cantSaveToast = (graphId: string) => `Can't save: ${graphId}.md has errors. Fix the file first.`;
 
 /** This graph's pending approvals: Run › Approve all acts on these only; the sidebar's covers every graph. */
 export function graphApprovals(s: State): ApprovalRequest[] {
@@ -35,7 +58,32 @@ export const actions = {
   tidy(): void {
     const { graph } = getState();
     if (!graph) return;
-    for (const [id, position] of layoutPositions(graph, false, canvas?.measuredSizes())) send({ type: 'op', graphId: graph.id, op: { type: 'moveNode', id, position } });
+    const ops: Op[] = [...layoutPositions(graph, false, canvas?.measuredSizes())].map(([id, position]) => ({ type: 'moveNode', id, position }));
+    // One undo step for the whole layout, even for a single step.
+    if (ops.length) send({ type: 'ops', graphId: graph.id, ops, label: TIDY_LABEL });
+  },
+  /**
+   * File › Save and ⌘S (spec §6a.1). Markdown mode saves the Markdown. Graph mode saves the open step's unsaved edits as
+   * its Save button does, or, with none, sends any move not confirmed yet: everything else is saved as it happens.
+   */
+  save(): void {
+    const s = getState();
+    if (!s.graph) return;
+    if (s.canvasMode === 'markdown') return actions.saveMarkdown();
+    if (nodeDraft?.dirty()) {
+      // The file has errors: the edit would be refused (R6), so the draft stays as it is.
+      if (s.fileErrors.length) return dispatch({ kind: 'showToast', message: cantSaveToast(s.graph.id) });
+      const id = nodeDraft.nodeId;
+      nodeDraft.save();
+      return dispatch({ kind: 'showToast', message: stepSavedToast(id) });
+    }
+    canvas?.flushMoves();
+    dispatch({ kind: 'showToast', message: GRAPH_SAVED });
+  },
+  /** Edit › Undo and ⌘Z: the engine undoes this tab's newest graph edit and answers with a toast. */
+  undo(): void {
+    const { graph } = getState();
+    if (graph) send({ type: 'undo', graphId: graph.id });
   },
   run(): void {
     dispatch({ kind: 'openConfirm', request: {} });

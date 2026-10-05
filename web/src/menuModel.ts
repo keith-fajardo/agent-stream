@@ -1,8 +1,10 @@
 import { refinable, type HostCommand } from '@agent-stream/shared';
 import { actions, approvableApprovals } from './actions';
+import { MOD } from './shortcuts';
 import type { State, Tab } from './state';
 
-export type MenuAction = { label: string; enabled: boolean; checked?: boolean; warn?: boolean; run: () => void };
+/** `shortcut`: the key shown at the item's right, such as ⌘S. */
+export type MenuAction = { label: string; enabled: boolean; checked?: boolean; warn?: boolean; shortcut?: string; run: () => void };
 export type MenuEntry = MenuAction | { separator: true };
 export type Menu = { id: 'file' | 'edit' | 'run' | 'variables' | 'view'; label: string; items: MenuEntry[] };
 
@@ -44,6 +46,7 @@ export function buildMenus(s: State): Menu[] {
         host('Open…', 'openGraph'),
         host('Import…', 'importGraph'),
         SEPARATOR,
+        item('Save', hasGraph, actions.save, { shortcut: `${MOD}S` }),
         host('Export…', 'exportGraph', hasGraph),
         host('Open as Markdown', 'openGraphMarkdown', !s.graphGone),
         host('Rename…', 'renameGraph', hasGraph),
@@ -56,6 +59,8 @@ export function buildMenus(s: State): Menu[] {
       id: 'edit',
       label: 'Edit',
       items: [
+        item(s.undoLabel ? `Undo ${s.undoLabel}` : 'Undo', hasGraph && !!s.undoLabel, actions.undo, { shortcut: `${MOD}Z` }),
+        SEPARATOR,
         item('Add step', onCanvas, actions.addStep),
         item('Delete selected step', selected, actions.deleteSelectedStep),
         item('Tidy layout', onCanvas, actions.tidy),
