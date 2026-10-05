@@ -67,7 +67,10 @@ export function stepModelNote(model: StepModel, provider: ProviderId, known: rea
     return `This step is set to ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name} model (${model.id}); this run uses ${PROVIDER_NAMES[provider]}, so it uses the default model.`;
   }
   const list = listed(known);
-  if (list && !findModel(list, model.id)) return `${model.id} isn't offered by ${PROVIDER_NAMES[provider]} any more (or on this plan), so this step uses the default model.`;
+  if (list && !findModel(list, model.id)) {
+    if (provider === 'copilot') return `${model.id} isn't in GitHub Copilot's model list here, so this step tries it and uses Auto if Copilot refuses it.`;
+    return `${model.id} isn't offered by ${PROVIDER_NAMES[provider]} any more (or on this plan), so this step uses the default model.`;
+  }
   return null;
 }
 

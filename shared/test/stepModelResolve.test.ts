@@ -49,9 +49,24 @@ describe('resolveStepModel (spec §3.2)', () => {
   it('rule 2: Copilot still tries a model its list doesn’t name, with the same note', () => {
     expect(resolveStepModel({ model: { provider: 'copilot', id: 'grok-4.7' } }, { provider: 'copilot' }, COPILOT)).toEqual({
       model: 'grok-4.7',
-      note: "grok-4.7 isn't offered by GitHub Copilot any more (or on this plan), so this step uses the default model.",
+      note: "grok-4.7 isn't in GitHub Copilot's model list here, so this step tries it and uses Auto if Copilot refuses it.",
     });
     expect(resolveStepModel({ model: { provider: 'copilot', id: 'gpt-5.6-sol' } }, { provider: 'copilot' }, COPILOT)).toEqual({ model: 'gpt-5.6-sol' });
+  });
+
+  it('combinations: Copilot with another provider’s model or its own effort, Codex unlisted, unknown list', () => {
+    expect(resolveStepModel({ model: { provider: 'codex', id: 'gpt-6-astra' } }, { provider: 'copilot' }, COPILOT)).toEqual({
+      note: 'This step is set to an OpenAI Codex model (gpt-6-astra); this run uses GitHub Copilot, so it uses the default model.',
+    });
+    expect(resolveStepModel({ model: { provider: 'copilot', id: 'gpt-5.6-sol' }, effort: 'high' }, { provider: 'copilot' }, COPILOT)).toEqual({
+      model: 'gpt-5.6-sol',
+      note: 'GitHub Copilot has no effort levels; running without an effort level.',
+    });
+    expect(resolveStepModel({ model: { provider: 'codex', id: 'gpt-6-astra' } }, { provider: 'codex', model: 'gpt-6-luna' }, CODEX)).toEqual({
+      model: 'gpt-6-luna',
+      note: "gpt-6-astra isn't offered by OpenAI Codex any more (or on this plan), so this step uses the default model.",
+    });
+    expect(effortProblem('codex', undefined, 'ultra', undefined)).toBeNull();
   });
 
   it('rule 3: a model of another provider runs the run’s model, with a note', () => {
