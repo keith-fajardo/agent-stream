@@ -22,6 +22,7 @@ import { addsToSelection, deletionEdit, MULTI_SELECT_KEYS, selectedForDelete } f
 import { actions, registerCanvas, sendEdit } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
+import { dropMoves, settleMoves } from '../pendingMoves';
 import { dispatch, useStore } from '../store';
 import { CanvasModeToggle } from './CanvasModeToggle';
 import { StepNode, type StepFlowNode } from './StepNode';
@@ -50,6 +51,9 @@ export function Canvas() {
   const dragging = useRef(new Set<string>());
   const pendingMoves = useRef(new Map<string, Position>());
   const lastSelected = useRef<string | undefined>(undefined);
+  // A refused edit leaves its moves unconfirmed for good: forget them, so the steps return to where the graph has them.
+  const rejections = useStore((s) => s.rejections);
+  useEffect(() => pendingMoves.current.clear(), [rejections]);
 
   useEffect(() => {
     const selectionChanged = lastSelected.current !== selectedId;
@@ -114,7 +118,10 @@ export function Canvas() {
   };
   addInView.current = addInCenter;
   const moves = (list: [string, Position][]) => sendEdit(graphId, list.map(([id, position]): Op => ({ type: 'moveNode', id, position })), movedLabel(list.map(([id]) => id)));
-  flushMoves.current = () => moves([...pendingMoves.current]);
+  flushMoves.current = () => {
+    if (graph) settleMoves(pendingMoves.current, graph);
+    moves([...pendingMoves.current]);
+  };
   // Deleting a selection is one action, so one undo step (spec §6a.2).
   const remove = (nodeIds: string[], removed: FlowEdge[]) => {
     const edit = deletionEdit(nodeIds, removed);
@@ -157,13 +164,8 @@ export function Canvas() {
         onNodeDragStart={(_e, _n, ns) => ns.forEach((n) => dragging.current.add(n.id))}
         onNodeDragStop={(_e, _n, ns) => {
           // One drag is one action, even with several steps selected (spec §6a.2).
-          const dropped = ns.map((n): [string, Position] => {
-            dragging.current.delete(n.id);
-            const position = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
-            pendingMoves.current.set(n.id, position);
-            return [n.id, position];
-          });
-          moves(dropped);
+          ns.forEach((n) => dragging.current.delete(n.id));
+          dropMoves(graphId, pendingMoves.current, ns);
         }}
         // A ghost (a removed step or connection) can't be edited: clicking it opens its change instead.
         onNodeClick={(e, n) => {

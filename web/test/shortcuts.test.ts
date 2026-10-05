@@ -13,6 +13,8 @@ const { buildMenus } = await import('../src/menuModel');
 const { actions } = await import('../src/actions');
 const { deletionEdit } = await import('../src/selection');
 const { GraphPanel } = await import('../src/components/GraphPanel');
+const { MarkdownEditor } = await import('../src/components/MarkdownEditor');
+const { dropMoves, settleMoves } = await import('../src/pendingMoves');
 type MenuAction = import('../src/menuModel').MenuAction;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -50,6 +52,10 @@ beforeEach(async () => {
   vi.mocked(send).mockClear();
 });
 afterEach(async () => {
+  dispatch({ kind: 'closeVariables' });
+  dispatch({ kind: 'closeConfirm' });
+  dispatch({ kind: 'closeChangeConfirm' });
+  dispatch({ kind: 'confirmLeaveMarkdown', open: false });
   document.removeEventListener('keydown', onShortcutKey);
   await act(async () => root.unmount());
   el.remove();
@@ -161,5 +167,101 @@ describe('one action, one undo step', () => {
       ops: [{ type: 'disconnect', from: 'n3', to: 'n4' }, { type: 'deleteNode', id: 'n1' }, { type: 'deleteNode', id: 'n2' }],
       label: 'deleted 2 steps and 1 connection',
     });
+  });
+});
+
+describe('fix round 1', () => {
+  async function graphPanel() {
+    const panel = document.createElement('div');
+    document.body.appendChild(panel);
+    const r = createRoot(panel);
+    await act(async () => r.render(createElement(GraphPanel)));
+    return { panel, unmount: () => act(async () => { r.unmount(); panel.remove(); }) };
+  }
+
+  it('⌘S in the Graph panel saves the goal and instructions as its Save does, and says so', async () => {
+    await act(async () => root.unmount());
+    root = createRoot(el);
+    const { panel, unmount } = await graphPanel();
+    const goal = panel.querySelector('#graph-goal') as HTMLInputElement;
+    await act(async () => type(goal, 'New goal'));
+    press('s', goal);
+    expect(vi.mocked(send).mock.calls).toEqual([[{ type: 'op', graphId: 'g', op: { type: 'setGoal', goal: 'New goal' } }]]);
+    expect(getState().toast).toBe('Goal and instructions saved.');
+    vi.mocked(send).mockClear();
+    dispatch({ kind: 'dismissToast' });
+    press('s');
+    expect(send).not.toHaveBeenCalled();
+    expect(getState().toast).toBe('Graph saved.');
+    await unmount();
+  });
+
+  it('keeps the Graph panel draft while the file has errors', async () => {
+    await act(async () => root.unmount());
+    root = createRoot(el);
+    const { panel, unmount } = await graphPanel();
+    dispatch({ kind: 'server', msg: { type: 'graphFileErrors', graphId: 'g', errors: [{ line: 3, message: 'x' }] } });
+    const goal = panel.querySelector('#graph-goal') as HTMLInputElement;
+    await act(async () => type(goal, 'New goal'));
+    press('s', goal);
+    expect(send).not.toHaveBeenCalled();
+    expect(getState().toast).toBe("Can't save: g.md has errors. Fix the file first.");
+    expect((panel.querySelector('#graph-goal') as HTMLInputElement).value).toBe('New goal');
+    await unmount();
+  });
+
+  it.each([
+    ['the Variables dialog', () => dispatch({ kind: 'openVariables' })],
+    ['the run dialog', () => dispatch({ kind: 'openConfirm', request: {} })],
+    ['the change-confirm dialog', () => dispatch({ kind: 'openChangeConfirm', mode: 'accept' })],
+    ['the Markdown leave dialog', () => dispatch({ kind: 'confirmLeaveMarkdown', open: true })],
+  ])('⌘S and ⌘Z do nothing under %s', (_n, open) => {
+    open();
+    dispatch({ kind: 'dismissToast' });
+    expect(press('z').defaultPrevented).toBe(false);
+    expect(press('s').defaultPrevented).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+    expect(getState().toast).toBeUndefined();
+  });
+
+  it('works on a layout whose key is not Latin, through the physical key', () => {
+    const e = new KeyboardEvent('keydown', { key: 'ы', code: 'KeyS', metaKey: true, bubbles: true, cancelable: true });
+    act(() => void document.body.dispatchEvent(e));
+    expect(getState().toast).toBe('Graph saved.');
+    const z = new KeyboardEvent('keydown', { key: 'я', code: 'KeyZ', metaKey: true, bubbles: true, cancelable: true });
+    act(() => void document.body.dispatchEvent(z));
+    expect(vi.mocked(send).mock.calls).toEqual([[{ type: 'undo', graphId: 'g' }]]);
+  });
+
+  it('⌘S inside the Markdown editor sends exactly one save', async () => {
+    await act(async () => root.unmount());
+    root = createRoot(el);
+    dispatch({ kind: 'setCanvasMode', mode: 'markdown' });
+    dispatch({ kind: 'server', msg: { type: 'graphMarkdown', graphId: 'g', text: '# G\n' } });
+    dispatch({ kind: 'markdownEdited', text: '# G2\n', from: '# G\n' });
+    await act(async () => root.render(createElement(MarkdownEditor)));
+    press('s', el.querySelector('textarea[aria-label="Markdown"]')!);
+    expect(vi.mocked(send).mock.calls.filter(([m]) => m.type === 'saveGraphMarkdown')).toHaveLength(1);
+  });
+
+  it('a pending move for a step that is gone is dropped before a flush', () => {
+    const pending = new Map([['n1', { x: 1, y: 2 }], ['gone', { x: 3, y: 4 }]]);
+    settleMoves(pending, graph);
+    expect([...pending]).toEqual([['n1', { x: 1, y: 2 }]]);
+  });
+
+  it('a rejection clears pending moves', () => {
+    const before = getState().rejections;
+    dispatch({ kind: 'server', msg: { type: 'opRejected', graphId: 'g', error: 'nope' } });
+    expect(getState().rejections).toBe(before + 1);
+  });
+
+  it('a drag of several steps is one ops batch', () => {
+    const pending = new Map<string, { x: number; y: number }>();
+    dropMoves('g', pending, [{ id: 'n1', position: { x: 1.4, y: 2 } }, { id: 'n2', position: { x: 5, y: 6.6 } }]);
+    expect(vi.mocked(send).mock.calls).toEqual([
+      [{ type: 'ops', graphId: 'g', ops: [{ type: 'moveNode', id: 'n1', position: { x: 1, y: 2 } }, { type: 'moveNode', id: 'n2', position: { x: 5, y: 7 } }], label: 'moved 2 steps' }],
+    ]);
+    expect(pending.size).toBe(2);
   });
 });

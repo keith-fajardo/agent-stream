@@ -1,3 +1,4 @@
+import { MARKDOWN_SAVED } from './toasts';
 import type {
   AgentChange,
   ApprovalRequest,
@@ -103,6 +104,8 @@ export type State = {
   markdown: MarkdownEditorState;
   /** What Edit › Undo would undo in this tab, as the engine names it; undefined: nothing (step model spec §6a.2). */
   undoLabel?: string;
+  /** How many edits the engine has refused: the canvas forgets its unconfirmed moves on each. */
+  rejections: number;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
@@ -111,7 +114,7 @@ function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
 
 const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };
 
-export const initialState: State = { connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -286,10 +289,10 @@ function reduceServer(state: State, msg: HostMessage): State {
       if (msg.error !== undefined) return { ...state, markdown: m, toast: msg.error };
       // Written (with or without errors): the editor shows the file as it is now. Saved without errors: a toast says so (spec §6a.1).
       const markdown = { ...m, disk: msg.text ?? m.disk, draft: undefined, base: undefined, conflict: false };
-      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode, ...(msg.ok && { toast: 'Saved.' }) };
+      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode, ...(msg.ok && { toast: MARKDOWN_SAVED }) };
     }
     case 'opRejected':
-      return msg.graphId === current ? { ...state, toast: msg.error } : state;
+      return msg.graphId === current ? { ...state, toast: msg.error, rejections: state.rejections + 1 } : state;
     case 'runs':
       return msg.graphId === current ? { ...state, runs: msg.runs } : state;
     case 'run': {

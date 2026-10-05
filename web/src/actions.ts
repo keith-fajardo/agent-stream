@@ -4,6 +4,7 @@ import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
 import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
+import { cantSaveToast, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
 type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize>; flushMoves(): void };
@@ -23,17 +24,23 @@ export function registerNodeDraft(d: NodeDraft): () => void {
   };
 }
 
+/** The Graph panel's goal and instructions draft, for ⌘S; the panel registers it while it is mounted (ruling R10a). */
+export type GraphDraft = { dirty(): boolean; save(): void };
+let graphDraft: GraphDraft | undefined;
+export function registerGraphDraft(d: GraphDraft): () => void {
+  graphDraft = d;
+  return () => {
+    if (graphDraft === d) graphDraft = undefined;
+  };
+}
+
 /** Sends edits that are one user action as one undo step (spec §6a.2); a single edit goes as it is. */
 export function sendEdit(graphId: string, ops: Op[], label: string): void {
   if (ops.length === 1) send({ type: 'op', graphId, op: ops[0] });
   else if (ops.length > 1) send({ type: 'ops', graphId, ops, label });
 }
 
-/** The toasts of ⌘S (spec §6a.1). */
-export const stepSavedToast = (id: string) => `Step ${id} saved.`;
-export const GRAPH_SAVED = 'Graph saved.';
-export const MARKDOWN_SAVED = 'Saved.';
-export const cantSaveToast = (graphId: string) => `Can't save: ${graphId}.md has errors. Fix the file first.`;
+export * from './toasts';
 
 /** This graph's pending approvals: Run › Approve all acts on these only; the sidebar's covers every graph. */
 export function graphApprovals(s: State): ApprovalRequest[] {
@@ -70,12 +77,13 @@ export const actions = {
     const s = getState();
     if (!s.graph) return;
     if (s.canvasMode === 'markdown') return actions.saveMarkdown();
-    if (nodeDraft?.dirty()) {
+    // Whichever open panel has unsaved edits (only one is shown at a time) saves them as its own Save button does.
+    const open = nodeDraft?.dirty() ? { draft: nodeDraft, toast: stepSavedToast(nodeDraft.nodeId) } : graphDraft?.dirty() ? { draft: graphDraft, toast: GRAPH_PANEL_SAVED } : undefined;
+    if (open) {
       // The file has errors: the edit would be refused (R6), so the draft stays as it is.
       if (s.fileErrors.length) return dispatch({ kind: 'showToast', message: cantSaveToast(s.graph.id) });
-      const id = nodeDraft.nodeId;
-      nodeDraft.save();
-      return dispatch({ kind: 'showToast', message: stepSavedToast(id) });
+      open.draft.save();
+      return dispatch({ kind: 'showToast', message: open.toast });
     }
     canvas?.flushMoves();
     dispatch({ kind: 'showToast', message: GRAPH_SAVED });

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Graph, Op } from '@agent-stream/shared';
-import { sendEdit } from '../actions';
+import { registerGraphDraft, sendEdit } from '../actions';
 import { useStore } from '../store';
 
 type Draft = { goal: string; instructions: string };
@@ -40,6 +40,10 @@ function GraphEditor({ graph }: { graph: Graph }) {
     sendEdit(graph.id, ops, 'edited the goal and instructions');
     setBase(draft);
   };
+  // ⌘S saves this draft exactly as the Save button does (ruling R10a).
+  const draftRef = useRef({ dirty, save });
+  draftRef.current = { dirty, save };
+  useEffect(() => registerGraphDraft({ dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), []);
 
   return (
     <div className="node-panel">
