@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { legacyNodeIdProblem, topoOrder } from './graph';
+import { MAX_MODEL_ID_CHARS, ONLY_AGENT_STEPS_MODEL } from './stepModels';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
-import { EFFORT_LEVELS, MAX_IMPORT_CHARS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
+import { EFFORT_LEVELS, MAX_IMPORT_CHARS, PROVIDER_IDS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
@@ -10,6 +11,9 @@ const nodeKind = z.enum(['agent', 'command']);
 const access = z.enum(['read', 'write']);
 const timeoutSec = z.number().positive();
 const description = z.string().max(2000).optional();
+/** A step's own model (spec §2.1): the provider and its model id, 1 to 200 characters without whitespace. */
+const stepModel = z.object({ provider: z.enum(PROVIDER_IDS), id: z.string().regex(new RegExp(`^\\S{1,${MAX_MODEL_ID_CHARS}}$`)) });
+const effort = z.enum(EFFORT_LEVELS);
 
 const graphNodeSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
@@ -21,6 +25,8 @@ const graphNodeSchema = z.object({
   timeoutSec: timeoutSec.optional(),
   access: access.optional(),
   workspace: z.string().optional(),
+  model: stepModel.optional(),
+  effort: effort.optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -51,6 +57,7 @@ export function parseGraph(json: unknown): GraphResult {
     if (ids.has(n.id)) return { ok: false, error: `duplicate node id ${n.id}` };
     ids.add(n.id);
     if (n.access === 'read' && n.kind === 'command') return { ok: false, error: `${n.id}: ${COMMAND_ALWAYS_WRITES}` };
+    if ((n.model || n.effort) && n.kind === 'command') return { ok: false, error: `${n.id}: ${ONLY_AGENT_STEPS_MODEL}` };
     const workspaceProblem = n.workspace === undefined ? null : workspaceNameProblem(n.workspace);
     if (workspaceProblem) return { ok: false, error: `${n.id}: ${workspaceProblem}` };
   }
@@ -79,6 +86,8 @@ const newNode = z.object({
   timeoutSec: timeoutSec.optional(),
   access: access.optional(),
   workspace: z.string().optional(),
+  model: stepModel.optional(),
+  effort: effort.optional(),
   position: position.optional(),
 });
 
@@ -91,6 +100,9 @@ const nodePatch = z.object({
   timeoutSec: timeoutSec.optional(),
   access: access.optional(),
   workspace: z.string().optional(),
+  // null clears the step's own model or effort.
+  model: stepModel.nullable().optional(),
+  effort: effort.nullable().optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
@@ -128,7 +140,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('splitStep'), graphId: z.string(), sessionId: z.string(), nodeId: z.string() }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('stopPlanner'), graphId: z.string(), sessionId: z.string() }),
-  z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: z.enum(EFFORT_LEVELS).optional() }),
+  z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: effort.optional() }),
   z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), sequential: z.boolean().optional() }),
   z.object({ type: z.literal('inspectCheckout') }),
   z.object({ type: z.literal('previewRun'), graphId: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),

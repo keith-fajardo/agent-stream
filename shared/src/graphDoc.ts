@@ -47,8 +47,8 @@ export function formatFileErrors(errors: readonly GraphFileError[], max = 1): st
 /**
  * The graph as its files hold it (spec §4): what loading its Markdown and side file gives back. Names, titles, variable
  * descriptions and step descriptions on one line; goal and instructions trimmed; LF line endings; only the text of the
- * step's kind (a prompt or a command), absent when empty; `access` only for a read-only agent step; whole-second
- * timeouts; `nodeSeq` at least the highest n<number> id.
+ * step's kind (a prompt or a command), absent when empty; `access` only for a read-only agent step; a model and an
+ * effort only on an agent step; whole-second timeouts; `nodeSeq` at least the highest n<number> id.
  */
 export function canonicalGraph(graph: Graph): Graph {
   const nodes = graph.nodes.map(canonicalNode);
@@ -65,7 +65,7 @@ export function canonicalGraph(graph: Graph): Graph {
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, ...rest } = node;
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, ...rest } = node;
   const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
   const summary = oneLine(description ?? '');
   return {
@@ -76,6 +76,8 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(timeoutSec !== undefined && { timeoutSec: timeoutValue(timeoutSec) }),
     ...(node.kind === 'agent' && access === 'read' && { access: 'read' as const }),
     ...(workspace && { workspace }),
+    ...(node.kind === 'agent' && model && { model: { provider: model.provider, id: model.id } }),
+    ...(node.kind === 'agent' && effort && { effort }),
   };
 }
 

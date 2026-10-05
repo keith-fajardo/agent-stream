@@ -17,6 +17,10 @@ export type GraphNode = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  /** Agent steps: the step's own model, within its provider (spec §2.1). Missing means the run's model. */
+  model?: StepModel;
+  /** Agent steps: the step's own effort. Missing means the run's effort. */
+  effort?: EffortLevel;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -53,6 +57,8 @@ export type NewNodeInput = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  model?: StepModel;
+  effort?: EffortLevel;
   position?: Position;
 };
 
@@ -68,6 +74,10 @@ export type NodePatch = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  /** null clears the step's model (back to the run's). */
+  model?: StepModel | null;
+  /** null clears the step's effort (back to the run's). */
+  effort?: EffortLevel | null;
 };
 
 export type Op =
@@ -100,7 +110,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
@@ -278,6 +288,8 @@ export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', '
  * runs when none is chosen (Codex marks one; Claude Code has a `default` row instead).
  */
 export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string; isDefault?: boolean };
+/** A step's own model: the provider's model id exactly as its model list reports it, tagged with the provider (spec §2.1). */
+export type StepModel = { provider: ProviderId; id: string };
 /** A model and effort choice; an absent field means Default. */
 export type ModelSelection = { model?: string; effort?: EffortLevel };
 

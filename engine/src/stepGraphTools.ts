@@ -28,8 +28,8 @@ const TITLE_PROBLEM = `a step title must be one line of at most ${MAX_TITLE_CHAR
 const titleProblem = (title: string | undefined) => (title !== undefined && (/[\r\n\u2028\u2029\u0085\v\f]/.test(title) || title.length > MAX_TITLE_CHARS) ? TITLE_PROBLEM : null);
 
 /** Changed fields in the order a person reads them: the text that runs first. */
-const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec', 'access', 'workspace'];
-const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace' };
+const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec', 'access', 'workspace', 'model', 'effort'];
+const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace', model: 'model', effort: 'effort' };
 /** "command", "prompt and description", "prompt, title and description". */
 const listed = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 const unique = (ids: string[]) => [...new Set(ids)];
