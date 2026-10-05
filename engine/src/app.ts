@@ -347,8 +347,8 @@ export function createApp(d: AppDeps) {
   values.on('changed', (graphId: string, vals: Record<string, string>) => broadcast({ type: 'variableValues', graphId, values: vals }));
   graphStore.on('op', (graphId: string, op: Op, via?: OpRecord['via']) => {
     if (op.type === 'renameVariable') values.rename(graphId, op.name, op.newName);
-    // A file edit (a branch switch, a hand edit) never deletes a saved value: the variable may come back with the file.
-    if (op.type === 'deleteVariable' && via !== 'file') values.delete(graphId, op.name);
+    // A file edit (a branch switch, a hand edit) never deletes a saved value: the variable may come back with the file. Nor does an undo.
+    if (op.type === 'deleteVariable' && via === undefined) values.delete(graphId, op.name);
   });
   /** Each graph's agent-change count as last broadcast, so the graphs list follows it. */
   const agentChangeCounts = new Map<string, number>();
@@ -497,8 +497,11 @@ export function createApp(d: AppDeps) {
     const label = undo.top(client, graphId)?.label;
     client.send({ type: 'undoState', graphId, ...(label !== undefined && { label }) });
   }
-  function recordUndo(client: Client, graphId: string, before: Graph, after: Graph, label: string, ops: Op[]): void {
-    if (undo.record(client, graphId, { before, after, label, ops })) sendUndoState(client, graphId);
+  /** `savedValues`: the graph's values from before the action, of which those of the variables it deleted are kept for undo. */
+  function recordUndo(client: Client, graphId: string, before: Graph, after: Graph, label: string, ops: Op[], savedValues: Record<string, string> = {}): void {
+    const kept = Object.fromEntries(before.variables.filter((v) => !after.variables.some((a) => a.name === v.name) && Object.hasOwn(savedValues, v.name)).map((v) => [v.name, savedValues[v.name]]));
+    const values = Object.keys(kept).length ? kept : undefined;
+    if (undo.record(client, graphId, { before, after, label, ops, ...(values && { values }) })) sendUndoState(client, graphId);
   }
   /**
    * Edit › Undo: restores the graph from before this tab's newest action, as user edits recorded `via: 'undo'` — only when
@@ -523,6 +526,9 @@ export function createApp(d: AppDeps) {
       undo.clear(client, graphId);
       return done(`Can't undo ${entry.label}: ${r.error}`);
     }
+    // A deleted variable's saved value comes back with it (the delete took it away).
+    const have = values.get(graphId);
+    for (const [name, value] of Object.entries(entry.values ?? {})) if (!Object.hasOwn(have, name)) values.set(graphId, name, value);
     undo.pop(client, graphId);
     done(undoneMessage(entry.label));
   }
@@ -596,10 +602,11 @@ export function createApp(d: AppDeps) {
       case 'op': {
         if (revertBlockedByRun(msg.graphId, msg.op)) return client.send({ type: 'opRejected', graphId: msg.graphId, error: 'Stop the run first.' });
         const before = graphStore.load(msg.graphId);
+        const savedValues = values.get(msg.graphId);
         const r = graphStore.apply(msg.graphId, msg.op, 'user');
         if (!r.ok) return client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
         const label = undoLabel(msg.op);
-        if (label && before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, label, [msg.op]);
+        if (label && before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, label, [msg.op], savedValues);
         // Agent changes have their own Accept and Revert; a revert here changes the graph under this tab's undo steps.
         if (msg.op.type === 'revertChange') {
           undo.clear(client, msg.graphId);
@@ -609,9 +616,10 @@ export function createApp(d: AppDeps) {
       }
       case 'ops': {
         const before = graphStore.load(msg.graphId);
+        const savedValues = values.get(msg.graphId);
         const r = graphStore.applyBatch(msg.graphId, msg.ops, 'user');
         if (!r.ok) return client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
-        if (before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, msg.label, msg.ops);
+        if (before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, msg.label, msg.ops, savedValues);
         return;
       }
       case 'undo':

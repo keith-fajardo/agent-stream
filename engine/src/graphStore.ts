@@ -463,7 +463,8 @@ export class GraphStore extends EventEmitter {
     const applied: Op[] = [];
     for (const op of ops) {
       const r = this.applyOne(graph, op, by, at);
-      // The same edits just succeeded on a copy; only I/O (writeBaseline) can fail here, and then nothing is saved.
+      // The same edits just succeeded on a copy; only I/O (writeBaseline) can fail here. Then this throws before the graph is
+      // saved, and the baseline may already be ahead of it (as in apply()).
       if (!r.ok) throw new Error(r.error);
       graph = r.graph;
       applied.push(r.op);

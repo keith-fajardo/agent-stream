@@ -1,4 +1,5 @@
 import { diffToOps } from './diffToOps';
+import { applyOp } from './graph';
 import type { GraphDoc } from './graphDoc';
 import type { Graph, Op } from './types';
 
@@ -69,18 +70,25 @@ export function graphAsDoc(g: Graph): GraphDoc {
 }
 
 /**
- * The operations that take `current` back to `before` (spec §6a.2): diffToOps, then a move for every step whose place
- * differs (null puts a step back on the automatic layout). A variable rename is undone by renaming it back, so its saved
- * value and the steps that use it follow.
+ * The operations that take `current` back to `before` (spec §6a.2): first every variable rename of the action renamed back,
+ * newest first (so the saved value and the steps that use the variable follow), then diffToOps for the rest, then a move for
+ * every step whose place differs (null puts a step back on the automatic layout).
  */
 export function undoOps(current: Graph, before: Graph, forward: readonly Op[] = []): Op[] {
-  const only = forward.length === 1 ? forward[0] : undefined;
-  if (only?.type === 'renameVariable') return [{ type: 'renameVariable', name: only.newName, newName: only.name }];
-  const ops = diffToOps(current, graphAsDoc(before));
-  const now = new Map(current.nodes.map((n) => [n.id, n.position]));
+  const ops: Op[] = [];
+  let now = current;
+  for (const op of [...forward].reverse()) {
+    if (op.type !== 'renameVariable') continue;
+    const back: Op = { type: 'renameVariable', name: op.newName, newName: op.name };
+    const r = applyOp(now, back, 'user', now.updatedAt);
+    if (!r.ok) continue;
+    ops.push(back);
+    now = r.graph;
+  }
+  ops.push(...diffToOps(now, graphAsDoc(before)));
+  const at = new Map(now.nodes.map((n) => [n.id, n.position]));
   for (const n of before.nodes) {
-    const at = now.get(n.id);
-    if (stable(at ?? null) !== stable(n.position ?? null)) ops.push({ type: 'moveNode', id: n.id, position: n.position ?? null });
+    if (stable(at.get(n.id) ?? null) !== stable(n.position ?? null)) ops.push({ type: 'moveNode', id: n.id, position: n.position ?? null });
   }
   return ops;
 }

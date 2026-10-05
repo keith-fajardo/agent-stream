@@ -179,4 +179,49 @@ describe('undo (step model spec §6a.2)', () => {
     expect(s.graph().nodes).toHaveLength(1);
     expect(t.label()).toBe('added n1');
   });
+
+  it('refuses after an agent step changed the graph', async () => {
+    const s = setup();
+    const t = s.tab();
+    await t.op(add('n1'));
+    s.app.graphStore.apply(s.graphId, { type: 'updateNode', id: 'n1', patch: { prompt: 'from a run' } }, 'agent', { kind: 'step', runId: 'r1', nodeId: 'n1' });
+    await t.undo();
+    expect(t.toast()).toBe(UNDO_CHANGED);
+    expect(s.graph().nodes).toHaveLength(1);
+  });
+
+  it('undoing a lone variable rename keeps the saved value', async () => {
+    const s = setup();
+    const t = s.tab();
+    await t.op({ type: 'addVariable', name: 'x' });
+    await s.app.handle(t.c, { type: 'setVariableValue', graphId: s.graphId, name: 'x', value: 'secret' });
+    await t.op({ type: 'renameVariable', name: 'x', newName: 'y' });
+    expect(s.app.values.get(s.graphId)).toEqual({ y: 'secret' });
+    await t.undo();
+    expect(s.graph().variables.map((v) => v.name)).toEqual(['x']);
+    expect(s.app.values.get(s.graphId)).toEqual({ x: 'secret' });
+  });
+
+  it('undoing a dialog-style batch (rename and describe) brings the variable and its value back', async () => {
+    const s = setup();
+    const t = s.tab();
+    await t.op({ type: 'addVariable', name: 'x' });
+    await s.app.handle(t.c, { type: 'setVariableValue', graphId: s.graphId, name: 'x', value: 'secret' });
+    await t.ops([{ type: 'renameVariable', name: 'x', newName: 'y' }, { type: 'setVariableDescription', name: 'y', description: 'Why' }], 'edited the variables');
+    await t.undo();
+    expect(s.graph().variables).toMatchObject([{ name: 'x', description: '' }]);
+    expect(s.app.values.get(s.graphId)).toEqual({ x: 'secret' });
+  });
+
+  it('undoing a variable delete restores its saved value', async () => {
+    const s = setup();
+    const t = s.tab();
+    await t.op({ type: 'addVariable', name: 'x' });
+    await s.app.handle(t.c, { type: 'setVariableValue', graphId: s.graphId, name: 'x', value: 'secret' });
+    await t.op({ type: 'deleteVariable', name: 'x' });
+    expect(s.app.values.get(s.graphId)).toEqual({});
+    await t.undo();
+    expect(s.graph().variables.map((v) => v.name)).toEqual(['x']);
+    expect(s.app.values.get(s.graphId)).toEqual({ x: 'secret' });
+  });
 });

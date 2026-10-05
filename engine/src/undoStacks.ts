@@ -1,7 +1,7 @@
 import { MAX_UNDO, undoState, type Graph, type Op } from '@agent-stream/shared';
 
 /** One user action in a tab: the graph before and after it, its label, and the edits it was made of. */
-export type UndoEntry = { before: Graph; after: Graph; label: string; ops: Op[] };
+export type UndoEntry = { before: Graph; after: Graph; label: string; ops: Op[]; /** Saved values of the variables this action deleted, so undo can put them back (in memory only). */ values?: Record<string, string> };
 
 /**
  * Each tab's undo stack per graph (step model spec §6a.2), newest last, at most MAX_UNDO entries. In memory only: a tab
