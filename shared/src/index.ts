@@ -18,3 +18,4 @@ export * from './graphMarkdownWrite';
 export * from './diffToOps';
 export * from './stepModels';
 export * from './undo';
+export * from './attachments';
