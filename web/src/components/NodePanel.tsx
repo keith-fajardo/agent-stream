@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { refinable, type GraphNode, type NodeKind, type NodePatch } from '@agent-stream/shared';
+import { parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
+import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModelMenus';
 import { dispatch, useStore } from '../store';
 
-type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; prompt: string; command: string; timeoutSec: string };
+/** `model`: `<provider>/<id>`, '' for Default; `effort`: a level, '' for Default. */
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; prompt: string; command: string; timeoutSec: string };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
@@ -14,6 +16,8 @@ const toDraft = (n: GraphNode): Draft => ({
   kind: n.kind,
   access: n.access === 'read' ? 'read' : 'write',
   workspace: n.workspace ?? '',
+  model: n.model ? stepModelText(n.model) : '',
+  effort: n.effort ?? '',
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
@@ -44,6 +48,54 @@ export function NodePanel() {
       )}
       <NodeEditor key={node.id} graphId={graph.id} node={node} workspaces={workspaces} />
     </div>
+  );
+}
+
+const NO_MODELS: ModelChoice[] = [];
+const options = (list: MenuOption[]) =>
+  list.map((o) => (
+    <option key={o.value} value={o.value} disabled={o.disabled}>
+      {o.label}
+    </option>
+  ));
+
+/** An agent step's own Model and Effort (step model spec §4.1), saved with the panel's other edits. */
+function StepModelFields({ model, effort, onChange }: { model: string; effort: string; onChange(next: { model: string; effort: string }): void }) {
+  const statusProvider = useStore((s) => s.status?.provider);
+  const listProvider = useStore((s) => s.modelsProvider);
+  const provider = listProvider ?? statusProvider;
+  const models = useStore((s) => (s.modelsProvider === provider ? s.models : NO_MODELS));
+  const defaultEfforts = useStore((s) => s.defaultEfforts);
+  const menu = modelMenu(provider, models, model);
+  const efforts = effortMenu(provider, models, defaultEfforts, model, effort);
+  // An effort the new model doesn't offer goes back to Default.
+  const pickModel = (next: string) => {
+    const levels = provider === 'copilot' ? [] : effortsFor(provider, models, defaultEfforts, next);
+    onChange({ model: next, effort: effort && levels && !levels.includes(effort as EffortLevel) ? '' : effort });
+  };
+  return (
+    <>
+      <div className="field">
+        <label htmlFor="node-model">Model</label>
+        <div className="field-row">
+          <select id="node-model" value={model} onChange={(e) => pickModel(e.target.value)}>
+            {options(menu.options)}
+            {menu.pinned.length > 0 && <optgroup label="Pinned versions">{options(menu.pinned)}</optgroup>}
+            {menu.extra && options([menu.extra])}
+          </select>
+          {menu.otherProvider && <button onClick={() => pickModel('')}>Use Default</button>}
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor="node-effort">Effort</label>
+        <div className="field-row">
+          <select id="node-effort" value={effort} disabled={efforts.disabled} onChange={(e) => onChange({ model, effort: e.target.value })}>
+            {options(efforts.options)}
+          </select>
+          {efforts.disabled && effort && <button onClick={() => onChange({ model, effort: '' })}>Use Default</button>}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -82,6 +134,12 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     if (draft.kind !== base.draft.kind) patch.kind = draft.kind;
     if (draft.access !== base.draft.access && draft.kind === 'agent') patch.access = draft.access;
     if (draft.workspace !== base.draft.workspace) patch.workspace = draft.workspace.trim();
+    // Only agent steps have a model or effort; becoming a command step drops them in the engine.
+    if (draft.kind === 'agent' && draft.model !== base.draft.model) {
+      const parsed = draft.model ? parseStepModel(draft.model) : undefined;
+      patch.model = parsed?.ok ? parsed.model : null;
+    }
+    if (draft.kind === 'agent' && draft.effort !== base.draft.effort) patch.effort = (draft.effort || null) as EffortLevel | null;
     if (draft.prompt !== base.draft.prompt) patch.prompt = draft.prompt;
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
@@ -147,6 +205,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           ))}
         </datalist>
       </div>
+      {draft.kind === 'agent' && <StepModelFields model={draft.model} effort={draft.effort} onChange={(next) => setDraft({ ...draft, ...next })} />}
       {draft.kind === 'agent' ? (
         <div className="field">
           <label>Prompt</label>

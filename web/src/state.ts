@@ -13,6 +13,7 @@ import type {
   ModelChoice,
   ModelSelection,
   NodeEvent,
+  ProviderId,
   ProviderStatus,
   RunMeta,
   RunPreview,
@@ -78,8 +79,10 @@ export type State = {
   chatBusy: boolean;
   /** The planner conversation the chat view shows; the extension picks it. */
   chatTarget?: ChatTarget;
-  /** The current provider's models, for the chat's Model menu. */
+  /** The current provider's models, for the chat's and the Node panel's Model menus. */
   models: ModelChoice[];
+  /** The provider `models` belongs to. */
+  modelsProvider?: ProviderId;
   /** The levels the chat's Default offers: the settings' model's, else Claude Code's default row's. */
   defaultEfforts: EffortLevel[];
   /** The shown conversation's own model and effort choice, as the engine last confirmed it (absent fields: Default). */
@@ -314,7 +317,7 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'plannerModel':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, plannerModel: selection(msg) } : state;
     case 'models':
-      return { ...state, models: msg.models, defaultEfforts: msg.defaultEfforts ?? [] };
+      return { ...state, models: msg.models, modelsProvider: msg.provider, defaultEfforts: msg.defaultEfforts ?? [] };
     case 'chatEntry':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':

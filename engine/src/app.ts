@@ -226,6 +226,10 @@ export function createApp(d: AppDeps) {
   };
   /** The one planner conversation each client shows (openChat). */
   const chatSubscriptions = new Map<Client, { graphId: string; sessionId: string }>();
+  /** Clients that opened a graph: their Node panel's Model menu needs the provider's models too (step model spec §4.1). */
+  const graphClients = new Set<Client>();
+  /** Everyone who shows a Model menu: chats and graph tabs. */
+  const modelClients = () => new Set<Client>([...chatSubscriptions.keys(), ...graphClients]);
   const toConversation = (sessionId: string, graphId: string, msg: ServerMessage) => {
     for (const [c, sub] of chatSubscriptions) if (sub.graphId === graphId && sub.sessionId === sessionId) c.send(msg);
   };
@@ -438,7 +442,7 @@ export function createApp(d: AppDeps) {
   }
   /** The settings' default model or effort changed: the chats' Default menus follow. Runs and turns read them when they start. */
   function modelDefaultsChanged(): void {
-    for (const c of chatSubscriptions.keys()) sendModels(c);
+    for (const c of modelClients()) sendModels(c);
   }
 
   async function preview(
@@ -459,6 +463,12 @@ export function createApp(d: AppDeps) {
   function review(graphId: string): { baseline?: Graph; changes: AgentChange[] } {
     const base = graphStore.baseline(graphId);
     return { ...(base.ok && base.graph && { baseline: base.graph }), changes: graphStore.agentChanges(graphId) };
+  }
+
+  /** A tab showing a graph gets the provider's models, for its Node panel, after the graph. */
+  function openedGraph(client: Client): void {
+    graphClients.add(client);
+    if (provider.listModels) sendModels(client);
   }
 
   function opened(graph: Graph): ServerMessage {
@@ -486,7 +496,7 @@ export function createApp(d: AppDeps) {
     provider = next;
     status = nextStatus;
     broadcast({ type: 'auth', status });
-    for (const c of chatSubscriptions.keys()) sendModels(c, next);
+    for (const c of modelClients()) sendModels(c, next);
   }
 
   /** VS Code is closing: release this engine's leases and stop every run (ruling R4, spec §8). */
@@ -513,6 +523,7 @@ export function createApp(d: AppDeps) {
     return () => {
       clients.delete(client);
       chatSubscriptions.delete(client);
+      graphClients.delete(client);
     };
   }
 
@@ -523,11 +534,13 @@ export function createApp(d: AppDeps) {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         client.send(opened(r.graph));
+        openedGraph(client);
         return;
       }
       case 'createGraph': {
         const graph = createGraph(msg.name);
         client.send(opened(graph));
+        openedGraph(client);
         return;
       }
       case 'op': {
