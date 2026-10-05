@@ -1,4 +1,4 @@
-# Agent Stream — model and effort per step, plus save and undo shortcuts (design)
+# Agent Stream — model and effort per step, save/undo shortcuts, and attachments (design)
 
 Date: 2026-10-05. Status: approved in conversation, awaiting review of this written spec.
 
@@ -186,6 +186,81 @@ These apply to the graph tab. "⌘" means Command on macOS and Ctrl on Windows a
 
 **Redo** (⇧⌘Z / Ctrl+Y) is not included. It's an easy follow-up on the same stack.
 
+## 6b. Attachments: files and photos as context (added on request; phase 2)
+
+Built as a **second phase**, after model, effort and the shortcuts (§§2–6a), so those ship sooner. The user approved approach A: **copy into the project**.
+
+### 6b.1 Where you can attach
+
+1. **A planner chat message.** 📎 button, drag-and-drop, or paste in the chat box. The planner receives the files with that message only.
+2. **A step.** Attachments list in the Node panel (agent steps only). The step's agent gets them every time the step runs.
+3. **The whole graph.** Attachments list in the Graph panel. Every agent step gets them, after the step's own.
+
+The planner is told the graph's and the open step's attachment names (as context), but it does not receive their contents unless they are attached to a chat message.
+
+### 6b.2 Storage
+
+- **Step and graph attachments** are copied into `.agent-stream/attachments/<graph-id>/<name>`.
+  - This folder is **not** git-ignored, so attachments are committed with the graph and teammates get them.
+  - **Names:** the original file name, made safe (letters, digits, `.`, `-`, `_`, space, at most 100 characters). A clash gets `-2`, `-3`, … before the extension.
+- **Chat attachments** are copied into `.agent-stream/sessions/<session>/attachments/` (git-ignored, personal, never committed). They are not part of the graph.
+- **Allowed types:**
+  - images: `png`, `jpg`/`jpeg`, `gif`, `webp`;
+  - PDFs;
+  - text-like files: `md`, `txt`, `csv`, `tsv`, `json`, `yaml`/`yml`, `sql`, `xml`, `html`, `log`, and common source-code extensions.
+  - Anything else is refused with a message naming the allowed types.
+- **Limits:** images up to 10 MB, other files up to 5 MB, at most 20 attachments per step, per graph, and per chat message.
+- **Removing:**
+  - A step or graph attachment is removed from the list. Its file is deleted only when nothing else in the graph still references it.
+  - **Deleting a graph** deletes its attachments folder.
+  - **Duplicating a graph** copies it.
+- **The first attachment in a folder** shows a one-time notice: `Attachments are saved with the graph (and committed) and sent to your AI provider. Don't attach secrets.` Variable values are never written into attachments.
+
+### 6b.3 In the Markdown file
+
+- **A step** gets one line per attachment in its field list, after `effort`: `- attach: mockup.png`. The line is repeatable and order is kept.
+- **The graph** gets a reserved `## Attachments` section after `## Variables`: a bullet list, `` - `mockup.png` ``.
+- **Parse errors** (each with its line and a fix hint):
+  - an attachment name that isn't a safe name;
+  - a duplicate name in one list;
+  - `attach` on a command step.
+- **A missing attachment file** is not a parse error. It is a warning when a run starts (§6b.5), so a graph still opens before the files are pulled.
+- **Round trip** and `diffToOps` cover both lists.
+- **Data model:**
+  - `GraphNode.attachments?: string[]` and `Graph.attachments?: string[]`;
+  - the node patch accepts `attachments`, and a new op `setGraphAttachments { names }`;
+  - `ChangedField` gains `'attachments'`;
+  - switching a step to `command` drops its list.
+
+### 6b.4 Adding and opening files
+
+- **Add…** opens VS Code's file picker (the extension copies the files).
+- **Drag-and-drop or paste** into the Node panel, Graph panel or chat box sends the file bytes to the extension. That is subject to the same limits, checked in the tab before sending.
+- **Open** opens the attachment in VS Code (images in its image viewer).
+- **Remove** removes it (§6b.2).
+- **History:** each change is a normal edit in history, agent-change review and the `.md`, and undo (§6a) covers it. **Agents and the planner can't add or remove attachments in v1**: no graph tool for it.
+
+### 6b.5 What agents receive
+
+**A step's run.** The step's prompt gets an `Attached files:` list: the step's attachments, then the graph's, each with its path (relative to the step's folder, or absolute for a variant worktree).
+
+| | Images | PDFs | Text files |
+|---|---|---|---|
+| **Claude** | attached as images in the step's first message | read with Read (Claude supports PDFs) | read with the read tools (no approval needed) |
+| **Codex** | attached with `turn/start` image input items | path plus a note that the model may not read PDFs | read with plain reads (no approval needed) |
+| **Copilot** | sent as images if the VS Code LM API supports image parts for extensions (to be checked in the plan's first task); otherwise path plus the note `This image couldn't be shown to the model.` | path plus a note | read with Read |
+
+- **Run snapshot:** it records each attachment's name and SHA-256, and a missing file adds a warning to the run dialog and the step log.
+- **Run Report:** it lists each step's attachments (names and hashes, not contents).
+- **Privacy:** the attachments folder is readable by agents like any project file. It is not a private path.
+
+**A planner chat message.** Its files go to the planner with the message:
+- **Images** as images, where the provider supports them.
+- **Text files** inlined into the message, up to 100 KB each, with a note when cut.
+- **PDFs** sent as documents on Claude; on Codex and Copilot, a note that they couldn't be included.
+
+The planner can't open chat attachments with its read tools, because the sessions folder stays private. The chat shows each attachment as a chip on its message.
+
 ## 7. Testing
 
 - **shared:**
@@ -227,6 +302,12 @@ These apply to the graph tab. "⌘" means Command on macOS and Ctrl on Windows a
     - ⌘Z inside text fields stays text undo;
     - Edit › Undo label and disabled state;
     - agent-change baseline behaviour matches a canvas edit.
+- **attachments (6b):**
+  - **storage:** safe names and clashes; type and size limits; delete-when-unreferenced; graph delete and duplicate;
+  - **the `.md`:** `attach` lines and the `## Attachments` section (parse errors, round trip, `diffToOps`), and `setGraphAttachments`;
+  - **runs:** the prompt's `Attached files:` list; images passed as images per provider (Claude, Codex; Copilot as the check in its first task decides); PDFs per provider; the snapshot hashes; a missing-file warning; Run Report;
+  - **chat:** chat attachments sent with one message (images; text inlined and cut; PDF per provider), stored in the session and never committed;
+  - **UI:** Add, drag/drop, paste, Open, Remove; limits checked before sending; the one-time notice; undo covers attachment edits.
 - **All existing tests keep passing,** on Windows, macOS and Linux CI.
 
 ## 8. Research appendix (2026-10-05)
@@ -271,3 +352,4 @@ From live checks on the user's machine (Claude Code 2.1.289 `supportedModels()`,
 - Showing cost per model.
 - Tier-based model names.
 - Redo, and undo of agent changes or outside file edits.
+- Agents or the planner adding or removing attachments; attachments in exports (an exported `.md` names them but doesn't include the files — the export toast says so); other file types; links to existing repo files instead of copies.
