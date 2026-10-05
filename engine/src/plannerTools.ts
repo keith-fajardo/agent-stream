@@ -1,5 +1,5 @@
 import { z, type ZodRawShape } from 'zod';
-import type { ChangeSource, CheckoutInfo, Graph, LeaseHolder, Op } from '@agent-stream/shared';
+import { CLI_DEFAULT_MODEL, EFFORT_LEVELS, parseStepModel, stepModelText, type ChangeSource, type CheckoutInfo, type EffortLevel, type Graph, type LeaseHolder, type ModelChoice, type NodePatch, type Op, type ProviderId, type StepModel } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
 import { ALL_HAVE_WORKTREES_ADVICE, MISSING_WORKTREES_ADVICE, OUTSIDE_GIT_ADVICE } from './policy';
@@ -20,6 +20,8 @@ export type PlannerToolDeps = {
   requestRun: (fromNodeId?: string) => string | null;
   /** checkout_info and check_tickets read it. */
   checkout: CheckoutSource;
+  /** list_models reads it: the current provider and its models ([] when they can't be listed). */
+  models?: () => Promise<{ provider: ProviderId; models: ModelChoice[] }>;
 };
 
 export const reply = (text: string, isError = false): ToolReply => (isError ? { text, isError: true } : { text });
@@ -40,17 +42,30 @@ export function defineTool<S extends ZodRawShape>(name: string, description: str
 
 const kind = z.enum(['agent', 'command']);
 const access = z.enum(['read', 'write']);
+const effort = z.enum(EFFORT_LEVELS);
 const RUN_EXCERPT_CHARS = 2000;
+/** list_models when the provider can't list its models. */
+export const NO_MODEL_LIST = "The current provider's models can't be listed right now; leave model on Default.";
+
+/** The planner's `model` text ("" = Default) as a step model, or why it can't be one (step model spec §5). */
+function modelArg(text: string | undefined): { ok: true; model?: StepModel | null } | { ok: false; error: string } {
+  if (text === undefined) return { ok: true };
+  if (text === '') return { ok: true, model: null };
+  const r = parseStepModel(text);
+  return r.ok ? { ok: true, model: r.model } : r;
+}
 
 export function summarizeGraph(graph: Graph) {
   return {
     goal: graph.goal,
     instructions: graph.instructions,
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, createdBy, updatedBy }) => ({
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, createdBy, updatedBy }) => ({
       id, title, kind: k, description, prompt, command, timeoutSec,
       ...(a === 'read' && { access: 'read' as const }),
       ...(workspace && { workspace }),
+      ...(model && { model: stepModelText(model) }),
+      ...(e && { effort: e }),
       createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
@@ -63,12 +78,24 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
   const outcome = (r: { ok: true } | { ok: false; error: string }, success: string) => (r.ok ? reply(success) : reply(r.error, true));
 
   return [
-    defineTool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command) and edges.', {}, async () =>
+    defineTool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command, and an agent step\'s own model and effort) and edges.', {}, async () =>
       reply(JSON.stringify(summarizeGraph(d.graphStore.get(d.graphId)), null, 2)),
     ),
     defineTool(
+      'list_models',
+      'Read-only. List the current provider\'s models as JSON: each model\'s id, name, effort levels, and which one is the default. Give a step one of them as model "<provider>/<id>" in add_node or update_node.',
+      {},
+      async () => {
+        const listed = await d.models?.().catch(() => undefined);
+        if (!listed || listed.models.length === 0) return reply(NO_MODEL_LIST);
+        const isDefault = (m: ModelChoice) => !!m.isDefault || (listed.provider === 'claude' && m.value === CLI_DEFAULT_MODEL);
+        const models = listed.models.map((m) => ({ id: m.value, name: m.label, efforts: m.efforts, ...(isDefault(m) && { default: true }) }));
+        return reply(JSON.stringify({ provider: listed.provider, models }, null, 2));
+      },
+    ),
+    defineTool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s.',
       {
         kind,
         title: z.string(),
@@ -79,9 +106,13 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         after: z.array(z.string()).optional(),
         access: access.optional(),
         workspace: z.string().optional(),
+        model: z.string().optional(),
+        effort: effort.optional(),
       },
       async (a) => {
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace } });
+        const m = modelArg(a.model || undefined);
+        if (!m.ok) return reply(m.error, true);
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }) } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -94,7 +125,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s.',
       {
         id: z.string(),
         title: z.string().optional(),
@@ -105,8 +136,15 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         timeoutSec: z.number().positive().optional(),
         access: access.optional(),
         workspace: z.string().optional(),
+        model: z.string().optional(),
+        effort: z.union([effort, z.literal('')]).optional(),
       },
-      async ({ id, ...patch }) => outcome(apply({ type: 'updateNode', id, patch }), `Updated ${id}.`),
+      async ({ id, model, effort: e, ...rest }) => {
+        const m = modelArg(model);
+        if (!m.ok) return reply(m.error, true);
+        const patch: NodePatch = { ...rest, ...(m.model !== undefined && { model: m.model }), ...(e !== undefined && { effort: e === '' ? null : (e as EffortLevel) }) };
+        return outcome(apply({ type: 'updateNode', id, patch }), `Updated ${id}.`);
+      },
     ),
     defineTool('delete_node', 'Delete a step and its edges.', { id: z.string() }, async ({ id }) =>
       outcome(apply({ type: 'deleteNode', id }), `Deleted ${id}.`),

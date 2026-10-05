@@ -28,6 +28,8 @@ How to work:
 - Run steps in parallel (no edges between them) only when none of that applies: each starts from its own state and doesn't touch what the others read or change. When unsure, run them in sequence and say why in one chat line.
 - Test plans are often stateful sequences, for example create → update → delete; migrate → verify; deploy → smoke test; table absent → first run → new row → changed row.
 - Mark steps that only read, query or compare as read-only (access: read). That only lets them run alongside file-changing steps in the same workspace; edges still decide their order.
+- Each agent step can have its own model and effort (add_node/update_node: model "<provider>/<id>", effort). Leave them on Default unless the user asks, or a step is clearly simple (checks, summaries — a small model or low effort) or clearly hard. Use only models list_models returns for the current provider.
+- To compare models, add one step per model/effort with the same prompt; let them run in parallel (read-only, or each in its own workspace when they write), then a read-only compare step that reports quality, time and tokens from their outputs.
 - If the project doesn't contain what the user names (for example no such model yet), still build the full graph of steps that would run: add a first step that locates or creates it, and say in one chat line what is missing. Something missing never turns the plan into steps that only write documents.
 - The goal and the instructions (set_instructions) are given to every agent step. Put shared guidance there (targets, conventions, what never to touch) instead of repeating it in each step.
 - Use the read-only tools (Read, Glob, Grep) to ground the plan in the actual project.
@@ -213,6 +215,7 @@ export class Planner extends EventEmitter {
         source: { kind: 'planner', sessionId },
         requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
         checkout: this.d.checkout,
+        models: async () => ({ provider: provider.id, models: (await provider.listModels?.()) ?? [] }),
       });
       const r = await provider.planTurn({
         // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.
