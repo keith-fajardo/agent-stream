@@ -7,7 +7,7 @@ export const MAX_MODEL_ID_CHARS = 200;
 /** applyOp's refusal for a model or effort on a command step (spec §2.1). */
 export const ONLY_AGENT_STEPS_MODEL = 'Only agent steps have a model or effort.';
 /** A provider's own model id: 1 to 200 characters, no whitespace; `/` is allowed (spec §2.1). */
-const MODEL_ID_RE = /^\S{1,200}$/;
+export const MODEL_ID_RE = new RegExp(`^\\S{1,${MAX_MODEL_ID_CHARS}}$`);
 
 export const isProviderId = (value: string): value is ProviderId => (PROVIDER_IDS as readonly string[]).includes(value);
 export const isModelId = (id: string): boolean => MODEL_ID_RE.test(id);

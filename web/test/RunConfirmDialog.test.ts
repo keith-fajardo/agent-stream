@@ -76,6 +76,16 @@ describe('RunConfirmDialog', () => {
     await act(async () => button('Cancel').click());
   });
 
+  it('asks for the preview again when the model list arrives while the dialog is open', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    const asked = () => vi.mocked(send).mock.calls.filter(([m]) => m.type === 'previewRun').length;
+    expect(asked()).toBe(1);
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'models', provider: 'claude', models: [], defaultEfforts: [] } }));
+    expect(asked()).toBe(2);
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));
+    expect(container.textContent).toContain('Build');
+  });
+
   it('shows commands in full, agent prompts folded, the variables used, then starts with the signature', async () => {
     await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
     await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview(), requestId: lastRequestId() } }));

@@ -22,6 +22,8 @@ export function RunConfirmDialog() {
   const preview = useStore((s) => s.preview);
   const variableValues = useStore((s) => s.variableValues);
   const blocked = useStore((s) => s.blocked);
+  // A new model list changes which steps run their own model, so the preview's per-step notes are asked for again.
+  const models = useStore((s) => s.models);
 
   useEffect(() => {
     if (confirm && graph) {
@@ -29,7 +31,7 @@ export function RunConfirmDialog() {
       dispatch({ kind: 'previewRequested', requestId });
       send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId, requestId });
     }
-  }, [confirm, graph, variableValues]);
+  }, [confirm, graph, variableValues, models]);
 
   if (blocked && graph) {
     // Another run is changing files in this checkout (spec §7): separate tickets, or wait for it.

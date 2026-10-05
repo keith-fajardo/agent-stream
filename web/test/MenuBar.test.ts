@@ -43,6 +43,12 @@ describe('MenuBar', () => {
     expect(openItems()).toEqual([]);
   });
 
+  it('names the save and undo keys as ARIA does: Control+S off macOS', async () => {
+    await act(async () => title('File').click());
+    const save = [...container.querySelectorAll('.menu-items button')].find((b) => b.textContent?.startsWith('Save'));
+    expect(save?.getAttribute('aria-keyshortcuts')).toBe('Control+S');
+  });
+
   it('does not open a menu on hover when none is open', async () => {
     await act(async () => title('Edit').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
     expect(openItems()).toEqual([]);

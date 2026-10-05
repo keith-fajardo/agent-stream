@@ -521,7 +521,7 @@ export function createApp(d: AppDeps) {
       undo.clear(client, graphId);
       return done(UNDO_CHANGED);
     }
-    const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo' });
+    const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo', order: entry.before });
     if (!r.ok) {
       undo.clear(client, graphId);
       return done(`Can't undo ${entry.label}: ${r.error}`);

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { legacyNodeIdProblem, topoOrder } from './graph';
-import { MAX_MODEL_ID_CHARS, ONLY_AGENT_STEPS_MODEL } from './stepModels';
+import { MODEL_ID_RE, ONLY_AGENT_STEPS_MODEL } from './stepModels';
 import { MAX_UNDO_LABEL_CHARS } from './undo';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 import { EFFORT_LEVELS, MAX_IMPORT_CHARS, PROVIDER_IDS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
@@ -13,7 +13,7 @@ const access = z.enum(['read', 'write']);
 const timeoutSec = z.number().positive();
 const description = z.string().max(2000).optional();
 /** A step's own model (spec §2.1): the provider and its model id, 1 to 200 characters without whitespace. */
-const stepModel = z.object({ provider: z.enum(PROVIDER_IDS), id: z.string().regex(new RegExp(`^\\S{1,${MAX_MODEL_ID_CHARS}}$`)) });
+const stepModel = z.object({ provider: z.enum(PROVIDER_IDS), id: z.string().regex(MODEL_ID_RE) });
 const effort = z.enum(EFFORT_LEVELS);
 
 const graphNodeSchema = z.object({

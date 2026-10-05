@@ -14,7 +14,7 @@ export function isTextField(target: EventTarget | null): boolean {
 /** A dialog is open: the shortcuts leave the graph alone under it. */
 function modalOpen(): boolean {
   const s = getState();
-  return !!(s.variablesDialog || s.confirm || s.changeConfirm || s.markdown.confirmLeave);
+  return !!(s.variablesDialog || s.confirm || s.blocked || s.changeConfirm || s.markdown.confirmLeave);
 }
 
 /**

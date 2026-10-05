@@ -56,6 +56,27 @@ describe('undo (step model spec §6a.2)', () => {
     expect(t.label()).toBeUndefined();
   });
 
+  it('puts a deleted step, edge and variable back in their old place: the file is byte-identical', async () => {
+    const s = setup();
+    const t = s.tab();
+    for (const id of ['n1', 'n2', 'n3']) await t.op(add(id));
+    await t.op({ type: 'connect', from: 'n1', to: 'n2' });
+    await t.op({ type: 'connect', from: 'n1', to: 'n3' });
+    await t.op({ type: 'connect', from: 'n2', to: 'n3' });
+    await t.op({ type: 'addVariable', name: 'a' });
+    await t.op({ type: 'addVariable', name: 'b' });
+    await t.op({ type: 'addVariable', name: 'c' });
+    const before = readFileSync(s.file, 'utf8');
+    await t.ops([{ type: 'deleteNode', id: 'n2' }], 'deleted n2');
+    await t.undo();
+    expect(s.graph().nodes.map((n) => n.id)).toEqual(['n1', 'n2', 'n3']);
+    expect(readFileSync(s.file, 'utf8')).toBe(before);
+    await t.op({ type: 'deleteVariable', name: 'b' });
+    await t.undo();
+    expect(s.graph().variables.map((v) => v.name)).toEqual(['a', 'b', 'c']);
+    expect(readFileSync(s.file, 'utf8')).toBe(before);
+  });
+
   it('restores through user edits recorded via undo, in the Markdown file too', async () => {
     const s = setup();
     const t = s.tab();

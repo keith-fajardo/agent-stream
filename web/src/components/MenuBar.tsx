@@ -51,7 +51,7 @@ export function MenuBar() {
                     disabled={!entry.enabled}
                     className={entry.warn ? 'warn' : ''}
                     data-shortcut={entry.shortcut}
-                    aria-keyshortcuts={entry.shortcut?.replace('⌘', 'Meta+')}
+                    aria-keyshortcuts={entry.shortcut?.replace('⌘', 'Meta+').replace('Ctrl+', 'Control+')}
                     onClick={() => {
                       setOpen(undefined);
                       entry.run();

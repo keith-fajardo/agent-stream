@@ -159,8 +159,9 @@ export type NodeRunState = {
 /** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
 export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
 
-/** `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no value, or it has a problem). */
 /**
+ * `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no
+ * value, or it has a problem).
  * `modelLine`: `Model: … · Effort: …` for an agent step whose own model or effort makes it differ from the run's;
  * `modelNote`: why it doesn't run its own (step model spec §3.3). Both are shown, neither blocks the run.
  */

@@ -54,6 +54,7 @@ beforeEach(async () => {
 afterEach(async () => {
   dispatch({ kind: 'closeVariables' });
   dispatch({ kind: 'closeConfirm' });
+  dispatch({ kind: 'closeBlocked' });
   dispatch({ kind: 'closeChangeConfirm' });
   dispatch({ kind: 'confirmLeaveMarkdown', open: false });
   document.removeEventListener('keydown', onShortcutKey);
@@ -214,6 +215,7 @@ describe('fix round 1', () => {
     ['the Variables dialog', () => dispatch({ kind: 'openVariables' })],
     ['the run dialog', () => dispatch({ kind: 'openConfirm', request: {} })],
     ['the change-confirm dialog', () => dispatch({ kind: 'openChangeConfirm', mode: 'accept' })],
+    ['the Run blocked dialog', () => dispatch({ kind: 'server', msg: { type: 'runBlocked', graphId: 'g', message: 'busy', holder: { runId: 'r', graphId: 'h', folder: '/p', pid: 1, startedAt: 't' }, otherWindow: false, checkout: { git: false, root: '/p', reason: 'x' }, canSetUpTickets: false } })],
     ['the Markdown leave dialog', () => dispatch({ kind: 'confirmLeaveMarkdown', open: true })],
   ])('⌘S and ⌘Z do nothing under %s', (_n, open) => {
     open();

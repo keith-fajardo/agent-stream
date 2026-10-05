@@ -74,6 +74,23 @@ function touches(op: Op, change: AgentChange): boolean {
   return op.type === 'deleteNode' && (op.id === change.from || op.id === change.to);
 }
 
+/** `items` sorted as `order` lists them (by `key`); what `order` doesn't list keeps its relative place, after the rest. */
+function sortedLike<T>(items: readonly T[], order: readonly T[], key: (item: T) => string): T[] {
+  const rank = new Map(order.map((item, i) => [key(item), i]));
+  const at = (item: T) => rank.get(key(item)) ?? order.length;
+  return items.map((item, i) => ({ item, i })).sort((x, y) => at(x.item) - at(y.item) || x.i - y.i).map((x) => x.item);
+}
+
+/** `graph` with its steps, edges and variables in the order `order` has them (an undone delete returns to its old place). */
+function inOrderOf(graph: Graph, order: Graph): Graph {
+  return {
+    ...graph,
+    nodes: sortedLike(graph.nodes, order.nodes, (n) => n.id),
+    edges: sortedLike(graph.edges, order.edges, (e) => `${e.from}\u0000${e.to}`),
+    variables: sortedLike(graph.variables, order.variables, (v) => v.name),
+  };
+}
+
 /** `node` with `source`'s content fields (absent ones removed), keeping its id, position and authorship. */
 function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
   const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, ...rest } = node;
@@ -442,9 +459,10 @@ export class GraphStore extends EventEmitter {
   /**
    * Several edits that are one user action (a drag of several steps, deleting a selection, Tidy) or one undo (step model
    * spec §6a.2): checked on a copy first, so they apply all or none, then applied with the baseline rules of single edits,
-   * saved once and recorded one by one (`via: 'undo'` for an undo). Moves alone are allowed while the file has errors.
+   * saved once and recorded one by one (`via: 'undo'` for an undo; `order` is the graph whose order of steps, edges and
+   * variables the result keeps, so an undone delete comes back where it was). Moves alone are allowed while the file has errors.
    */
-  applyBatch(graphId: string, ops: readonly Op[], by: Actor, o: { via?: 'undo' } = {}): GraphResult {
+  applyBatch(graphId: string, ops: readonly Op[], by: Actor, o: { via?: 'undo'; order?: Graph } = {}): GraphResult {
     if (ops.some((op) => op.type === 'acceptChange' || op.type === 'revertChange')) return { ok: false, error: 'Agent changes are accepted or reverted one review at a time.' };
     const current = this.load(graphId);
     if (!current.ok) return current;
@@ -469,7 +487,7 @@ export class GraphStore extends EventEmitter {
       graph = r.graph;
       applied.push(r.op);
     }
-    const saved = this.save(graph);
+    const saved = this.save(o.order ? inOrderOf(graph, o.order) : graph);
     const edits = applied.filter((op) => op.type !== 'moveNode');
     if (edits.length) this.dropBaselineIfSame(saved);
     for (const op of edits) this.record(graphId, { at, by, op, ...(o.via && { via: o.via }) });

@@ -46,7 +46,7 @@ describe('resolveStepModel (spec §3.2)', () => {
     });
   });
 
-  it('rule 2: Copilot still tries a model its list doesn’t name, with the same note', () => {
+  it('rule 2: Copilot still tries a model its list doesn’t name, with a note', () => {
     expect(resolveStepModel({ model: { provider: 'copilot', id: 'grok-4.7' } }, { provider: 'copilot' }, COPILOT)).toEqual({
       model: 'grok-4.7',
       note: "grok-4.7 isn't in GitHub Copilot's model list here, so this step tries it and uses Auto if Copilot refuses it.",
