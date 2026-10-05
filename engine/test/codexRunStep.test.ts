@@ -349,3 +349,15 @@ describe('stepItemEvents', () => {
     expect(stepItemEvents('completed', { type: 'userMessage', id: 'u1' }, none)).toEqual([]);
   });
 });
+
+describe('codexRunStep: the model and effort a step runs with', () => {
+  it('logs them in the start event as they are sent, an effort the model lacks left out', async () => {
+    const known: ModelChoice[] = [{ value: 'gpt-a', label: 'A', efforts: ['high'] }];
+    const kept = step((t) => t.end(), { model: 'gpt-a', effort: 'high', known });
+    await kept.run();
+    expect(kept.events[0]).toEqual({ type: 'start', kind: 'agent', cwd, prompt: 'FULL PROMPT', model: 'gpt-a', effort: 'high' });
+    const dropped = step((t) => t.end(), { model: 'gpt-a', effort: 'ultra', known });
+    await dropped.run();
+    expect(dropped.events[0]).toEqual({ type: 'start', kind: 'agent', cwd, prompt: 'FULL PROMPT', model: 'gpt-a' });
+  });
+});

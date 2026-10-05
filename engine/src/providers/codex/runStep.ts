@@ -98,7 +98,9 @@ export function codexRunStep(deps: CodexRunDeps) {
   return async (ctx: NodeContext, gate: ToolGate): Promise<NodeOutcome> => {
     const codexPath = deps.codexPath();
     if (!codexPath) return { ok: false, output: '', error: deps.missing() };
-    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
+    const effort = codexEffort(ctx, deps.knownModels(), deps.warnOnce);
+    // The model and effort the step actually runs with: an effort the model doesn't offer is already dropped.
+    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt, ...(ctx.model && { model: ctx.model }), ...(effort && { effort }) });
     const readOnly = !isWriteCapable(ctx.node);
     const tools = readOnly ? [] : toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX);
     /** Aborted when the step ends or Codex exits: approval cards still open are withdrawn (R18). */
@@ -140,7 +142,7 @@ export function codexRunStep(deps: CodexRunDeps) {
         conn,
         threadId: thread.thread.id,
         text: ctx.prompt,
-        effort: codexEffort(ctx, deps.knownModels(), deps.warnOnce),
+        effort,
         signal: ctx.signal,
         onItem: (phase, item) => {
           // Recorded before Codex's approval request for it arrives: notifications are handled in order (R14).

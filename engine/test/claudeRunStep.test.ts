@@ -299,3 +299,23 @@ describe('Claude provider: steps', () => {
     expect(createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }) }).folderProblem?.(mkdtempSync(join(tmpdir(), 'cs-')))).toBeUndefined();
   });
 });
+
+describe('Claude provider: the model and effort a step runs with', () => {
+  it('logs them in the start event as they are sent, an effort Claude lacks left out', async () => {
+    const script = () =>
+      fake(async function* () {
+        yield init();
+        yield success('ok');
+      });
+    const kept = script();
+    const a = ctx();
+    await runStep({ queryFn: kept.fn }, { ...a.c, model: 'opus', effort: 'high' });
+    expect(a.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: '/proj', prompt: 'FULL PROMPT', model: 'opus', effort: 'high' });
+    expect(kept.calls[0].options).toMatchObject({ model: 'opus', effort: 'high' });
+    const dropped = script();
+    const b = ctx();
+    await runStep({ queryFn: dropped.fn }, { ...b.c, model: 'opus', effort: 'ultra' });
+    expect(b.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: '/proj', prompt: 'FULL PROMPT', model: 'opus' });
+    expect(dropped.calls[0].options).not.toHaveProperty('effort');
+  });
+});

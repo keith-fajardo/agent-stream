@@ -93,7 +93,9 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
     // Re-checked per node: the project's settings can change while VS Code runs.
     const settingsProblem = projectSettingsProblem(ctx.cwd);
     if (settingsProblem) return { ok: false, output: '', error: settingsProblem };
-    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
+    const chosen = sdkModelOptions(deps, ctx);
+    // The model and effort the step actually runs with: an effort the model doesn't offer is already dropped.
+    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt, ...(chosen.model && { model: chosen.model }), ...(chosen.effort && { effort: chosen.effort as EffortLevel }) });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     ctx.signal.addEventListener('abort', onAbort, { once: true });
@@ -110,7 +112,7 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
       hooks: gate.hooks,
       canUseTool: gate.canUseTool,
       abortController,
-      ...sdkModelOptions(deps, ctx),
+      ...chosen,
     };
     if (ctx.graphTools?.length) {
       // The step's own graph tools: each asks the user with the exact change (the gate lets them through).

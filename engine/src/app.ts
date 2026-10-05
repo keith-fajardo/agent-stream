@@ -4,6 +4,7 @@ import {
   findModel,
   isWriteCapable,
   refinable,
+  runStepModels,
   validateRunnable,
   workspaceOf,
   type AgentChange,
@@ -682,6 +683,13 @@ export function createApp(d: AppDeps) {
             if (!removed.ok) console.error('[agent-stream] could not remove a worktree after a refused start', w.path, removed.error);
           }
         };
+        // Like the provider, fixed for the whole run: a settings change mid-run doesn't reach its later steps.
+        const defaults = modelDefaults();
+        // Each agent step's own model and effort, resolved once against the list known now (never waiting for it); a
+        // reused step keeps what it ran with (step model spec §3.1).
+        const reusedIds = new Set(p.outcome.preview.steps.filter((s) => s.reused).map((s) => s.id));
+        const source = msg.sourceRunId ? runStore.get(msg.sourceRunId) : undefined;
+        const stepModels = runStepModels(r.graph, { provider: provider.id, ...defaults }, knownModels(), reusedIds, source);
         let started: ReturnType<typeof runner.start>;
         try {
           started = runner.start({
@@ -690,8 +698,8 @@ export function createApp(d: AppDeps) {
             sourceRunId: msg.sourceRunId,
             fromNodeId: msg.fromNodeId,
             provider: provider.id,
-            // Like the provider, fixed for the whole run: a settings change mid-run doesn't reach its later steps.
-            ...modelDefaults(),
+            ...defaults,
+            stepModels,
             runId,
             checkout,
             sequential: msg.sequential,

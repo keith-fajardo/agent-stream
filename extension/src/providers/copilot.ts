@@ -179,8 +179,9 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
     stepRequestCap: () => d.limits().maxRequestsPerStep,
 
     async runStep(ctx, gate): Promise<NodeOutcome> {
-      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
       const picked = await pick(ctx.model);
+      // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
+      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt, ...('model' in picked && { model: picked.model.id }) });
       if ('error' in picked) return { ok: false, output: '', error: picked.error };
       if (picked.note) ctx.emit({ type: 'text', text: picked.note });
       const cap = d.limits().maxRequestsPerStep;

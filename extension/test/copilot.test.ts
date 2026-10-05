@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type ToolGate } from '@agent-stream/engine';
-import { emptyGraph, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
+import { emptyGraph, type EffortLevel, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { COPILOT_CONSENT_LATER, COPILOT_RESUME_FAILED, COPILOT_UNAVAILABLE, createCopilotProvider, type CopilotLimits, type LmAccess, type LmApi } from '../src/providers/copilot';
 import { COPILOT_PERMISSION } from '../src/providers/copilotModel';
 import { fakeLmModel } from './helpers';
@@ -25,7 +25,7 @@ function provider(o: { lm?: LmApi; access?: LmAccess; limits?: Partial<CopilotLi
   return createCopilotProvider({ lm: o.lm, access: o.access, runShell: noShell, limits: () => ({ maxRequestsPerStep: 25, maxRequestsPerTurn: 10, ...o.limits }) });
 }
 
-function step(o: { model?: string; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal } = {}) {
+function step(o: { model?: string; effort?: EffortLevel; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal } = {}) {
   const events: NodeEventBody[] = [];
   const cwd = mkdtempSync(join(tmpdir(), 'copilot-step-'));
   const node: GraphNode = { id: 'n1', title: 'Step', kind: 'agent', prompt: 'p', ...(o.access && { access: o.access }), createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
@@ -38,6 +38,7 @@ function step(o: { model?: string; access?: 'read'; graphTools?: GraphTool[]; si
     signal: o.signal ?? new AbortController().signal,
     emit: (e) => events.push(e),
     ...(o.model && { model: o.model }),
+    ...(o.effort && { effort: o.effort }),
     ...(o.graphTools && { graphTools: o.graphTools }),
   };
   return { ctx, events, cwd };
@@ -185,7 +186,7 @@ describe('Copilot runStep', () => {
     const m = fakeLmModel({ id: 'auto', name: 'Auto', replies: [[call('c1', 'Read', { file_path: 'a.txt' })], [text('The file says '), text('hello.')]] });
     const out = await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
     expect(s.events).toEqual([
-      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.' },
+      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'auto' },
       { type: 'tool_call', toolUseId: 'c1', name: 'Read', input: { file_path: 'a.txt' } },
       { type: 'tool_result', toolUseId: 'c1', content: '     1\thello', isError: false },
       { type: 'text', text: 'The file says hello.' },
@@ -353,5 +354,28 @@ describe('Copilot planTurn', () => {
     const m = fakeLmModel({ id: 'auto', replies: [[call('c1', 'add_node', {})]] });
     const r = await provider({ lm: models(m.model), limits: { maxRequestsPerTurn: 1 } }).planTurn(turn().t);
     expect(r).toEqual({ ok: true, sessionId: expect.any(String), error: 'Stopped after 1 Copilot requests (agentStream.copilot.maxRequestsPerTurn). Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.' });
+  });
+});
+
+describe('Copilot effort (step model spec §6)', () => {
+  it('has no effort option for extensions: a step’s effort is never sent, and its start names the model it ran on', async () => {
+    const s = step({ model: 'gpt-4o-mini', effort: 'high' });
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    const mini = fakeLmModel({ id: 'gpt-4o-mini', name: 'GPT-4o mini' });
+    await provider({ lm: models(auto.model, mini.model) }).runStep(s.ctx, allowAll);
+    expect(s.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'gpt-4o-mini' });
+    const options = mini.requests[0].options!;
+    expect(options).not.toHaveProperty('modelOptions');
+    expect(JSON.stringify(options)).not.toContain('high');
+  });
+
+  it('names Auto in the start event of a step whose model is gone', async () => {
+    const s = step({ model: 'gpt-9' });
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    await provider({ lm: models(auto.model) }).runStep(s.ctx, allowAll);
+    expect(s.events.slice(0, 2)).toEqual([
+      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'auto' },
+      { type: 'text', text: 'The Copilot model gpt-9 is no longer available; using Auto.' },
+    ]);
   });
 });

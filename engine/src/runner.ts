@@ -23,6 +23,7 @@ import {
   type ProviderId,
   type RenderedRun,
   type RunMeta,
+  type StepModelUse,
   type WaitingFor,
 } from '@agent-stream/shared';
 import type { ApprovalBroker } from './approvals';
@@ -68,6 +69,8 @@ export type StartRunInput = {
   /** The model and effort every agent step of this run gets, captured at start and recorded in the run (only when set). */
   model?: string;
   effort?: EffortLevel;
+  /** Each agent step's own model and effort, resolved at start (step model spec §3.1); a step without an entry gets `model` and `effort`. */
+  stepModels?: Record<string, StepModelUse>;
   /** The run's id, when the caller needs it before the run starts (variant worktree paths contain it). */
   runId?: string;
   /** Start even though another run holds the checkout's lease: write-capable checkout steps wait for it (spec §4.3). */
@@ -197,6 +200,7 @@ export class Runner extends EventEmitter {
       ...(input.provider && { provider: input.provider }),
       ...(input.model && { model: input.model }),
       ...(input.effort && { effort: input.effort }),
+      ...(input.stepModels && Object.keys(input.stepModels).length > 0 && { stepModels: structuredClone(input.stepModels) }),
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
       ...(Object.keys(workspaces).length > 0 && { workspaces }),
@@ -434,6 +438,17 @@ export class Runner extends EventEmitter {
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
     const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
+    // What the run resolved for this step when it started; a step added during the run gets the run's own (spec §3.1).
+    const use: StepModelUse | undefined = node.kind === 'agent' ? (meta.stepModels?.[nodeId] ?? { model: meta.model, effort: meta.effort }) : undefined;
+    let noted = false;
+    const emit = (event: NodeEventBody) => {
+      this.emitEvent(run, nodeId, event);
+      // Why the step doesn't run its own model or effort: a line in its log, right after it starts.
+      if (event.type === 'start' && use?.note && !noted) {
+        noted = true;
+        this.emitEvent(run, nodeId, { type: 'text', text: use.note });
+      }
+    };
     Promise.resolve()
       .then(() => {
         const workspace = workspaceOf(node);
@@ -467,9 +482,9 @@ export class Runner extends EventEmitter {
           // Agents get the variant path as their working directory; commands run there (spec §4.3a).
           cwd: place?.path ?? this.deps.projectDir,
           signal: controller.signal,
-          emit: (event) => this.emitEvent(run, nodeId, event),
-          ...(node.kind === 'agent' && meta.model && { model: meta.model }),
-          ...(node.kind === 'agent' && meta.effort && { effort: meta.effort }),
+          emit,
+          ...(use?.model && { model: use.model }),
+          ...(use?.effort && { effort: use.effort }),
         });
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))

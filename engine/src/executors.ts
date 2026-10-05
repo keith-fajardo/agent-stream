@@ -14,7 +14,7 @@ export type NodeContext = {
   emit: (event: NodeEventBody) => void;
   /** Agent steps: tools to change the graph of the running run, each asking the user first (add_step, change_step). */
   graphTools?: GraphTool[];
-  /** Agent steps: the run's model and effort, captured when it started; absent: the provider's own default. */
+  /** Agent steps: the model and effort the run resolved for this step when it started; absent: the provider's own default. */
   model?: string;
   effort?: EffortLevel;
 };
