@@ -439,6 +439,44 @@ export class GraphStore extends EventEmitter {
     return { ok: true, graph: saved };
   }
 
+  /**
+   * Several edits that are one user action (a drag of several steps, deleting a selection, Tidy) or one undo (step model
+   * spec §6a.2): checked on a copy first, so they apply all or none, then applied with the baseline rules of single edits,
+   * saved once and recorded one by one (`via: 'undo'` for an undo). Moves alone are allowed while the file has errors.
+   */
+  applyBatch(graphId: string, ops: readonly Op[], by: Actor, o: { via?: 'undo' } = {}): GraphResult {
+    if (ops.some((op) => op.type === 'acceptChange' || op.type === 'revertChange')) return { ok: false, error: 'Agent changes are accepted or reverted one review at a time.' };
+    const current = this.load(graphId);
+    if (!current.ok) return current;
+    const broken = ops.every((op) => op.type === 'moveNode') ? null : this.brokenFile(graphId);
+    if (broken) return { ok: false, error: broken };
+    if (!ops.length) return current;
+    const at = this.clock();
+    let draft = current.graph;
+    for (const op of ops) {
+      const resolved: Op = op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(draft) } } : op;
+      const r = applyOp(draft, resolved, by, at, { rewriteReferences: renameReferences });
+      if (!r.ok) return r;
+      draft = r.graph;
+    }
+    let graph = current.graph;
+    const applied: Op[] = [];
+    for (const op of ops) {
+      const r = this.applyOne(graph, op, by, at);
+      // The same edits just succeeded on a copy; only I/O (writeBaseline) can fail here, and then nothing is saved.
+      if (!r.ok) throw new Error(r.error);
+      graph = r.graph;
+      applied.push(r.op);
+    }
+    const saved = this.save(graph);
+    const edits = applied.filter((op) => op.type !== 'moveNode');
+    if (edits.length) this.dropBaselineIfSame(saved);
+    for (const op of edits) this.record(graphId, { at, by, op, ...(o.via && { via: o.via }) });
+    this.emit('changed', saved);
+    for (const op of applied) this.emit('op', graphId, op, o.via);
+    return { ok: true, graph: saved };
+  }
+
   /** One edit on `current`, keeping the baseline rules; saves nothing. Returns the op as recorded: an added step gets its id. */
   private applyOne(current: Graph, op: Op, by: Actor, at: string): { ok: true; graph: Graph; op: Op } | { ok: false; error: string } {
     const resolved: Op = op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(current) } } : op;

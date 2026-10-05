@@ -200,7 +200,12 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
     }
     case 'moveNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
-      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? { ...n, position: op.position } : n)) });
+      const place = (n: GraphNode): GraphNode => {
+        if (op.position) return { ...n, position: op.position };
+        const { position: _position, ...rest } = n;
+        return rest;
+      };
+      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? place(n) : n)) });
     }
     case 'acceptChange':
     case 'revertChange':

@@ -92,7 +92,8 @@ export type Op =
   | { type: 'renameVariable'; name: string; newName: string }
   | { type: 'setVariableDescription'; name: string; description: string }
   | { type: 'deleteVariable'; name: string }
-  | { type: 'moveNode'; id: string; position: Position }
+  /** `position: null` puts the step back on the automatic layout (only undo does that; clients always send a position). */
+  | { type: 'moveNode'; id: string; position: Position | null }
   /** Review of agent changes (agent changes spec §3.4): applied by the graph store, which keeps the baseline. */
   | { type: 'acceptChange'; target: ChangeTarget }
   | { type: 'revertChange'; target: ChangeTarget };
@@ -100,8 +101,11 @@ export type Op =
 /** Which agent made an edit: the planner (in a work session) or an agent step during a run. */
 export type ChangeSource = { kind: 'planner'; sessionId?: string } | { kind: 'step'; runId: string; nodeId: string };
 
-/** `via: 'file'`: the edit came from the graph's Markdown file (Markdown graph files spec §6.3). A history label only. */
-export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; via?: 'file' };
+/**
+ * `via: 'file'`: the edit came from the graph's Markdown file (Markdown graph files spec §6.3); `via: 'undo'`: Edit › Undo
+ * made it (step model spec §6a.2). A history label only.
+ */
+export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; via?: 'file' | 'undo' };
 
 /** One problem in a graph's Markdown file: its 1-based line and a message that says how to fix it. */
 export type GraphFileError = { line: number; message: string };
@@ -374,12 +378,20 @@ export type ServerMessage =
   | { type: 'runBlocked'; graphId: string; message: string; holder: LeaseHolder; otherWindow: boolean; checkout: CheckoutInfo; canSetUpTickets: boolean }
   /** The Markdown run report asked for with exportRunReport, and the file name to suggest when saving it. */
   | { type: 'runReport'; runId: string; markdown: string; suggestedName: string }
+  /** What Edit › Undo would undo in this tab (absent: nothing): after the graph opens, and after each edit or undo here. */
+  | { type: 'undoState'; graphId: string; label?: string }
+  /** The answer to undo, for the toast: `Undid moved 2 steps.`, `Nothing to undo.`, or why it can't. */
+  | { type: 'undone'; graphId: string; message: string }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
   | { type: 'openGraph'; graphId: string }
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
+  /** Several edits that are one user action (a drag of several steps, deleting a selection, Tidy): applied all or none, one undo step named `label`. */
+  | { type: 'ops'; graphId: string; ops: Op[]; label: string }
+  /** Edit › Undo (⌘Z): reverses this tab's newest graph edit, if the graph is still as that edit left it. */
+  | { type: 'undo'; graphId: string }
   /** Asks for the graph's Markdown file as it is on disk; the engine answers with graphMarkdown and keeps sending it as the text changes. */
   | { type: 'getGraphMarkdown'; graphId: string }
   /**

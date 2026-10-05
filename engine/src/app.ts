@@ -32,6 +32,14 @@ import {
   type SessionResult,
   type SessionTab,
   supportsEffort,
+  MARKDOWN_SAVE_LABEL,
+  NOTHING_TO_UNDO,
+  UNDO_CHANGED,
+  undoFileErrors,
+  undoLabel,
+  undoneMessage,
+  undoOps,
+  undoState,
   withStepModelLines,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
@@ -49,6 +57,7 @@ import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from './providers/toolGate';
 import type { AgentProvider } from './providers/types';
 import { previewRun, envLookup, type PreviewOutcome } from './runPreview';
 import { needsCheckoutLease, Runner } from './runner';
+import { UndoStacks } from './undoStacks';
 import { buildRunReport } from './runReport';
 import { RunStore } from './runStore';
 import { createStepGraphTools } from './stepGraphTools';
@@ -391,6 +400,7 @@ export function createApp(d: AppDeps) {
   /** The Markdown editor's Save (Graph | Markdown toggle): the store writes the text and reads it like an outside edit. */
   function saveGraphMarkdown(client: Client, msg: Extract<ClientMessage, { type: 'saveGraphMarkdown' }>): void {
     const { graphId } = msg;
+    const before = graphStore.load(graphId);
     let r: ReturnType<GraphStore['saveMarkdown']>;
     try {
       r = graphStore.saveMarkdown(graphId, msg.text, msg.base, msg.force);
@@ -399,6 +409,9 @@ export function createApp(d: AppDeps) {
     }
     if (!r.ok) return client.send({ type: 'graphMarkdownSaved', graphId, ok: false, ...('conflict' in r ? { conflict: true } : { error: r.error }) });
     fileSynced(graphId, r.sync);
+    // A save that changed the graph is one undo step in this tab (spec §6a.2).
+    const after = r.sync === 'applied' ? graphStore.load(graphId) : undefined;
+    if (before.ok && after?.ok) recordUndo(client, graphId, before.graph, after.graph, MARKDOWN_SAVE_LABEL, []);
     const errors = graphStore.fileErrors(graphId);
     client.send({ type: 'graphMarkdownSaved', graphId, ok: errors.length === 0, text: graphStore.markdownText(graphId), ...(errors.length > 0 && { errors }) });
   }
@@ -478,6 +491,42 @@ export function createApp(d: AppDeps) {
     return { type: 'graphOpened', graph, runs, run, variableValues: values.get(graph.id), ...review(graph.id), ...(fileErrors.length > 0 && { fileErrors }) };
   }
 
+  /** Each tab's undo stacks (spec §6a.2): a tab is the client it talks through. */
+  const undo = new UndoStacks();
+  function sendUndoState(client: Client, graphId: string): void {
+    const label = undo.top(client, graphId)?.label;
+    client.send({ type: 'undoState', graphId, ...(label !== undefined && { label }) });
+  }
+  function recordUndo(client: Client, graphId: string, before: Graph, after: Graph, label: string, ops: Op[]): void {
+    if (undo.record(client, graphId, { before, after, label, ops })) sendUndoState(client, graphId);
+  }
+  /**
+   * Edit › Undo: restores the graph from before this tab's newest action, as user edits recorded `via: 'undo'` — only when
+   * the graph is still as that action left it, so nobody else's change is ever discarded; otherwise the stack is cleared.
+   */
+  function undoLast(client: Client, graphId: string): void {
+    const done = (message: string) => {
+      client.send({ type: 'undone', graphId, message });
+      sendUndoState(client, graphId);
+    };
+    const entry = undo.top(client, graphId);
+    if (!entry) return done(NOTHING_TO_UNDO);
+    if (graphStore.fileErrors(graphId).length) return done(undoFileErrors(graphId));
+    const current = graphStore.load(graphId);
+    if (!current.ok) return done(current.error);
+    if (undoState(current.graph) !== undoState(entry.after)) {
+      undo.clear(client, graphId);
+      return done(UNDO_CHANGED);
+    }
+    const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo' });
+    if (!r.ok) {
+      undo.clear(client, graphId);
+      return done(`Can't undo ${entry.label}: ${r.error}`);
+    }
+    undo.pop(client, graphId);
+    done(undoneMessage(entry.label));
+  }
+
   /** A revert would change a step that a run in progress is about to run or is running. */
   function revertBlockedByRun(graphId: string, op: Op): boolean {
     if (op.type !== 'revertChange') return false;
@@ -535,6 +584,7 @@ export function createApp(d: AppDeps) {
         if (!r.ok) return error(r.error);
         client.send(opened(r.graph));
         openedGraph(client);
+        sendUndoState(client, r.graph.id);
         return;
       }
       case 'createGraph': {
@@ -545,10 +595,27 @@ export function createApp(d: AppDeps) {
       }
       case 'op': {
         if (revertBlockedByRun(msg.graphId, msg.op)) return client.send({ type: 'opRejected', graphId: msg.graphId, error: 'Stop the run first.' });
+        const before = graphStore.load(msg.graphId);
         const r = graphStore.apply(msg.graphId, msg.op, 'user');
-        if (!r.ok) client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
+        if (!r.ok) return client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
+        const label = undoLabel(msg.op);
+        if (label && before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, label, [msg.op]);
+        // Agent changes have their own Accept and Revert; a revert here changes the graph under this tab's undo steps.
+        if (msg.op.type === 'revertChange') {
+          undo.clear(client, msg.graphId);
+          sendUndoState(client, msg.graphId);
+        }
         return;
       }
+      case 'ops': {
+        const before = graphStore.load(msg.graphId);
+        const r = graphStore.applyBatch(msg.graphId, msg.ops, 'user');
+        if (!r.ok) return client.send({ type: 'opRejected', graphId: msg.graphId, error: r.error });
+        if (before.ok) recordUndo(client, msg.graphId, before.graph, r.graph, msg.label, msg.ops);
+        return;
+      }
+      case 'undo':
+        return undoLast(client, msg.graphId);
       case 'getGraphMarkdown': {
         const text = graphStore.markdownText(msg.graphId);
         if (text === undefined) return error(`graph "${msg.graphId}" not found`);

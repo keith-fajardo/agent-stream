@@ -101,6 +101,8 @@ export type State = {
   /** Each tab keeps its own (webview state); never saved in the graph or the session. */
   canvasMode: CanvasMode;
   markdown: MarkdownEditorState;
+  /** What Edit › Undo would undo in this tab, as the engine names it; undefined: nothing (step model spec §6a.2). */
+  undoLabel?: string;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
@@ -248,7 +250,7 @@ function reduceServer(state: State, msg: HostMessage): State {
         ...state,
         ...reviewing(state, msg.changes),
         // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
-        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined, markdown: initialMarkdown }),
+        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined, markdown: initialMarkdown, undoLabel: undefined }),
         graph: msg.graph,
         graphGone: false,
         fileErrors: msg.fileErrors ?? [],
@@ -345,6 +347,10 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'runReport':
       // The extension saves the report itself; a tab has nothing to show.
       return state;
+    case 'undoState':
+      return msg.graphId === current ? { ...state, undoLabel: msg.label } : state;
+    case 'undone':
+      return msg.graphId === current ? { ...state, toast: msg.message } : state;
     case 'error':
       // A save the engine or the extension refused before it could answer (a message too large, a throw) is over too.
       return { ...state, toast: msg.message, ...(state.markdown.saving && { markdown: { ...state.markdown, saving: undefined } }) };

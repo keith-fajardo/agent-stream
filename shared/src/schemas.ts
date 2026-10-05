@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { legacyNodeIdProblem, topoOrder } from './graph';
 import { MAX_MODEL_ID_CHARS, ONLY_AGENT_STEPS_MODEL } from './stepModels';
+import { MAX_UNDO_LABEL_CHARS } from './undo';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 import { EFFORT_LEVELS, MAX_IMPORT_CHARS, PROVIDER_IDS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
 
@@ -132,6 +133,8 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openGraph'), graphId: z.string() }),
   z.object({ type: z.literal('createGraph'), name: z.string().min(1) }),
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
+  z.object({ type: z.literal('ops'), graphId: z.string(), ops: z.array(opSchema).min(1).max(500), label: z.string().min(1).max(MAX_UNDO_LABEL_CHARS) }),
+  z.object({ type: z.literal('undo'), graphId: z.string() }),
   z.object({ type: z.literal('getGraphMarkdown'), graphId: z.string() }),
   z.object({ type: z.literal('saveGraphMarkdown'), graphId: z.string(), text: markdownText, base: markdownText, force: z.boolean().optional() }),
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
