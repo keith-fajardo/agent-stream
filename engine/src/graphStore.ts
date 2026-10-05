@@ -76,8 +76,8 @@ function touches(op: Op, change: AgentChange): boolean {
 
 /** `node` with `source`'s content fields (absent ones removed), keeping its id, position and authorship. */
 function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
-  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, ...rest } = node;
-  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace };
+  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, ...rest } = node;
+  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort };
   return { ...rest, title: source.title, kind: source.kind, ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)) };
 }
 

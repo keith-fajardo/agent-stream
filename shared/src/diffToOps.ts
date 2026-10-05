@@ -1,5 +1,8 @@
 import type { DocStep, GraphDoc } from './graphDoc';
-import type { Graph, GraphNode, NewNodeInput, NodePatch, Op } from './types';
+import { stepModelText } from './stepModels';
+import type { Graph, GraphNode, NewNodeInput, NodePatch, Op, StepModel } from './types';
+
+const modelText = (m: StepModel | undefined) => (m ? stepModelText(m) : '');
 
 const edgeKey = (e: { from: string; to: string }) => `${e.from}->${e.to}`;
 
@@ -8,7 +11,7 @@ function newNode(step: DocStep): NewNodeInput {
   return node;
 }
 
-/** Only the fields that differ; '' clears a description, prompt, command or workspace, and 0 clears a timeout. */
+/** Only the fields that differ; '' clears a description, prompt, command or workspace, 0 a timeout, and null a model or effort. */
 function patchOf(node: GraphNode, step: DocStep): NodePatch {
   const patch: NodePatch = {};
   if (node.title !== step.title) patch.title = step.title;
@@ -19,6 +22,9 @@ function patchOf(node: GraphNode, step: DocStep): NodePatch {
   if ((node.access === 'read') !== (step.access === 'read')) patch.access = step.access ?? 'write';
   if ((node.workspace ?? '') !== (step.workspace ?? '')) patch.workspace = step.workspace ?? '';
   if ((node.timeoutSec ?? 0) !== (step.timeoutSec ?? 0)) patch.timeoutSec = step.timeoutSec ?? 0;
+  // A step that becomes a command step loses both without a patch (applyOp drops them).
+  if (step.kind === 'agent' && modelText(node.model) !== modelText(step.model)) patch.model = step.model ?? null;
+  if (step.kind === 'agent' && (node.effort ?? '') !== (step.effort ?? '')) patch.effort = step.effort ?? null;
   return patch;
 }
 

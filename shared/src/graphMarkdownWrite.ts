@@ -1,6 +1,7 @@
 import { fenceFor } from './fence';
 import { escapeFreeText } from './freeText';
 import { normText, oneLine, STEP_SEPARATOR, timeoutValue } from './graphDoc';
+import { stepModelText } from './stepModels';
 import type { Graph, GraphNode } from './types';
 
 /** A Mermaid node label: quoted, `"` as #quot;, on one line (spec §4.1). */
@@ -27,6 +28,8 @@ function stepLines(node: GraphNode): string[] {
   if (node.kind === 'agent' && node.access === 'read') fields.push('- access: read');
   if (node.workspace) fields.push(`- workspace: ${node.workspace}`);
   if (node.timeoutSec !== undefined) fields.push(`- timeout: ${timeoutValue(node.timeoutSec)}`);
+  if (node.kind === 'agent' && node.model) fields.push(`- model: ${stepModelText(node.model)}`);
+  if (node.kind === 'agent' && node.effort) fields.push(`- effort: ${node.effort}`);
   const description = oneLine(node.description ?? '');
   const text = normText((node.kind === 'agent' ? node.prompt : node.command) ?? '');
   return [

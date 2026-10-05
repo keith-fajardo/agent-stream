@@ -1,6 +1,6 @@
 import { edgeId, nodeIdProblem, seqOf } from './graph';
 import type { FlowEdge } from './graphFlow';
-import type { Graph, GraphFileError, GraphNode, NodeKind } from './types';
+import type { EffortLevel, Graph, GraphFileError, GraphNode, NodeKind, StepModel } from './types';
 
 /** The longest timeout a step can have: Node's longest timer, in whole seconds. */
 export const MAX_TIMEOUT_SEC = 2_147_483;
@@ -16,6 +16,9 @@ export type DocStep = {
   access?: 'read';
   workspace?: string;
   timeoutSec?: number;
+  /** Agent steps only. */
+  model?: StepModel;
+  effort?: EffortLevel;
   description?: string;
   prompt?: string;
   command?: string;

@@ -1,5 +1,5 @@
 import { applyOp, emptyGraph } from '../src/graph';
-import type { Graph, NewNodeInput, Op } from '../src/types';
+import { EFFORT_LEVELS, type Graph, type NewNodeInput, type Op, type StepModel } from '../src/types';
 
 export const T0 = '2026-10-04T00:00:00.000Z';
 
@@ -61,6 +61,13 @@ export function rng(seed: number): () => number {
 
 const TEXTS = ['', 'plain', '```', '````js\nx\n````', '{% raw %}{{ x }}{% endraw %}', '## not a heading', '# H1', '\n', ' leading space', 'trailing  ', '~~~', '> quote', '- kind: command', '\\## esc', '日本語 ✓', 'a · b', '"q"', '```\nunclosed', '\r\nwindows'];
 const TITLES = ['Build', 'Prüfen · 日本語', 'Say "hi"', '# hash', 'Goal', 'a\nb', '  padded  ', 'end'];
+const MODELS: StepModel[] = [
+  { provider: 'claude', id: 'opus' },
+  { provider: 'claude', id: 'claude-opus-4-8' },
+  { provider: 'codex', id: 'gpt-6-astra' },
+  { provider: 'copilot', id: 'auto' },
+  { provider: 'codex', id: 'org/model_1.5:beta' },
+];
 
 /** A random valid graph: steps, fields, edges (always forward, so no cycles), variables and tricky text. */
 export function randomGraph(seed: number): Graph {
@@ -83,6 +90,8 @@ export function randomGraph(seed: number): Graph {
         ...(kind === 'agent' && r() < 0.3 && { access: 'read' as const }),
         ...(r() < 0.2 && { workspace: pick(['wh_a', 'wh-b']) }),
         ...(r() < 0.3 && { position: { x: Math.floor(r() * 500), y: Math.floor(r() * 500) } }),
+        ...(kind === 'agent' && r() < 0.4 && { model: pick(MODELS) }),
+        ...(kind === 'agent' && r() < 0.4 && { effort: pick(EFFORT_LEVELS) }),
       }),
     );
   }

@@ -50,6 +50,8 @@ dbt run-operation table_exists --args '{table: dim_customer}'
 
 - kind: agent
 - workspace: wh_a
+- model: claude/sonnet
+- effort: low
 
 > Builds the model for the first time.
 
@@ -98,6 +100,10 @@ A step section holds, in this order:
    - `access`: `read` for an agent step that only reads and reports. Missing (or `write`) means it can change files. Command steps can always change files, so `access: read` on a command step is an error.
    - `workspace`: a variant workspace name (lowercase letters, digits, `-` and `_`, starting with a letter, at most 40 characters). Steps with the same workspace share one worktree per run. Missing means this checkout.
    - `timeout`: a whole number of seconds, from 1 to 2147483.
+   - `model`: the agent step's own model, written `<provider>/<model id>`: `claude/opus`, `codex/gpt-6-astra`, `copilot/auto`. The provider is `claude`, `codex` or `copilot`; the model id is everything after the first `/`, exactly as that provider's model list names it (1 to 200 characters, no spaces). Missing means the run's model (the `agentStream.model` setting). Agent Stream doesn't check here that the model exists, so the graph still opens on a machine with another plan or provider: a run checks it when it starts, and a step whose model isn't offered, or belongs to another provider than the run's, uses the run's model, with a warning.
+   - `effort`: the agent step's own effort, one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Missing means the run's effort. A level the step's model doesn't offer is left out when the step runs.
+
+   Command steps have no model or effort: either line on a command step is an error.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
 3. **Exactly one code block:**
    - ```` ```prompt ```` (or `text`, `md`) for an agent step's prompt;

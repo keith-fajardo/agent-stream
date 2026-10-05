@@ -4,7 +4,9 @@ import { unescapeFreeTextLine } from './freeText';
 import { nodeIdProblem } from './graph';
 import { MAX_TIMEOUT_SEC, STEP_SEPARATOR, type DocStep, type DocVariable, type ParseGraphResult } from './graphDoc';
 import { parseFlow, type FlowEdge } from './graphFlow';
-import type { GraphFileError, NodeKind } from './types';
+import type { EffortLevel, GraphFileError, NodeKind, StepModel } from './types';
+import { isEffortLevel } from './format';
+import { parseStepModel } from './stepModels';
 import { variableNameProblem } from './variables';
 
 type TextItem = { kind: 'text'; line: number; text: string };
@@ -19,7 +21,7 @@ const STEP_HEADING_RE = new RegExp(`^([A-Za-z0-9_-]+)${STEP_SEPARATOR.trimEnd()}
 const FIELD_RE = /^[-*][ \t]+([A-Za-z]+)[ \t]*:[ \t]*(.*?)[ \t]*$/;
 const VARIABLE_RE = /^[-*][ \t]+`([^`]*)`(?:[ \t]*:[ \t]*(.*?))?[ \t]*$/;
 const QUOTE_RE = /^>[ \t]?(.*)$/;
-const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout'];
+const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort'];
 const AGENT_INFOS = new Set(['prompt', 'text', 'md']);
 const COMMAND_INFOS = new Set(['sh', 'bash', 'shell']);
 const START = 'the file must start with the graph\'s name, as "# Name".';
@@ -144,7 +146,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     if (field) {
       const key = field[1].toLowerCase();
       if (phase !== 'fields') fail(item.line, `fields go at the top of step ${label}, before the description and the code block.`);
-      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace and timeout.`);
+      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model and effort.`);
       else if (fields.has(key)) fail(item.line, `the field ${key} appears twice in step ${label}. Keep one.`);
       else fields.set(key, { value: field[2], line: item.line });
       continue;
@@ -199,6 +201,23 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     if (sec >= 1 && sec <= MAX_TIMEOUT_SEC) timeoutSec = sec;
     else fail(t.line, `timeout is "${t.value}"; use a whole number of seconds from 1 to ${MAX_TIMEOUT_SEC}.`);
   }
+  // A step's own model and effort (step model spec §2.2). Whether the model exists is checked when a run starts, not here.
+  let model: StepModel | undefined;
+  let effort: EffortLevel | undefined;
+  for (const key of ['model', 'effort'] as const) {
+    const f = fields.get(key);
+    if (!f) continue;
+    if (finalKind === 'command') {
+      fail(f.line, `step ${label} is a command step, so it can't have a model or effort. Remove this line, or make it an agent step.`);
+      continue;
+    }
+    if (key === 'model') {
+      const r = parseStepModel(f.value);
+      if (r.ok) model = r.model;
+      else fail(f.line, r.error);
+    } else if (isEffortLevel(f.value)) effort = f.value;
+    else fail(f.line, `effort is "${f.value}"; use low, medium, high, xhigh, max or ultra.`);
+  }
   if (errors.length > before || !code || !finalKind) return null;
   const description = quote
     .map((q) => q.trim())
@@ -212,6 +231,8 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     ...(access && { access }),
     ...(workspace && { workspace }),
     ...(timeoutSec !== undefined && { timeoutSec }),
+    ...(model && { model }),
+    ...(effort && { effort }),
     ...(description && { description }),
     ...(text && (finalKind === 'agent' ? { prompt: text } : { command: text })),
     line: section.line,
