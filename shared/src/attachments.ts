@@ -15,7 +15,9 @@ export const ALLOWED_ATTACHMENTS = 'images (png, jpg, gif, webp), PDFs, and text
 
 export type AttachmentKind = 'image' | 'pdf' | 'text';
 
-const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+const IMAGE_TYPES = new Map<string, string>([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp']]);
+/** An extension longer than this is dropped when a name is made safe or made unique, so the stem keeps room. */
+const MAX_EXTENSION_CHARS = 90;
 const TEXT_TYPES = new Set([
   'md', 'txt', 'csv', 'tsv', 'json', 'yaml', 'yml', 'sql', 'xml', 'html', 'htm', 'log',
   // Common source code.
@@ -34,14 +36,14 @@ const extensionOf = (name: string): string => {
 /** Image, PDF or text file, by the name's extension; undefined for a type attachments don't take. */
 export function attachmentKind(name: string): AttachmentKind | undefined {
   const ext = extensionOf(name);
-  if (IMAGE_TYPES[ext]) return 'image';
+  if (IMAGE_TYPES.has(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
   if (TEXT_TYPES.has(ext)) return 'text';
   return undefined;
 }
 
 /** An image's media type (`image/png`), for providers that take the bytes. */
-export const imageMediaType = (name: string): string | undefined => IMAGE_TYPES[extensionOf(name)];
+export const imageMediaType = (name: string): string | undefined => IMAGE_TYPES.get(extensionOf(name));
 
 /**
  * Why `name` can't name an attachment, or null (spec §6b.2): letters, digits, `.`, `-`, `_` and spaces, at most 100
@@ -50,18 +52,18 @@ export const imageMediaType = (name: string): string | undefined => IMAGE_TYPES[
 export function attachmentNameProblem(name: string): string | null {
   const rule = `An attachment name uses letters, digits, ".", "-", "_" and spaces (at most ${MAX_ATTACHMENT_NAME_CHARS} characters), and doesn't start or end with "." or a space.`;
   if (!name || [...name].length > MAX_ATTACHMENT_NAME_CHARS || !SAFE_NAME_RE.test(name) || /^[. ]|[. ]$/.test(name)) return `"${name}" isn't a safe attachment name. ${rule}`;
-  if (WINDOWS_DEVICE_RE.test(name.split('.')[0])) return `"${name}" can't be used as an attachment name on Windows. Rename the file.`;
+  if (WINDOWS_DEVICE_RE.test(name.split('.')[0].trim())) return `"${name}" can't be used as an attachment name on Windows. Rename the file.`;
   return null;
 }
 
-const key = (name: string) => name.toLowerCase();
+const key = (name: string) => name.normalize('NFC').toLowerCase();
 
 /** Why a list of attachment names can't be stored, or null: each name safe, none twice (in any letter case), at most 20. */
 export function attachmentListProblem(names: readonly string[]): string | null {
   if (names.length > MAX_ATTACHMENTS) return `at most ${MAX_ATTACHMENTS} attachments; remove ${names.length - MAX_ATTACHMENTS}.`;
   const seen = new Set<string>();
   for (const name of names) {
-    const problem = attachmentNameProblem(name);
+    const problem = attachmentNameProblem(name.normalize('NFC'));
     if (problem) return problem;
     if (seen.has(key(name))) return `"${name}" is attached twice. Keep one.`;
     seen.add(key(name));
@@ -83,14 +85,14 @@ export function attachmentFileProblem(name: string, bytes: number): string | nul
  * at most 100 characters with the extension kept, and never a Windows device name.
  */
 export function safeAttachmentName(original: string): string {
-  const base = original.split(/[\\/]/).pop() ?? '';
+  const base = (original.split(/[\\/]/).pop() ?? '').normalize('NFC');
   let name = [...base].map((c) => (SAFE_CHAR_RE.test(c) ? c : '_')).join('').replace(/^[. ]+|[. ]+$/g, '');
   const ext = extensionOf(name);
-  const stemOf = (n: string) => (ext ? n.slice(0, n.length - ext.length - 1) : n);
-  let stem = stemOf(name).replace(/[. ]+$/, '');
+  const keepExt = [...ext].length <= MAX_EXTENSION_CHARS;
+  const suffix = ext && keepExt ? `.${ext}` : '';
+  let stem = (suffix ? name.slice(0, name.length - suffix.length) : name).replace(/[. ]+$/, '');
   if (!stem) stem = 'attachment';
-  if (WINDOWS_DEVICE_RE.test(stem.split('.')[0])) stem = `_${stem}`;
-  const suffix = ext ? `.${ext}` : '';
+  if (WINDOWS_DEVICE_RE.test(stem.split('.')[0].trim())) stem = `_${stem.trimStart()}`;
   const room = MAX_ATTACHMENT_NAME_CHARS - [...suffix].length;
   stem = [...stem].slice(0, room).join('').replace(/[. ]+$/, '') || 'attachment';
   name = `${stem}${suffix}`;
@@ -102,8 +104,8 @@ export function uniqueAttachmentName(name: string, taken: Iterable<string>): str
   const used = new Set([...taken].map(key));
   if (!used.has(key(name))) return name;
   const ext = extensionOf(name);
-  const suffix = ext ? `.${ext}` : '';
-  const stem = ext ? name.slice(0, name.length - suffix.length) : name;
+  const suffix = ext && [...ext].length <= MAX_EXTENSION_CHARS ? `.${ext}` : '';
+  const stem = suffix ? name.slice(0, name.length - suffix.length) : name;
   for (let i = 2; ; i++) {
     const tail = `-${i}${suffix}`;
     const candidate = `${[...stem].slice(0, MAX_ATTACHMENT_NAME_CHARS - tail.length).join('')}${tail}`;

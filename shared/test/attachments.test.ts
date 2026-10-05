@@ -66,3 +66,47 @@ describe('attachment names (spec §6b.2)', () => {
     expect(attachmentListProblem(Array.from({ length: MAX_ATTACHMENTS + 1 }, (_, i) => `f${i}.md`))).toBe('at most 20 attachments; remove 1.');
   });
 });
+
+describe('attachment rules, review fixes', () => {
+  it('knows only its own extensions, never prototype keys', () => {
+    for (const name of ['x.constructor', 'x.__proto__', 'x.toString', 'x.hasOwnProperty']) {
+      expect(attachmentKind(name), name).toBeUndefined();
+      expect(imageMediaType(name), name).toBeUndefined();
+      expect(attachmentFileProblem(name, 5), name).toMatch(/can't be attached/);
+    }
+  });
+
+  it('never makes a name over 100 characters, even with a very long extension', () => {
+    for (const n of [`a.${'b'.repeat(150)}`, `${'a'.repeat(50)}.${'b'.repeat(95)}`, `x.${'é'.repeat(100)}`]) {
+      const safe = safeAttachmentName(n);
+      expect([...safe].length, n).toBeLessThanOrEqual(100);
+      expect(attachmentNameProblem(safe), n).toBeNull();
+    }
+    const long = `a.${'b'.repeat(95)}`;
+    for (const taken of [[long], [long, `a-2.${'b'.repeat(95)}`]]) {
+      const unique = uniqueAttachmentName(long, taken);
+      expect([...unique].length).toBeLessThanOrEqual(100);
+      expect(attachmentNameProblem(unique)).toBeNull();
+      expect(taken.map((t) => t.toLowerCase())).not.toContain(unique.toLowerCase());
+    }
+  });
+
+  it('treats a decomposed and a composed letter as the same name', () => {
+    const decomposed = 'gro\u0308\u00dfe.csv';
+    expect(safeAttachmentName(decomposed)).toBe('größe.csv');
+    expect(attachmentListProblem(['gr\u00f6\u00dfe.csv', 'GRO\u0308SSE.csv'.replace('SSE', '\u00dfE')])).toBe('"GRO\u0308\u00dfE.csv" is attached twice. Keep one.');
+    expect(uniqueAttachmentName('\u00fc.md', ['u\u0308.md'])).toBe('\u00fc-2.md');
+  });
+
+  it('refuses a Windows device name with spaces before the dot', () => {
+    expect(attachmentNameProblem('CON .txt')).toBe(`"CON .txt" can't be used as an attachment name on Windows. Rename the file.`);
+    expect(attachmentNameProblem('nul  .md')).toMatch(/Windows/);
+    expect(safeAttachmentName('nul  .md')).toBe('_nul.md');
+    expect(attachmentNameProblem(safeAttachmentName('CON .txt'))).toBeNull();
+  });
+
+  it('refuses dots, NUL, separators and drive letters as names', () => {
+    for (const name of ['..', '.', 'a\u0000b.png', 'a/b.png', 'a\\b.png', 'C:x']) expect(attachmentNameProblem(name), name).toMatch(/isn't a safe attachment name/);
+  });
+});
+
