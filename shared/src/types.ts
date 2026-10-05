@@ -156,7 +156,11 @@ export type NodeRunState = {
 export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
 
 /** `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no value, or it has a problem). */
-export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean };
+/**
+ * `modelLine`: `Model: … · Effort: …` for an agent step whose own model or effort makes it differ from the run's;
+ * `modelNote`: why it doesn't run its own (step model spec §3.3). Both are shown, neither blocks the run.
+ */
+export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean; modelLine?: string; modelNote?: string };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
 export type RunPreview = {

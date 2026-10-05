@@ -32,6 +32,7 @@ import {
   type SessionResult,
   type SessionTab,
   supportsEffort,
+  withStepModelLines,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
@@ -636,7 +637,9 @@ export function createApp(d: AppDeps) {
         const cap = provider.stepRequestCap?.();
         // Copilot ignores effort, so a configured level isn't previewed as if it applied.
         const shownEffort = supportsEffort(provider.id) ? effort : undefined;
-        const shown = { ...p.outcome.preview, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
+        // Each agent step's own model and effort, as the run would resolve them now (step model spec §3.3).
+        const steps = withStepModelLines(p.outcome.preview.steps, r.graph, { provider: provider.id, model, effort }, knownModels());
+        const shown = { ...p.outcome.preview, steps, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
         client.send({ type: 'runPreview', preview: shown, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
       }

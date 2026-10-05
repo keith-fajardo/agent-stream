@@ -1,4 +1,4 @@
-import { fenceFor, fmtDuration, longestRun, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { fenceFor, fmtDuration, longestRun, modelLine, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -171,6 +171,9 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   const duration = durationOf(state);
   const out: string[] = [`### ${n.id} · ${inline(n.title)} — ${statusLabel(state.status)}${duration ? `, ${duration}` : ''}`];
   const block = (lines: string[]) => lines.length && out.push('', ...lines);
+  // The model and effort the step ran with, resolved when the run started (step model spec §3.3); runs from before have none.
+  const use = n.kind === 'agent' ? run.stepModels?.[n.id] : undefined;
+  if (use) block([inline(modelLine({ model: use.model, effort: use.effort, provider: run.provider })), ...(use.note?.trim() ? ['', `_Note:_ ${inline(use.note)}`] : [])]);
   // After a label on the same line, so line-start markup in it (an agent can write descriptions) stays text.
   if (n.description?.trim()) block([`_Description:_ ${inline(n.description)}`]);
   // As it ran: the rendered text, which has the variable values filled in.

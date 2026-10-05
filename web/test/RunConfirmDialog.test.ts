@@ -257,3 +257,22 @@ describe('RunConfirmDialog and the checkout', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe('RunConfirmDialog: each step’s model', () => {
+  it('shows a step’s model line and its warning under its prompt, and still lets the run start', async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    const steps = [
+      { id: 'n2', title: 'Check', kind: 'agent' as const, text: 'Compare.', reused: false, modelLine: 'Model: Opus · Effort: high' },
+      { id: 'n3', title: 'Other', kind: 'agent' as const, text: 'Sum up.', reused: false, modelNote: 'This step is set to an OpenAI Codex model (gpt-6-astra); this run uses Claude, so it uses the default model.' },
+    ];
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ steps, model: { value: 'sonnet', label: 'Sonnet' } }), requestId: lastRequestId() } }));
+    const prompts = container.querySelector('.agent-prompts')!;
+    const [first, second] = [...prompts.children];
+    expect(first.querySelector('details + .step-model-line')?.textContent).toBe('Model: Opus · Effort: high');
+    expect(second.querySelector('.step-model-line')).toBeNull();
+    expect(second.querySelector('.approval-warning')?.textContent).toBe('⚠ This step is set to an OpenAI Codex model (gpt-6-astra); this run uses Claude, so it uses the default model.');
+    // The header line still shows the run-wide values.
+    expect(container.querySelector('.model-line')?.textContent).toBe('Model: Sonnet · Effort: Default');
+    expect(button('Start run').disabled).toBe(false);
+  });
+});

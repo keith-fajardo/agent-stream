@@ -1,6 +1,6 @@
-import { isEffortLevel, supportsEffort } from './format';
+import { isEffortLevel, modelLine, supportsEffort } from './format';
 import { CLI_DEFAULT_MODEL, findModel } from './models';
-import { PROVIDER_IDS, PROVIDER_NAMES, type EffortLevel, type Graph, type ModelChoice, type ProviderId, type RunMeta, type StepModel, type StepModelUse } from './types';
+import { PROVIDER_IDS, PROVIDER_NAMES, type EffortLevel, type Graph, type ModelChoice, type PreviewStep, type ProviderId, type RunMeta, type StepModel, type StepModelUse } from './types';
 
 /** The longest model id a step can store. */
 export const MAX_MODEL_ID_CHARS = 200;
@@ -117,4 +117,25 @@ export function runStepModels(graph: Graph, run: RunModels, known: readonly Mode
     } else out[n.id] = resolveStepModel(n, run, known);
   }
   return out;
+}
+
+/**
+ * The run dialog's per-step lines (spec §3.3): an agent step that will run with its own model or effort gets
+ * `Model: <label> · Effort: <label>` when that differs from the run's, and its note as a warning. Labels are the list's
+ * display names; a reused step runs nothing, so it gets no line.
+ */
+export function withStepModelLines(steps: readonly PreviewStep[], graph: Graph, run: RunModels, known: readonly ModelChoice[] | undefined): PreviewStep[] {
+  const base = resolveStepModel({}, run, known);
+  return steps.map((s) => {
+    const n = graph.nodes.find((x) => x.id === s.id);
+    if (!n || n.kind !== 'agent' || s.reused || (!n.model && !n.effort)) return s;
+    const use = resolveStepModel(n, run, known);
+    const differs = use.model !== base.model || use.effort !== base.effort;
+    const label = use.model ? findModel(listed(known), use.model)?.label : undefined;
+    return {
+      ...s,
+      ...(differs && { modelLine: modelLine({ model: use.model, label, effort: use.effort, provider: run.provider }) }),
+      ...(use.note && { modelNote: use.note }),
+    };
+  });
 }

@@ -136,13 +136,18 @@ export function RunConfirmDialog() {
             {agents.length > 0 && (
               <div className="agent-prompts">
                 {agents.map((s) => (
-                  <details key={s.id}>
-                    <summary>
-                      {s.id} · {s.title}
-                    </summary>
-                    <StepBrief text={s.description} />
-                    <StepText text={s.text} />
-                  </details>
+                  <div key={s.id}>
+                    <details>
+                      <summary>
+                        {s.id} · {s.title}
+                      </summary>
+                      <StepBrief text={s.description} />
+                      <StepText text={s.text} />
+                    </details>
+                    {/* The step's own model and effort, under its prompt; a note never blocks the run. */}
+                    {s.modelLine && <p className="step-model-line">{s.modelLine}</p>}
+                    {s.modelNote && <p className="approval-warning">⚠ {s.modelNote}</p>}
+                  </div>
                 ))}
               </div>
             )}

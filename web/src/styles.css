@@ -189,6 +189,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 
 .checkout-chip { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .checkout-line, .model-line, .cap-line { color: var(--muted); }
+.step-model-line { margin: 0 0 4px 16px; color: var(--muted); }
 .run-note { color: var(--info); }
 .static-note { margin: 0; color: var(--muted); }
 .read-badge { padding: 0 4px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
