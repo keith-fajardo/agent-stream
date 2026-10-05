@@ -1,4 +1,4 @@
-# Agent Stream — model and effort per step (design)
+# Agent Stream — model and effort per step, plus save and undo shortcuts (design)
 
 Date: 2026-10-05. Status: approved in conversation, awaiting review of this written spec.
 
@@ -133,6 +133,59 @@ The research found no effort or reasoning option in the `vscode.lm` request API 
 - **If no supported option exists:** Copilot steps show Effort as **Not supported**, and a stored effort on a Copilot step is ignored with the existing log note.
 - **If one exists:** the plan adds it behind the same per-model rule.
 
+## 6a. Keyboard: save and undo (added on request)
+
+These apply to the graph tab. "⌘" means Command on macOS and Ctrl on Windows and Linux. Toasts use the existing toast (it disappears after 6 s).
+
+### 6a.1 Save: ⌘S
+
+**What it saves:**
+- **In Markdown mode,** ⌘S keeps its current behaviour (saves the Markdown). On success it now also shows the toast `Saved.`
+- **In Graph mode,** ⌘S saves everything unsaved in the tab:
+  - **The Node panel's draft.** If the open step has unsaved edits, they are saved exactly as the panel's Save button does.
+  - **Canvas edits.** Moves, adds, connections, deletes and Tidy are already saved as they happen. ⌘S also sends any position that hasn't been confirmed yet.
+
+**What the toast says:**
+- `Step <id> saved.` when a step draft was saved.
+- `Graph saved.` when the step had no unsaved edits. Nothing else needed saving, so this confirms that the graph is saved.
+- `Can't save: <id>.md has errors. Fix the file first.` when the graph's file has errors and the step draft can't be saved (R6 of the Markdown graphs work). In that case the draft is kept.
+
+**Focus:** ⌘S works wherever focus is in the tab, including the Node panel's text fields. It calls `preventDefault`. VS Code may also run its own Save on the tab, which is read-only and does nothing.
+
+**Menu:** File › **Save** (⌘S) does the same thing.
+
+### 6a.2 Undo: ⌘Z
+
+**What can be undone:**
+- Undo reverses **the user's own graph edits made in this tab**, newest first, up to 50 steps.
+- One user action is one undo step:
+  - a Node panel save;
+  - adding, deleting or connecting steps, including deleting a whole selection;
+  - one drag, even with several steps selected;
+  - Tidy;
+  - a Markdown save in this tab;
+  - a model or effort change;
+  - a goal, instructions or variable edit.
+- **Not undone:**
+  - agent changes (they have Accept and Revert in the Changes tab);
+  - outside file edits (by hand in another editor, git, another AI);
+  - edits from another window.
+- **Text fields:** inside a text field (the Node panel's inputs, the Markdown editor, the chat box), ⌘Z is the field's own text undo, not graph undo.
+
+**How it works:**
+- **Recording.** The engine keeps an undo stack per graph and per tab. Each entry holds the graph as it was before and after one action, with a short label (`moved 2 steps`, `deleted n3`, `saved n3`, `tidied the layout`, `saved the Markdown`). The stack lives in memory and is cleared when the extension reloads.
+- **Undoing:**
+  - **If the graph still equals the entry's "after"**, the engine restores the entry's "before" by applying `diffToOps(current, before)` as user edits. They are recorded in history with `via: 'undo'`, follow the normal agent-change baseline rules, and are written to the `.md`.
+  - **If the graph changed since then** (by the planner, an agent step, a file edit or another tab), undo is refused, so it never discards someone else's change. The stack is then cleared for that tab.
+  - **If the file has errors,** undo is refused (R6).
+- A running run is unaffected; it keeps its snapshot, as with any edit.
+
+**Toasts:** `Undid <label>.`, `Nothing to undo.`, `Can't undo: the graph changed since (by the planner, a run, the file or another tab).` and `Can't undo: <id>.md has errors. Fix the file first.`
+
+**Menu:** Edit › **Undo <label>** (⌘Z), disabled when there is nothing to undo.
+
+**Redo** (⇧⌘Z / Ctrl+Y) is not included. It's an easy follow-up on the same stack.
+
 ## 7. Testing
 
 - **shared:**
@@ -157,6 +210,23 @@ The research found no effort or reasoning option in the `vscode.lm` request API 
   - the chip and its warning state;
   - the run dialog's per-step lines and warnings.
 - **extension:** the Copilot effort check from §6. The model list wiring needs no change.
+- **keyboard (6a):**
+  - **Save:**
+    - Graph mode with a dirty step draft saves it, with the toast `Step <id> saved.`
+    - Graph mode with nothing dirty shows `Graph saved.`
+    - Markdown mode saves, with the toast `Saved.`
+    - It is refused while the file has errors (draft kept, toast).
+    - It works from the Node panel's text fields.
+    - File › Save does the same.
+  - **Undo:**
+    - each action kind is one step, labelled;
+    - 50-step limit;
+    - restores via `diffToOps` with `via: 'undo'` history;
+    - refused after an agent, file or other-tab change (and the stack cleared);
+    - refused while the file has errors;
+    - ⌘Z inside text fields stays text undo;
+    - Edit › Undo label and disabled state;
+    - agent-change baseline behaviour matches a canvas edit.
 - **All existing tests keep passing,** on Windows, macOS and Linux CI.
 
 ## 8. Research appendix (2026-10-05)
@@ -200,3 +270,4 @@ From live checks on the user's machine (Claude Code 2.1.289 `supportedModels()`,
 - Per-step model for planner chats.
 - Showing cost per model.
 - Tier-based model names.
+- Redo, and undo of agent changes or outside file edits.
