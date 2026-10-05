@@ -1,0 +1,202 @@
+# Agent Stream — model and effort per step (design)
+
+Date: 2026-10-05. Status: approved in conversation, awaiting review of this written spec.
+
+## 1. Purpose and decisions
+
+Today every agent step of a run uses the run's model and effort. Those come from `agentStream.model` and `agentStream.effort`, captured when the run starts. The user wants each step to be able to choose its own, for three reasons:
+
+1. **Cheaper or faster steps:** a small model or low effort for simple steps, a strong one for hard steps.
+2. **Comparing models (A/B):** the same step on different models or efforts in one graph.
+3. **Reproducible graphs:** pinning the exact model a step was designed for.
+
+Mixing providers inside one run is **not** a goal. A step's model always runs within the run's provider.
+
+**Decision (approach A):** a step stores **one** model, tagged with its provider, plus an effort. Both are optional and mean Default when absent. A step whose model belongs to another provider falls back to the run's default model, with a visible warning. Rejected:
+
+- one model per provider on every step: heavier than the use cases need;
+- tiers such as "Fast/Strongest": not reproducible.
+
+## 2. Data
+
+### 2.1 The step
+
+`GraphNode` gains two optional fields, valid on agent steps only:
+
+```ts
+model?: StepModel;      // { provider: ProviderId; id: string }
+effort?: EffortLevel;   // 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
+```
+
+- `id` is the provider's own model id, exactly as its model list reports it.
+  - Claude: `supportedModels()` `value`, e.g. `opus`, `sonnet`, `fable`, `haiku`, `default`, `claude-opus-5`.
+  - Codex: `model/list` `id`, e.g. `gpt-6-astra`.
+  - Copilot: the `vscode.lm` model id, or `auto`.
+- Ids are 1–200 characters, with no whitespace, `/` allowed.
+- A command step with `model` or `effort` is invalid. `applyOp` refuses it with the message `Only agent steps have a model or effort.`
+- **Switching a step to `command` drops both fields.** This is part of the canonical form, like the other kind's text.
+- `NewNodeInput` and `NodePatch` gain the same fields. In a patch, `model: null` and `effort: null` clear them; the patch schema uses the existing clearing convention.
+- `ChangedField` gains `'model'` and `'effort'`, so agent-change review and the "changed" marks cover them.
+
+### 2.2 The Markdown file
+
+Two more lines in a step's field list, written in this order after `timeout`:
+
+```
+- model: claude/opus
+- effort: high
+```
+
+- **`model`** is `<provider>/<id>`. The provider is `claude`, `codex` or `copilot`. The id is everything after the first `/`.
+- **`effort`** is one of the levels above.
+- **Parse errors** (each with its line and a fix hint):
+  - an unknown provider;
+  - an empty or whitespace id;
+  - an unknown effort;
+  - either field on a command step.
+- **The parser does not check** whether the model currently exists. That is checked when a run starts (§3), so a graph still opens on a machine with another plan or provider.
+- **Writing:** the serializer writes the lines only when set. The round trip and `diffToOps` cover them: a hand edit becomes `updateNode` with `model` and `effort` in the patch.
+- **Docs:** `docs/graph-format.md` documents both lines.
+
+### 2.3 Old graphs and exports
+
+There is no migration. Graphs without the fields behave exactly as today. Old `.agent-stream.json` exports import unchanged; their nodes have no model or effort.
+
+## 3. Which model a run uses
+
+### 3.1 When it is decided
+
+Each agent step's model and effort are resolved once, when the run starts, after the run's own provider, model and effort are captured as today. The result is saved in the run snapshot as `RunMeta.stepModels: Record<nodeId, { model?: string; effort?: EffortLevel; note?: string }>`. A re-run (Run from a step, or a re-run of a finished run) uses the snapshot's values. The Run Report reads them.
+
+### 3.2 Rules
+
+For an agent step, with `R` the run's provider, `M` the run's model (or Default) and `E` the run's effort:
+
+1. **No `model` on the step** → the model is `M`.
+2. **`model.provider === R`:**
+   - If the provider's current model list (the same list the chat's Model menu uses) is **known** and doesn't contain `model.id`, the model is `M`. The note reads `<id> isn't offered by <provider name> any more (or on this plan), so this step uses the default model.`
+   - Otherwise the model is `model.id`.
+   - **Copilot:** the list is "known" only for the purpose of showing the warning. The step still tries the stored id. If Copilot refuses it at request time (for example a model only VS Code core can use), the existing fallback to Auto applies.
+3. **`model.provider !== R`** → the model is `M`. The note reads `This step is set to a <provider name> model (<id>); this run uses <R name>, so it uses the default model.`
+4. **Effort** = the step's `effort` ?? `E`. It is then filtered by the existing per-provider rule (Claude's `modelOptions`, Codex's `codexEffort`, Copilot: none): a level the resolved model doesn't offer is dropped, with the existing one-line log note.
+
+Planner chats are unaffected. They keep using the chat header's Model and Effort.
+
+### 3.3 Where it shows
+
+- **Run dialog:** each agent step whose resolved model or effort differs from the run's gets a line `Model: <label> · Effort: <label>` under its prompt. Labels come from the provider list's display names. Each note from §3.2 shows as a warning line on that step.
+  - Warnings don't block the run.
+  - The dialog's header line (`Model: … · Effort: …`) still shows the run-wide values.
+- **Step log:** the `start` event records the model and effort the step actually ran with. Any note is logged as a text line.
+- **Run Report:** in each step's section, under its heading, a line `Model: <model or Default> · Effort: <effort or Default>`, plus the note if there is one. The run-level lines are unchanged.
+
+## 4. The UI
+
+### 4.1 The Node panel
+
+For agent steps only, below Access and Workspace:
+
+- **Model:** a dropdown.
+  - Its first option is **Default (the run's model)**, followed by the current provider's models (display names).
+  - On Claude, aliases come first (`default`, `sonnet`, `opus`, `fable`, `haiku`, in the order the list gives), then a **Pinned versions** group (ids starting `claude-`).
+  - On Codex, models are listed in the list's order.
+  - On Copilot, **Auto** comes first.
+  - **A step whose model belongs to another provider** shows it as a disabled entry, `<Provider> · <id> (not the current provider)`, with a **Use Default** button. Picking from the list replaces it.
+  - **A model id that the current provider's known list doesn't contain** shows as `<id> (not offered)`.
+- **Effort:** a dropdown with **Default** plus only the levels the chosen model offers. With Model on Default, it offers the levels the provider reports for its default model (the existing `defaultEffortsFor`). It is disabled and reads **Not supported** for a model with no levels, and on Copilot (see §6).
+- **Saving:** changes are saved as step edits (`updateNode`). They go into history, agent-change review and the `.md`, and count as "changed" for Refine.
+
+### 4.2 The canvas card
+
+An agent step with its own model or effort shows a chip next to its badges.
+
+- **Text:** the model's short label and the effort, e.g. `opus · high`, `GPT-6-Astra`, `· max`.
+- **Warning state:** the chip is struck through, with the note as its tooltip, when the model belongs to another provider or isn't offered.
+
+### 4.3 Not included
+
+There is no bulk "set model for selected steps". Users set each step separately, or ask the planner.
+
+## 5. The planner
+
+- **Graph tools:** `add_node` and `update_node` accept `model` (as `"<provider>/<id>"`) and `effort`, validated like the file.
+- **Graph view:** `get_graph` shows each step's model and effort.
+- **Model list:** a new read-only planner tool `list_models` returns the current provider's models (id, name, effort levels, default).
+- **New lines in `PLANNER_APPEND`:**
+  - *"Each agent step can have its own model and effort (add_node/update_node: model "<provider>/<id>", effort). Leave them on Default unless the user asks, or a step is clearly simple (checks, summaries — a small model or low effort) or clearly hard. Use only models list_models returns for the current provider."*
+  - *"To compare models, add one step per model/effort with the same prompt; let them run in parallel (read-only, or each in its own workspace when they write), then a read-only compare step that reports quality, time and tokens from their outputs."*
+
+## 6. Copilot effort
+
+The research found no effort or reasoning option in the `vscode.lm` request API that extensions use. The plan's first task checks the installed `vscode.d.ts` (and `LanguageModelChatRequestOptions.modelOptions`).
+
+- **If no supported option exists:** Copilot steps show Effort as **Not supported**, and a stored effort on a Copilot step is ignored with the existing log note.
+- **If one exists:** the plan adds it behind the same per-model rule.
+
+## 7. Testing
+
+- **shared:**
+  - the parse and write of `model` and `effort` (fields, order, every error with its line);
+  - round trip, including the 300-graph generator extended to set the fields on agent steps;
+  - `diffToOps` for set, change and clear;
+  - `applyOp`:
+    - refuses the fields on command steps;
+    - a kind switch drops them;
+    - null clears them;
+    - agent-change fields include them.
+- **engine:**
+  - resolution rules 1–4: matching provider, another provider (default plus note), not offered (default plus note), Copilot tries and falls back, effort filtering;
+  - the snapshot's `stepModels`;
+  - re-runs use the snapshot;
+  - executors receive the step's model and effort;
+  - Run Report lines;
+  - planner tools (`add_node` and `update_node` accepting and refusing values, `list_models`, `get_graph`);
+  - `PLANNER_APPEND` lines.
+- **web:**
+  - the Node panel dropdowns: Default, the Claude grouping, another provider disabled with Use Default, "not offered", the effort list per model, Not supported;
+  - the chip and its warning state;
+  - the run dialog's per-step lines and warnings.
+- **extension:** the Copilot effort check from §6. The model list wiring needs no change.
+- **All existing tests keep passing,** on Windows, macOS and Linux CI.
+
+## 8. Research appendix (2026-10-05)
+
+From live checks on the user's machine (Claude Code 2.1.289 `supportedModels()`, codex-cli 0.160 `model/list`, no model turn spent) and the providers' docs. Model lists are plan-specific and change, so Agent Stream always reads them at runtime.
+
+- **Claude:**
+
+  | Model | Efforts |
+  |---|---|
+  | `default` (Sonnet 5.5 on this account; Opus 5.5 on most plans) | low/medium/high/xhigh/max |
+  | `sonnet` (Sonnet 5.5) | low/medium/high/xhigh/max |
+  | `opus` (Opus 5.5) | low/medium/high/xhigh/max |
+  | `fable` (Fable 5.1, most capable) | low/medium/high/xhigh/max |
+  | `haiku` (Haiku 4.5, fastest) | none |
+  | pinned `claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7` | low/medium/high/xhigh/max |
+  | pinned `claude-opus-4-6`, `claude-sonnet-4-6` | low/medium/high/max (no xhigh) |
+
+  Aliases move with Claude Code updates; pinned ids don't. Source: code.claude.com/docs/en/model-config.
+- **Codex:**
+
+  | Model | Efforts |
+  |---|---|
+  | `gpt-6.1-sol` (default) | low → ultra |
+  | `gpt-6-astra` (most capable) | low → ultra |
+  | `gpt-6-luna` (fastest) | low → max |
+  | `gpt-6-sol`, `gpt-5.6-sol`, `gpt-5.6-terra` | low → ultra |
+  | `gpt-5.6-luna` | low → max |
+  | `gpt-5.5` (legacy; retires 2026-10-14) | low → xhigh |
+
+  Source: learn.chatgpt.com/docs/models.
+- **Copilot:**
+  - Plan-dependent: OpenAI GPT-5.x and 6.x, Anthropic Claude (Haiku 4.5 → Fable 5.1), Gemini 3.7/3.8 Flash, Grok 4.5–4.7, Kimi K3, MAI-Code-1.1-Flash, plus Auto. Some listed models only work for VS Code core.
+  - Billing is per token in AI credits.
+  - Sources: docs.github.com/en/copilot/reference/ai-models/supported-models and …/copilot-billing/models-and-pricing.
+
+## 9. Out of scope
+
+- Mixing providers in one run.
+- Bulk model setting.
+- Per-step model for planner chats.
+- Showing cost per model.
+- Tier-based model names.
