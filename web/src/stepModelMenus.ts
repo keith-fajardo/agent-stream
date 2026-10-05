@@ -1,4 +1,4 @@
-import { findModel, parseStepModel, PROVIDER_NAMES, type EffortLevel, type ModelChoice, type ProviderId } from '@agent-stream/shared';
+import { findModel, parseStepModel, PROVIDER_NAMES, stepModelNote, type EffortLevel, type GraphNode, type ModelChoice, type ProviderId } from '@agent-stream/shared';
 
 /** One option of a step's Model or Effort menu. Values are `<provider>/<id>` and effort levels; '' is Default. */
 export type MenuOption = { value: string; label: string; disabled?: boolean };
@@ -66,4 +66,19 @@ export function effortMenu(provider: ProviderId | undefined, models: readonly Mo
   const options: MenuOption[] = [{ value: '', label: 'Default' }, ...(levels ?? []).map((l) => ({ value: l, label: l }))];
   if (effort && !options.some((o) => o.value === effort)) options.push({ value: effort, label: levels ? `${effort} (not offered)` : effort });
   return { disabled: false, options };
+}
+
+/** What a step card's chip shows (spec §4.2): `opus · high`, `GPT-6-Astra`, `· max`; `warning` (the note) when it won't run as set. */
+export type ModelChip = { text: string; warning?: string };
+
+/**
+ * The chip of an agent step with its own model or effort: the model's display name from the current provider's list (else
+ * its id) and the effort. A model of another provider, or one the known list doesn't offer, is a warning.
+ */
+export function modelChip(node: Pick<GraphNode, 'kind' | 'model' | 'effort'>, provider: ProviderId | undefined, models: readonly ModelChoice[]): ModelChip | undefined {
+  if (node.kind !== 'agent' || (!node.model && !node.effort)) return undefined;
+  const warning = node.model && provider ? (stepModelNote(node.model, provider, models) ?? undefined) : undefined;
+  const label = node.model ? (warning ? node.model.id : (findModel(models, node.model.id)?.label ?? node.model.id)) : '';
+  const text = label ? `${label}${node.effort ? ` · ${node.effort}` : ''}` : `· ${node.effort}`;
+  return { text, ...(warning && { warning }) };
 }

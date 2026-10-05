@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { fmtDuration, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
 import { badgeText } from '../changeLabels';
+import type { ModelChip } from '../stepModelMenus';
 import { workspaceColor } from '../workspaceColor';
 
 export type StepData = {
@@ -13,6 +14,8 @@ export type StepData = {
   changeFields?: ChangedField[];
   /** A removed step drawn from the baseline: it can't be selected or edited. */
   ghost?: boolean;
+  /** The step's own model and effort (step model spec §4.2). */
+  modelChip?: ModelChip;
 };
 export type StepFlowNode = Node<StepData, 'step'>;
 
@@ -21,7 +24,7 @@ const changeTitle = (change: NonNullable<StepData['change']>, fields?: ChangedFi
   `${change[0].toUpperCase()}${change.slice(1)}${fields?.length ? `: ${fields.join(', ')}` : ''}`;
 
 export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
-  const { node, state, waiting, change, changeBy, changeFields } = data;
+  const { node, state, waiting, change, changeBy, changeFields, modelChip } = data;
   const status = state?.status;
   const classes = ['step', `kind-${node.kind}`, change ? `change-${change}` : '', status ? `status-${status}` : '', waiting ? 'waiting' : '', selected ? 'selected' : ''];
   return (
@@ -42,6 +45,12 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
         {node.workspace && (
           <span className={`ws-badge ws-color-${workspaceColor(node.workspace)}`} title={`Runs in workspace ${node.workspace}`}>
             ⎇ {node.workspace}
+          </span>
+        )}
+        {modelChip && (
+          // Struck through, with the note as its tooltip, when the step won't run its own model.
+          <span className={`model-chip${modelChip.warning ? ' model-chip-warning' : ''}`} title={modelChip.warning ?? "This step's own model and effort"}>
+            {modelChip.text}
           </span>
         )}
         {change ? (

@@ -37,6 +37,10 @@ export function Canvas() {
   const approvals = useStore((s) => s.approvals);
   const selectedId = useStore((s) => s.selectedNodeId);
   const minimap = useStore((s) => s.minimap);
+  const statusProvider = useStore((s) => s.status?.provider);
+  const listProvider = useStore((s) => s.modelsProvider);
+  const models = useStore((s) => s.models);
+  const provider = listProvider ?? statusProvider;
   const { screenToFlowPosition, getNodes } = useReactFlow<StepFlowNode, FlowEdge>();
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
@@ -52,11 +56,24 @@ export function Canvas() {
     lastSelected.current = selectedId;
     setNodes((current) =>
       graph
-        ? buildFlowNodes({ graph, run: runForGraph, approvals, selectedId, selectionChanged, current, dragging: dragging.current, pendingMoves: pendingMoves.current, baseline, changes: agentChanges })
+        ? buildFlowNodes({
+            graph,
+            run: runForGraph,
+            approvals,
+            selectedId,
+            selectionChanged,
+            current,
+            dragging: dragging.current,
+            pendingMoves: pendingMoves.current,
+            baseline,
+            changes: agentChanges,
+            provider,
+            models: listProvider === provider ? models : [],
+          })
         : [],
     );
     setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current, agentChanges) : []));
-  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId]);
+  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId, provider, listProvider, models]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<StepFlowNode>[]) => setNodes((current) => applyNodeChanges(changes.filter((c) => c.type !== 'remove'), current)),
