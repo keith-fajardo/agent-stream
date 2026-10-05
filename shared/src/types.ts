@@ -233,7 +233,12 @@ export type RunMeta = {
   /** The model and effort the run's agent steps used, captured from the settings when it started (only when set). */
   model?: string;
   effort?: EffortLevel;
+  /** Each agent step's model and effort, resolved when the run started (step model spec §3.1); absent in runs from before. */
+  stepModels?: Record<string, StepModelUse>;
 };
+
+/** What one agent step of a run uses: absent fields are the provider's own default. `note` says why it isn't the step's own choice. */
+export type StepModelUse = { model?: string; effort?: EffortLevel; note?: string };
 
 /** One approved change a step agent made to a run in progress: `byNodeId` asked, `nodeId` is the step added or changed. */
 export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summary: string };
@@ -244,7 +249,8 @@ export type RunSummary = { id: string; graphId: string; status: RunStatus; start
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
 export type NodeEventBody =
-  | { type: 'start'; kind: NodeKind; cwd: string; command?: string; prompt?: string }
+  /** `model`/`effort`: what an agent step actually ran with, as the provider sent it (absent: the provider's default). */
+  | { type: 'start'; kind: NodeKind; cwd: string; command?: string; prompt?: string; model?: string; effort?: EffortLevel }
   | { type: 'text'; text: string }
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError: boolean }
