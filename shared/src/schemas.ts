@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
+import { attachmentListProblem, MAX_ATTACHMENTS, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { legacyNodeIdProblem, topoOrder } from './graph';
 import { MODEL_ID_RE, ONLY_AGENT_STEPS_MODEL } from './stepModels';
 import { MAX_UNDO_LABEL_CHARS } from './undo';
@@ -15,6 +16,8 @@ const description = z.string().max(2000).optional();
 /** A step's own model (spec §2.1): the provider and its model id, 1 to 200 characters without whitespace. */
 const stepModel = z.object({ provider: z.enum(PROVIDER_IDS), id: z.string().regex(MODEL_ID_RE) });
 const effort = z.enum(EFFORT_LEVELS);
+/** An attachment list as a client sends it; the names are checked by attachmentListProblem in applyOp. */
+const attachmentNames = z.array(z.string().max(200)).max(MAX_ATTACHMENTS);
 
 const graphNodeSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
@@ -28,6 +31,7 @@ const graphNodeSchema = z.object({
   workspace: z.string().optional(),
   model: stepModel.optional(),
   effort: effort.optional(),
+  attachments: z.array(z.string()).optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -40,6 +44,7 @@ const graphSchema = z.object({
   goal: z.string().default(''),
   instructions: z.string().default(''),
   variables: z.array(z.object({ name: z.string(), description: z.string().default('') })).default([]),
+  attachments: z.array(z.string()).optional(),
   nodes: z.array(graphNodeSchema).default([]),
   edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
   // A stored counter too large to count on exactly (from a huge step id) is read as 0: the step ids still count.
@@ -59,6 +64,9 @@ export function parseGraph(json: unknown): GraphResult {
     ids.add(n.id);
     if (n.access === 'read' && n.kind === 'command') return { ok: false, error: `${n.id}: ${COMMAND_ALWAYS_WRITES}` };
     if ((n.model || n.effort) && n.kind === 'command') return { ok: false, error: `${n.id}: ${ONLY_AGENT_STEPS_MODEL}` };
+    const attachProblem = n.attachments ? attachmentListProblem(n.attachments) : null;
+    if (attachProblem) return { ok: false, error: `${n.id}: ${attachProblem}` };
+    if (n.attachments?.length && n.kind === 'command') return { ok: false, error: `${n.id}: ${ONLY_AGENT_STEPS_ATTACH}` };
     const workspaceProblem = n.workspace === undefined ? null : workspaceNameProblem(n.workspace);
     if (workspaceProblem) return { ok: false, error: `${n.id}: ${workspaceProblem}` };
   }
@@ -73,6 +81,8 @@ export function parseGraph(json: unknown): GraphResult {
     const problem = variableNameProblem(graph.variables[i].name, graph.variables.slice(0, i));
     if (problem) return { ok: false, error: `invalid variable: ${problem}` };
   }
+  const graphAttachProblem = graph.attachments ? attachmentListProblem(graph.attachments) : null;
+  if (graphAttachProblem) return { ok: false, error: `graph attachments: ${graphAttachProblem}` };
   if (topoOrder(graph).length !== graph.nodes.length) return { ok: false, error: 'the graph has a cycle' };
   return { ok: true, graph };
 }
@@ -89,6 +99,7 @@ const newNode = z.object({
   workspace: z.string().optional(),
   model: stepModel.optional(),
   effort: effort.optional(),
+  attachments: attachmentNames.optional(),
   position: position.optional(),
 });
 
@@ -104,6 +115,7 @@ const nodePatch = z.object({
   // null clears the step's own model or effort.
   model: stepModel.nullable().optional(),
   effort: effort.nullable().optional(),
+  attachments: attachmentNames.optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
@@ -120,6 +132,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('renameVariable'), name: z.string(), newName: z.string() }),
   z.object({ type: z.literal('setVariableDescription'), name: z.string(), description: z.string() }),
   z.object({ type: z.literal('deleteVariable'), name: z.string() }),
+  z.object({ type: z.literal('setGraphAttachments'), names: attachmentNames }),
   z.object({ type: z.literal('moveNode'), id: z.string(), position }),
   z.object({ type: z.literal('acceptChange'), target: changeTarget }),
   z.object({ type: z.literal('revertChange'), target: changeTarget }),

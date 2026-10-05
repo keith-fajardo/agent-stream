@@ -21,6 +21,8 @@ export type GraphNode = {
   model?: StepModel;
   /** Agent steps: the step's own effort. Missing means the run's effort. */
   effort?: EffortLevel;
+  /** Agent steps: files the step's agent gets every time it runs, by name, in order (step model spec §6b.3). */
+  attachments?: string[];
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -38,6 +40,8 @@ export type Graph = {
   /** Longer guidance every agent step and the planner receive after the goal. */
   instructions: string;
   variables: VariableDef[];
+  /** Files every agent step gets, after the step's own, by name, in order (step model spec §6b.3). */
+  attachments?: string[];
   nodes: GraphNode[];
   edges: Edge[];
   /** Highest node number ever issued, so ids are never reused. */
@@ -59,6 +63,7 @@ export type NewNodeInput = {
   workspace?: string;
   model?: StepModel;
   effort?: EffortLevel;
+  attachments?: string[];
   position?: Position;
 };
 
@@ -78,6 +83,8 @@ export type NodePatch = {
   model?: StepModel | null;
   /** null clears the step's effort (back to the run's). */
   effort?: EffortLevel | null;
+  /** The step's whole attachment list; [] clears it. */
+  attachments?: string[];
 };
 
 export type Op =
@@ -92,6 +99,8 @@ export type Op =
   | { type: 'renameVariable'; name: string; newName: string }
   | { type: 'setVariableDescription'; name: string; description: string }
   | { type: 'deleteVariable'; name: string }
+  /** The graph's whole attachment list; [] clears it (spec §6b.3). */
+  | { type: 'setGraphAttachments'; names: string[] }
   /** `position: null` puts the step back on the automatic layout (only undo does that; clients always send a position). */
   | { type: 'moveNode'; id: string; position: Position | null }
   /** Review of agent changes (agent changes spec §3.4): applied by the graph store, which keeps the baseline. */
@@ -114,7 +123,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =

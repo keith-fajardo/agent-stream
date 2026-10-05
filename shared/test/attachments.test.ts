@@ -94,8 +94,13 @@ describe('attachment rules, review fixes', () => {
   it('treats a decomposed and a composed letter as the same name', () => {
     const decomposed = 'gro\u0308\u00dfe.csv';
     expect(safeAttachmentName(decomposed)).toBe('größe.csv');
-    expect(attachmentListProblem(['gr\u00f6\u00dfe.csv', 'GRO\u0308SSE.csv'.replace('SSE', '\u00dfE')])).toBe('"GRO\u0308\u00dfE.csv" is attached twice. Keep one.');
+    expect(attachmentListProblem(['gr\u00f6\u00dfe.csv', 'GR\u00d6\u00dfE.csv'])).toBe('"GR\u00d6\u00dfE.csv" is attached twice. Keep one.');
     expect(uniqueAttachmentName('\u00fc.md', ['u\u0308.md'])).toBe('\u00fc-2.md');
+  });
+
+  it('refuses a list name that is not in its composed (NFC) form', () => {
+    expect(attachmentListProblem(['gro\u0308\u00dfe.csv'])).toBe('"gro\u0308\u00dfe.csv" must be written in its composed form (for example "\u00f6", not "o" and a separate accent), because files are saved under composed names.');
+    expect(attachmentListProblem(['gr\u00f6\u00dfe.csv'])).toBeNull();
   });
 
   it('refuses a Windows device name with spaces before the dot', () => {

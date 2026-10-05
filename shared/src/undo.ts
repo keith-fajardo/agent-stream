@@ -120,6 +120,8 @@ export function undoLabel(op: Op): string | undefined {
       return `edited variable ${op.name}`;
     case 'deleteVariable':
       return `deleted variable ${op.name}`;
+    case 'setGraphAttachments':
+      return "changed the graph's attachments";
     case 'acceptChange':
     case 'revertChange':
       return undefined;

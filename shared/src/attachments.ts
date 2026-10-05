@@ -63,7 +63,8 @@ export function attachmentListProblem(names: readonly string[]): string | null {
   if (names.length > MAX_ATTACHMENTS) return `at most ${MAX_ATTACHMENTS} attachments; remove ${names.length - MAX_ATTACHMENTS}.`;
   const seen = new Set<string>();
   for (const name of names) {
-    const problem = attachmentNameProblem(name.normalize('NFC'));
+    if (name !== name.normalize('NFC')) return `"${name}" must be written in its composed form (for example "\u00f6", not "o" and a separate accent), because files are saved under composed names.`;
+    const problem = attachmentNameProblem(name);
     if (problem) return problem;
     if (seen.has(key(name))) return `"${name}" is attached twice. Keep one.`;
     seen.add(key(name));

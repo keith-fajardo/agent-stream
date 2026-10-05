@@ -61,6 +61,7 @@ export function canonicalGraph(graph: Graph): Graph {
     goal: normText(graph.goal).trim(),
     instructions: normText(graph.instructions).trim(),
     variables: graph.variables.map((v) => ({ name: v.name, description: oneLine(v.description) })),
+    ...(graph.attachments?.length ? { attachments: [...graph.attachments] } : { attachments: undefined }),
     nodes,
     edges: graph.edges.map((e) => ({ id: edgeId(e.from, e.to), from: e.from, to: e.to })),
     nodeSeq: Math.max(graph.nodeSeq, ...nodes.map((n) => seqOf(n.id))),
@@ -68,7 +69,7 @@ export function canonicalGraph(graph: Graph): Graph {
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, model, effort, ...rest } = node;
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, ...rest } = node;
   const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
   const summary = oneLine(description ?? '');
   return {
@@ -81,6 +82,7 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(workspace && { workspace }),
     ...(node.kind === 'agent' && model && { model: { provider: model.provider, id: model.id } }),
     ...(node.kind === 'agent' && effort && { effort }),
+    ...(node.kind === 'agent' && attachments?.length && { attachments: [...attachments] }),
   };
 }
 

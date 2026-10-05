@@ -80,6 +80,8 @@ export function describeOp(op: Op): string {
       return `changed the description of variable ${op.name}`;
     case 'deleteVariable':
       return `deleted variable ${op.name}`;
+    case 'setGraphAttachments':
+      return op.names.length ? `set the graph's attachments to ${op.names.join(', ')}` : "removed the graph's attachments";
     case 'moveNode':
       return `moved ${op.id}`;
     case 'acceptChange':
