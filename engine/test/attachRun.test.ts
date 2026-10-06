@@ -147,3 +147,18 @@ describe('files read through the AttachmentStore', () => {
     expect(files.map((f) => [f.name, f.missing])).toEqual([['real.md', false], ['linked.md', true]]);
   });
 });
+
+describe('M-9: a name in both lists is one file, in any letter case', () => {
+  it('lists a step’s own entry once, ahead of a graph entry that differs only in case', () => {
+    const paths = tmpProject();
+    const store = new AttachmentStore(paths);
+    store.add('g', [{ name: 'mockup.png', bytes: new TextEncoder().encode('png') }, { name: 'brief.pdf', bytes: new TextEncoder().encode('pdf') }]);
+    const g = graphOf([{ type: 'setGraphAttachments', names: ['Mockup.png', 'brief.pdf'] }, { type: 'addNode', node: { title: 'A', kind: 'agent', prompt: 'p', attachments: ['mockup.png'] } }]);
+    const files = stepAttachments({ store, graph: g, node: g.nodes[0], cwd: paths.root, worktree: false });
+    expect(files.map((f) => f.name)).toEqual(['mockup.png', 'brief.pdf']);
+    // The Run Report lists the step's files the same way.
+    const run: RunMeta = { id: 'r1', graphId: 'g', status: 'succeeded', startedAt: 't', snapshot: g, nodes: { [g.nodes[0].id]: { status: 'succeeded' } }, attachments: [] };
+    const md = buildRunReport({ graphName: 'G', run, steps: {}, now: 't1' });
+    expect(md).toContain('**Attachments**\n\n- mockup.png · missing when the run started\n- brief.pdf · missing when the run started\n\n');
+  });
+});

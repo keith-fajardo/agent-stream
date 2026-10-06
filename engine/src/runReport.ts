@@ -1,4 +1,4 @@
-import { fenceFor, fmtDuration, longestRun, modelLine, PROVIDER_NAMES, statusLabel, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { fenceFor, fmtDuration, longestRun, modelLine, PROVIDER_NAMES, statusLabel, stepAttachmentNames, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -175,7 +175,7 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   const use = n.kind === 'agent' ? run.stepModels?.[n.id] : undefined;
   if (use) block([inline(modelLine({ model: use.model, effort: use.effort, provider: run.provider })), ...(use.note?.trim() ? ['', `_Note:_ ${inline(use.note)}`] : [])]);
   // Its attachments, its own then the graph's, by name and SHA-256 as the run started; never their contents (spec §6b.5).
-  const files = n.kind === 'agent' ? [...new Set([...(n.attachments ?? []), ...(run.snapshot.attachments ?? [])])] : [];
+  const files = n.kind === 'agent' ? stepAttachmentNames(n.attachments, run.snapshot.attachments) : [];
   if (files.length) {
     const hash = (name: string) => run.attachments?.find((a) => a.name === name)?.sha256;
     block(['**Attachments**', '', ...files.map((name) => `- ${inlineStart(name)} · ${hash(name) ? `sha256 ${hash(name)}` : 'missing when the run started'}`)]);

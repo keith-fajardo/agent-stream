@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
-import { attachmentKind, attachmentNameProblem, imageMediaType, type AttachmentKind, type ImageMediaType, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
+import { attachmentKind, attachmentNameProblem, stepAttachmentNames, imageMediaType, type AttachmentKind, type ImageMediaType, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
 import type { AttachmentStore } from './attachmentStore';
 
 /**
@@ -23,12 +23,13 @@ export function runAttachments(graph: Graph, hash: (name: string) => string | un
 }
 
 /**
- * What an agent step gets: its own attachments, then the graph's (a name in both once), with where each file is. Every
- * path and every "is it there" comes from the store, so a link, a bad name or a linked folder counts as missing.
+ * What an agent step gets: its own attachments, then the graph's, with where each file is. A name in both is one file
+ * (compared in any letter case, as on macOS and Windows), listed once as the step's own entry. Every path and every "is it
+ * there" comes from the store, so a link, a bad name or a linked folder counts as missing.
  */
 export function stepAttachments(o: { store: AttachmentStore; graph: Graph; node: GraphNode; cwd: string; worktree: boolean }): StepAttachment[] {
   if (o.node.kind !== 'agent') return [];
-  const names = [...new Set([...(o.node.attachments ?? []), ...(o.graph.attachments ?? [])])];
+  const names = stepAttachmentNames(o.node.attachments, o.graph.attachments);
   return names.map((name) => {
     const kind = attachmentKind(name) ?? 'text';
     // A name no file can have (a hand-edited snapshot): missing, with nothing to open.

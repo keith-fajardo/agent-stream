@@ -64,6 +64,21 @@ export function attachmentNameProblem(name: string): string | null {
 export const attachmentKey = (name: string): string => name.normalize('NFC').toLowerCase();
 const key = attachmentKey;
 
+/**
+ * An agent step's files by name: its own, then the graph's (step model spec §6b.1). A name in both is one file (compared
+ * as the file system does), listed once, as the step's own entry.
+ */
+export function stepAttachmentNames(own: readonly string[] | undefined, graph: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const name of [...(own ?? []), ...(graph ?? [])]) {
+    if (seen.has(key(name))) continue;
+    seen.add(key(name));
+    names.push(name);
+  }
+  return names;
+}
+
 /** Why a list of attachment names can't be stored, or null: each name safe, none twice (in any letter case), at most 20. */
 export function attachmentListProblem(names: readonly string[]): string | null {
   if (names.length > MAX_ATTACHMENTS) return `at most ${MAX_ATTACHMENTS} attachments; remove ${names.length - MAX_ATTACHMENTS}.`;
