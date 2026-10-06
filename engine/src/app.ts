@@ -4,6 +4,8 @@ import {
   findModel,
   isWriteCapable,
   refinable,
+  onlyRunPlan,
+  runModeProblem,
   runStepModels,
   validateRunnable,
   workspaceOf,
@@ -27,6 +29,7 @@ import {
   type Op,
   type OpRecord,
   type RunMeta,
+  type RunMode,
   type ServerMessage,
   type Session,
   type SessionResult,
@@ -46,14 +49,18 @@ import {
   undoOps,
   undoState,
   withStepModelLines,
+  RUN_STOPPED,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
 import { runAttachments } from './attachedFiles';
+import { createBrowserAsk } from './browser/approval';
+import type { BrowserService, ServiceStep } from './browser/service';
+import { BROWSER_TOOL_PREFIX, createBrowserTools, type BrowserTool } from './browser/tools';
 import { saveChatAttachments, type ChatAttachment } from './chatAttachments';
 import { AttachmentStore, type AttachmentFile } from './attachmentStore';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
-import type { Executors, NodeExecutor } from './executors';
+import type { Executors, NodeExecutor, NodeOutcome } from './executors';
 import { inspectCheckout, type GitExec } from './git';
 import { GraphStore, type FileSync } from './graphStore';
 import { migrateGraphsToMarkdown, migrateProjectFolder, migrateValuesFile } from './migrate';
@@ -115,6 +122,10 @@ export type AppDeps = {
   git: GitExec;
   /** The home folder: variant worktrees live in ~/.agent-stream/worktrees (spec §4.3a). Required, so no test writes to the real one. */
   home: string;
+  /** A line for the Agent Stream output channel (a graph file line Agent Stream dropped). */
+  log?: (message: string) => void;
+  /** The window's Agent Stream browser, shared by every folder's engine (browser spec §3); absent: steps get no browser tools. */
+  browser?: BrowserService;
 };
 
 export type App = ReturnType<typeof createApp>;
@@ -162,6 +173,10 @@ export function createApp(d: AppDeps) {
   if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
   ensureDataDirs(paths);
   const graphStore = new GraphStore(paths, clock);
+  // A line the store dropped while reading a graph file (browser spec §2.1, ruling R1): the file is written back without it.
+  graphStore.on('fileWarnings', (id: string, warnings: GraphFileError[]) => {
+    for (const w of warnings) d.log?.(`${id}.md line ${w.line}: ${w.message}`);
+  });
   const attachments = new AttachmentStore(paths);
   const sessions = new SessionStore(paths, clock);
   // Planner state and chats from before work sessions move into the Default session.
@@ -195,26 +210,67 @@ export function createApp(d: AppDeps) {
    */
   const agentFor =
     (p: AgentProvider): NodeExecutor =>
-    (ctx) => {
-      const readOnly = !isWriteCapable(ctx.node);
-      const graphTools = readOnly ? [] : createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
-      return p.runStep(
-        { ...ctx, graphTools },
-        createStepGate({
-          broker,
-          runId: ctx.runId,
-          graphId: ctx.graph.id,
-          nodeId: ctx.node.id,
-          nodeTitle: ctx.node.title,
-          projectDir: ctx.cwd,
-          runsRoot: d.projectDir,
-          privateFiles: privateFiles(),
-          signal: ctx.signal,
-          emit: ctx.emit,
-          readOnly,
-          selfApproving: new Set(graphTools.map((t) => STEP_GRAPH_TOOL_PREFIX + t.name)),
-        }),
-      );
+    async (original) => {
+      const readOnly = !isWriteCapable(original.node);
+      // A Browser step (browser spec §2): the browser opens before its agent starts, and a step that can't have it (no
+      // browser found, another window owns it) fails here, before it starts (ruling R3). Access doesn't matter (§2.3).
+      let step: ServiceStep | undefined;
+      let ctx = original;
+      let stepEnds: AbortController | undefined;
+      let browserTools: BrowserTool[] = [];
+      if (original.node.kind === 'agent' && original.node.browser && d.browser) {
+        const { runId } = original;
+        const nodeId = original.node.id;
+        const started = await d.browser.startStep({ runId, nodeId }, { emit: original.emit, record: (url) => runner.recordBrowserPage(runId, nodeId, url) });
+        if (!started.ok) return { ok: false, output: '', error: started.error };
+        step = started.step;
+      }
+      let outcome: NodeOutcome | undefined;
+      // From here on the step's browser step always ends (finally), whatever throws.
+      try {
+        if (step) {
+          // Stop came while the browser was opening: the agent never starts, and the step ends as cancelled.
+          if (original.signal.aborted) return { ok: false, output: '', error: RUN_STOPPED };
+          // The signal this step's tools, waits and cards run under: Stop aborts it, and so does the step's own end.
+          stepEnds = new AbortController();
+          ctx = { ...original, signal: AbortSignal.any([original.signal, stepEnds.signal]) };
+          // One tool set (and so one site allowance) per start of a step: never shared with another step or another run.
+          browserTools = createBrowserTools({ step, ask: createBrowserAsk({ broker, ctx }) });
+        }
+        const graphTools = readOnly ? [] : createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
+        outcome = await p.runStep(
+          { ...ctx, graphTools, ...(browserTools.length > 0 && { browserTools }) },
+          createStepGate({
+            broker,
+            runId: ctx.runId,
+            graphId: ctx.graph.id,
+            nodeId: ctx.node.id,
+            nodeTitle: ctx.node.title,
+            projectDir: ctx.cwd,
+            runsRoot: d.projectDir,
+            privateFiles: privateFiles(),
+            signal: ctx.signal,
+            emit: ctx.emit,
+            readOnly,
+            // The browser tools pass the gate as the graph tools do: reads need no approval, and the action tools ask the
+            // user themselves with the browser card (ruling R4).
+            selfApproving: new Set([...graphTools.map((t) => STEP_GRAPH_TOOL_PREFIX + t.name), ...browserTools.map((t) => BROWSER_TOOL_PREFIX + t.name)]),
+          }),
+        );
+        return outcome;
+      } finally {
+        if (step) {
+          // Its tabs close when it succeeded; otherwise they stay, so the user can see where it got to (spec §3.2). Whatever
+          // way the step ended (a provider that threw included), its signal aborts so a tool or wait still running ends.
+          const ended = outcome?.ok ? 'succeeded' : original.signal.aborted ? 'cancelled' : 'failed';
+          stepEnds?.abort();
+          try {
+            await step.end(ended);
+          } catch (e) {
+            console.error('[agent-stream] could not end the browser step', e);
+          }
+        }
+      }
     };
   const executors = d.executors ?? {
     agent: agentFor(provider),
@@ -304,19 +360,31 @@ export function createApp(d: AppDeps) {
     return r;
   }
 
-  function requestRun(graphId: string, fromNodeId?: string): string | null {
+  /**
+   * The planner's request_run. No mode: a fresh run, or a re-run from `fromNodeId`. `resume` retries from where the latest
+   * run stopped; `from` and `only` re-run from, or run only, `fromNodeId`. The user confirms in the usual dialog.
+   */
+  function requestRun(graphId: string, fromNodeId?: string, mode?: RunMode): string | null {
     const r = graphStore.load(graphId);
     if (!r.ok) return r.error;
     const problems = validateRunnable(r.graph);
     if (problems.length) return `The graph can't run yet:\n${problems.join('\n')}`;
     if (runner.activeFor(graphId)) return 'A run is already in progress.';
+    if (fromNodeId && !r.graph.nodes.some((n) => n.id === fromNodeId)) return `node ${fromNodeId} does not exist`;
     let sourceRunId: string | undefined;
-    if (fromNodeId) {
-      if (!r.graph.nodes.some((n) => n.id === fromNodeId)) return `node ${fromNodeId} does not exist`;
+    if (fromNodeId || mode) {
       sourceRunId = runStore.list(graphId)[0]?.id;
-      if (!sourceRunId) return 'There is no previous run to re-run from.';
+      if (!sourceRunId) return mode === 'resume' || mode === 'only' ? 'There is no previous run to retry.' : 'There is no previous run to re-run from.';
     }
-    broadcast({ type: 'confirmRun', graphId, fromNodeId, sourceRunId, requestedBy: 'planner' });
+    const modeProblem = runModeProblem(mode, fromNodeId, sourceRunId);
+    if (modeProblem) return modeProblem;
+    // The planner learns now what the dialog would only show: the same rule, checked on the templates (no variable values yet).
+    const source = mode === 'only' && sourceRunId ? runStore.get(sourceRunId) : undefined;
+    if (source && fromNodeId) {
+      const plan = onlyRunPlan(r.graph, source, fromNodeId);
+      if (!plan.ok) return plan.error;
+    }
+    broadcast({ type: 'confirmRun', graphId, ...(mode && { mode }), fromNodeId, sourceRunId, requestedBy: 'planner' });
     return null;
   }
 
@@ -469,6 +537,7 @@ export function createApp(d: AppDeps) {
 
   async function preview(
     graph: Graph,
+    mode: RunMode | undefined,
     fromNodeId?: string,
     sourceRunId?: string,
   ): Promise<{ ok: true; outcome: PreviewOutcome; checkout: CheckoutInfo } | { ok: false; error: string }> {
@@ -479,7 +548,7 @@ export function createApp(d: AppDeps) {
     }
     const checkout = await inspect();
     const files = runAttachments(graph, (name) => attachments.hash(graph.id, name));
-    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem, checkout, attachments: files }) };
+    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, mode, fromNodeId, commandShellProblem, checkout, attachments: files }) };
   }
 
   /** The pending agent changes and the baseline they are against, for graphOpened and graph. */
@@ -813,7 +882,7 @@ export function createApp(d: AppDeps) {
       case 'previewRun': {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        const p = await preview(r.graph, msg.mode, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
         // The dialog's Model line: what agent steps would get if the run started now. Never waits for the model list.
         const { model, effort } = modelDefaults();
@@ -826,7 +895,12 @@ export function createApp(d: AppDeps) {
         const shownEffort = supportsEffort(provider.id) ? effort : undefined;
         // Each agent step's own model and effort, as the run would resolve them now (step model spec §3.3).
         const steps = withStepModelLines(p.outcome.preview.steps, r.graph, { provider: provider.id, model, effort }, knownModels());
-        const shown = { ...p.outcome.preview, steps, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
+        // A Browser step that will run needs a browser on this machine (browser spec §5.4): a warning, never a problem.
+        const willRun = new Set(p.outcome.preview.steps.filter((s) => !s.reused && !s.notRun).map((s) => s.id));
+        const needsBrowser = !!d.browser && r.graph.nodes.some((n) => n.kind === 'agent' && n.browser && willRun.has(n.id));
+        const found = needsBrowser ? d.browser!.find() : undefined;
+        const warnings = found && !found.ok ? [...p.outcome.preview.warnings, found.error] : p.outcome.preview.warnings;
+        const shown = { ...p.outcome.preview, warnings, steps, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
         client.send({ type: 'runPreview', preview: shown, ...(msg.requestId !== undefined && { requestId: msg.requestId }) });
         return;
       }
@@ -834,7 +908,7 @@ export function createApp(d: AppDeps) {
         if (!status.ok) return error(`Runs are disabled: ${status.error}`);
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        const p = await preview(r.graph, msg.fromNodeId, msg.sourceRunId);
+        const p = await preview(r.graph, msg.mode, msg.fromNodeId, msg.sourceRunId);
         if (!p.ok) return error(p.error);
         // Run only what the user reviewed: a step, a value or an environment variable may have changed since.
         if (p.outcome.preview.signature !== msg.reviewed) return error(CHANGED_SINCE_REVIEW);
@@ -842,8 +916,10 @@ export function createApp(d: AppDeps) {
         if (runner.activeFor(r.graph.id)) return error('A run is already in progress for this graph.');
         const { checkout } = p;
         const runId = runner.newRunId();
-        // Steps with a workspace never reuse (spec §4.3a): every workspace the graph names gets a fresh worktree, before start.
-        const names = [...new Set(r.graph.nodes.map(workspaceOf).filter((w): w is string => w !== null))];
+        // Steps with a workspace never reuse (spec §4.3a): every workspace a step that runs names gets a fresh worktree, before start.
+        // `Run only` reuses the others, workspace or not, and leaves steps that didn't succeed unrun: those need none.
+        const skipped = new Set(p.outcome.preview.steps.filter((s) => s.reused || s.notRun).map((s) => s.id));
+        const names = [...new Set(r.graph.nodes.filter((n) => !skipped.has(n.id)).map(workspaceOf).filter((w): w is string => w !== null))];
         let workspaces: Record<string, { path: string; head: string }> | undefined;
         const sendBlocked = ({ holder, otherWindow, lockFile }: LeaseBlock) =>
           client.send({
@@ -859,8 +935,7 @@ export function createApp(d: AppDeps) {
           // The preview already refused this; kept so `head` is known here.
           if (!checkout.git || !checkout.head) return error(p.outcome.preview.problems.join('\n'));
           // Blocked now: refuse before making any worktree (spec §4.3, "nothing is created"). The runner checks again.
-          const reused = new Set(p.outcome.preview.steps.filter((s) => s.reused).map((s) => s.id));
-          const block = !msg.sequential && needsCheckoutLease(r.graph, reused) ? d.leases.blockedBy(checkout.root) : undefined;
+          const block = !msg.sequential && needsCheckoutLease(r.graph, skipped) ? d.leases.blockedBy(checkout.root) : undefined;
           if (block) return sendBlocked(block);
           const made = await createVariantWorkspaces({ checkoutRoot: checkout.root, runId, names, head: checkout.head, git: d.git, home: d.home });
           if (!made.ok) return error(made.error);
@@ -877,9 +952,8 @@ export function createApp(d: AppDeps) {
         const defaults = modelDefaults();
         // Each agent step's own model and effort, resolved once against the list known now (never waiting for it); a
         // reused step keeps what it ran with (step model spec §3.1).
-        const reusedIds = new Set(p.outcome.preview.steps.filter((s) => s.reused).map((s) => s.id));
         const source = msg.sourceRunId ? runStore.get(msg.sourceRunId) : undefined;
-        const stepModels = runStepModels(r.graph, { provider: provider.id, ...defaults }, knownModels(), reusedIds, source);
+        const stepModels = runStepModels(r.graph, { provider: provider.id, ...defaults }, knownModels(), skipped, source);
         let started: ReturnType<typeof runner.start>;
         try {
           started = runner.start({
@@ -887,6 +961,7 @@ export function createApp(d: AppDeps) {
             rendered: p.outcome.rendered,
             sourceRunId: msg.sourceRunId,
             fromNodeId: msg.fromNodeId,
+            ...(msg.mode && { mode: msg.mode }),
             provider: provider.id,
             ...defaults,
             stepModels,
@@ -942,9 +1017,15 @@ export function createApp(d: AppDeps) {
         client.send({ type: 'runReport', runId: msg.runId, markdown: r.markdown, suggestedName: r.suggestedName });
         return;
       }
-      case 'decide':
-        broker.decide(msg.approvalId, msg.decision === 'approve' ? { decision: 'approve' } : { decision: 'deny', note: msg.note });
+      case 'browserDone':
+        d.browser?.done(msg.waitId);
         return;
+      case 'decide': {
+        // Only a browser action has a site to allow.
+        const forSite = msg.scope !== undefined && broker.pending().some((r) => r.id === msg.approvalId && r.browserAction);
+        broker.decide(msg.approvalId, msg.decision === 'approve' ? { decision: 'approve', ...(forSite && { scope: msg.scope }) } : { decision: 'deny', note: msg.note });
+        return;
+      }
     }
   }
 

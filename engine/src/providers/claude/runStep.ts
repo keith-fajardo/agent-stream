@@ -5,11 +5,30 @@ import { attachedPrompt, CLAUDE_IMAGE_MAX_BYTES, PDF_READ_TOOL, readIfThere } fr
 import { READ_ONLY_TOOLS, STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import { modelOptions } from './models';
-import { blocksOf, graphServer, toolResultText, userMessage, type QueryFn, type UserBlock } from './sdk';
+import { BROWSER_SERVER, BROWSER_TOOL_PREFIX } from '../../browser/tools';
+import { blocksOf, browserServer, graphServer, toolResultText, userMessage, type QueryFn, type UserBlock } from './sdk';
 import { toSdkGate } from './sdkGate';
 
 /** The in-process MCP server that serves a step's graph tools: they are `mcp__run_graph__<name>` (STEP_GRAPH_TOOL_PREFIX). */
 export const RUN_GRAPH = 'run_graph';
+
+/** A configured MCP server under a name a step serves its own tools as (spec §3.4): its tools would share their self-approving names. */
+export const reservedServerName = (name: string) => `An MCP server in your settings is named ${name}, which Agent Stream reserves: rename it.`;
+
+/**
+ * Which of `ours` (the in-process servers this step registered) the session's init message lists as coming from
+ * somewhere else: an entry whose `source` isn't `sdk` (the host's own servers), or a second entry of that name. Claude
+ * reports every server it loaded (project .mcp.json, user and local config, plugins), so no settings file is read here.
+ * A CLI that predates `source` and lists the name once can't be told apart, and passes.
+ */
+export function reservedServerClash(init: unknown, ours: readonly string[]): string | undefined {
+  const servers = (init as { mcp_servers?: unknown }).mcp_servers;
+  if (!Array.isArray(servers)) return undefined;
+  return ours.find((name) => {
+    const same = (servers as { name?: unknown; source?: unknown }[]).filter((s) => s?.name === name);
+    return same.length > 1 || same.some((s) => s.source !== undefined && s.source !== 'sdk');
+  });
+}
 
 /** What the Claude provider shares with its steps and planner turns. */
 export type ClaudeRunDeps = {
@@ -96,7 +115,7 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
     if (settingsProblem) return { ok: false, output: '', error: settingsProblem };
     const chosen = sdkModelOptions(deps, ctx);
     // Its attachments (spec §6b.5): images go in the step's first message; PDFs and text files are read with the read tools.
-    // The API refuses an image block over 5 MB, so a larger image is listed with its path for the Read tool instead.
+    // The API refuses an image block whose base64 is over 5 MB (3.75 MB of image), so a larger image is listed with its path for the Read tool instead.
     const { text, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, { send: true, maxBytes: CLAUDE_IMAGE_MAX_BYTES, pdf: PDF_READ_TOOL });
     // The model and effort the step actually runs with: an effort the model doesn't offer is already dropped.
     ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: text, ...(chosen.model && { model: chosen.model }), ...(chosen.effort && { effort: chosen.effort as EffortLevel }) });
@@ -123,12 +142,22 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
       options.mcpServers = { [RUN_GRAPH]: graphServer(RUN_GRAPH, ctx.graphTools) };
       options.allowedTools = [...options.allowedTools!, `${STEP_GRAPH_TOOL_PREFIX}*`];
     }
+    if (ctx.browserTools?.length) {
+      // The browser tools (browser spec §3.4): reads run, actions ask the user with the browser card; the gate lets them through.
+      options.mcpServers = { ...options.mcpServers, [BROWSER_SERVER]: browserServer(ctx.browserTools, ctx.signal) };
+      options.allowedTools = [...options.allowedTools!, `${BROWSER_TOOL_PREFIX}*`];
+    }
     try {
       let sawInit = false;
       const blocks: UserBlock[] = [{ type: 'text', text }, ...images.map((i): UserBlock => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } }))];
       const prompt = images.length ? userMessage(blocks) : text;
       for await (const message of deps.queryFn({ prompt, options })) {
-        if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') sawInit = true;
+        if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') {
+          sawInit = true;
+          // Before any tool runs: a configured server named like one of ours would get our tools' free pass.
+          const clash = reservedServerClash(message, Object.keys(options.mcpServers ?? {}));
+          if (clash) return { ok: false, output: '', error: reservedServerName(clash) };
+        }
         // Fail closed: a result we cannot tie to a checked auth source is not trusted.
         if (message.type === 'result' && !sawInit) return { ok: false, output: '', error: UNVERIFIED_AUTH };
         const step = translateMessage(message, ctx.emit);

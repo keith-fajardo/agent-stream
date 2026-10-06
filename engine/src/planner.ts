@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { ChatEntry, ChatRole, ModelSelection, Op, OpRecord } from '@agent-stream/shared';
+import type { ChatEntry, ChatRole, ModelSelection, Op, OpRecord, RunMode } from '@agent-stream/shared';
 import { inlineTextFiles, turnFiles, type ChatAttachment } from './chatAttachments';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
@@ -11,6 +11,10 @@ import type { RunStore } from './runStore';
 import type { SessionStore } from './sessionStore';
 
 const SESSION_RESET_NOTE = ' (The previous planner session was reset; send your message again.)';
+
+/** The planner's instruction for the Browser setting (browser spec §2.3). The planner itself never browses (§2). */
+export const PLANNER_BROWSER_RULE =
+  "Switch the browser on (browser: true in add_node or update_node) only for an agent step that needs websites: searching the web, reading pages, or sites the user is logged in to. Such a step asks the user before every click or keystroke. You can't browse yourself.";
 
 export const PLANNER_APPEND = `You are the planner inside Agent Stream, a local tool where the user and you co-create a workflow graph that is then executed step by step.
 
@@ -30,6 +34,7 @@ How to work:
 - Test plans are often stateful sequences, for example create → update → delete; migrate → verify; deploy → smoke test; table absent → first run → new row → changed row.
 - Mark steps that only read, query or compare as read-only (access: read). That only lets them run alongside file-changing steps in the same workspace; edges still decide their order.
 - Each agent step can have its own model and effort (add_node/update_node: model "<provider>/<id>", effort). Leave them on Default unless the user asks, or a step is clearly simple (checks, summaries — a small model or low effort) or clearly hard. Use only models list_models returns for the current provider.
+- ${PLANNER_BROWSER_RULE}
 - To compare models, add one step per model/effort with the same prompt; let them run in parallel (read-only, or each in its own workspace when they write), then a read-only compare step that reports quality, time and tokens from their outputs.
 - If the project doesn't contain what the user names (for example no such model yet), still build the full graph of steps that would run: add a first step that locates or creates it, and say in one chat line what is missing. Something missing never turns the plan into steps that only write documents.
 - The goal and the instructions (set_instructions) are given to every agent step. Put shared guidance there (targets, conventions, what never to touch) instead of repeating it in each step.
@@ -116,7 +121,7 @@ export type PlannerDeps = {
   modelDefaults?: () => ModelSelection;
   /** Files the planner is denied reading (the variable values files). */
   privateFiles: () => string[];
-  requestRun: (graphId: string, fromNodeId?: string) => string | null;
+  requestRun: (graphId: string, fromNodeId?: string, mode?: RunMode) => string | null;
   /** Where the folder's graphs work and who holds its write lease (checkout_info, check_tickets). */
   checkout: CheckoutSource;
   clock?: Clock;
@@ -222,7 +227,7 @@ export class Planner extends EventEmitter {
         runStore: this.d.runStore,
         graphId,
         source: { kind: 'planner', sessionId },
-        requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
+        requestRun: (fromNodeId, mode) => this.d.requestRun(graphId, fromNodeId, mode),
         checkout: this.d.checkout,
         models: async () => ({ provider: provider.id, models: (await provider.listModels?.()) ?? [] }),
       });

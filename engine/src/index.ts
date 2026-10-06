@@ -15,7 +15,7 @@ export type { NodeContext, NodeOutcome } from './executors';
 export { createRunShell, type RunShell, type RunShellResult } from './shell';
 export { ChatModelError, type ChatMessage, type ChatModel, type ChatModelErrorCode, type ChatPart, type ImagePart, type ToolSpec } from './agentLoop/chatModel';
 export { notIncluded, promptWithNotes } from './chatAttachments';
-export { attachedPrompt, ATTACHED_IMAGE, CLAUDE_IMAGE_MAX_BYTES, IMAGE_NOT_SHOWN, inlineBudget, OVER_BUDGET_IN_CHAT, PDF_MAY_NOT_READ, readIfThere, readImages, TEXT_OVER_2_MB, withAttachedFiles, type ImageData, type StepAttachment } from './attachedFiles';
+export { attachedPrompt, ATTACHED_IMAGE, CLAUDE_IMAGE_MAX_BASE64, CLAUDE_IMAGE_MAX_BYTES, IMAGE_NOT_SHOWN, inlineBudget, OVER_BUDGET_IN_CHAT, PDF_MAY_NOT_READ, readIfThere, readImages, TEXT_OVER_2_MB, withAttachedFiles, type ImageData, type StepAttachment } from './attachedFiles';
 export { builtinTools, MAX_READ_BYTES, type LoopTool, type ToolOutput } from './agentLoop/tools';
 export { toLoopTools } from './agentLoop/graphLoopTools';
 export { lastAssistantText, runAgentLoop, type LoopOptions, type LoopResult } from './agentLoop/loop';
@@ -39,3 +39,7 @@ export {
 } from './worktrees';
 export { CHECK_COMMAND, starterGraph, writeStarterGraph } from './ticketGraph';
 export { AB_MEASUREMENT_GUIDANCE, abTestGraph, abVariableName, MAX_VARIANTS, MIN_VARIANTS, variantProblem } from './abTestGraph';
+export { browserDir } from './browser/launcher';
+export { BrowserService, createBrowserService, type BrowserServiceDeps, type BrowserSettings, type BrowserWait, type WaitEnd, type BrowserState, type OpenResult } from './browser/service';
+export { browserLoopTools } from './browser/loopTools';
+export type { BrowserTool, BrowserReply } from './browser/tools';

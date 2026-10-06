@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { PROVIDER_NAMES, fmtDuration, statusLabel, waitingText } from '@agent-stream/shared';
+import { PROVIDER_NAMES, fmtDuration, staleNote, statusLabel, waitingText } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { logKey } from '../state';
@@ -113,7 +113,8 @@ export function LogsPanel() {
                 </button>
               </div>
             )}
-            {events ? <LogView events={events} /> : <p className="muted">Loading…</p>}
+            {state.stale && <div className="stale-note">Stale: {staleNote(state.stale, node.id)}</div>}
+            {events ? <LogView events={events} live={state.status === 'running' || state.status === 'waiting_approval'} /> : <p className="muted">Loading…</p>}
           </>
         )}
       </div>

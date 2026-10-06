@@ -35,6 +35,7 @@ const graphNodeSchema = z.object({
   model: stepModel.optional(),
   effort: effort.optional(),
   attachments: z.array(z.string()).optional(),
+  browser: z.boolean().optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -103,6 +104,7 @@ const newNode = z.object({
   model: stepModel.optional(),
   effort: effort.optional(),
   attachments: attachmentNames.optional(),
+  browser: z.boolean().optional(),
   position: position.optional(),
 });
 
@@ -119,6 +121,8 @@ const nodePatch = z.object({
   model: stepModel.nullable().optional(),
   effort: effort.nullable().optional(),
   attachments: attachmentNames.optional(),
+  // false turns the browser off.
+  browser: z.boolean().optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
@@ -141,6 +145,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('revertChange'), target: changeTarget }),
 ]);
 
+const runMode = z.enum(['resume', 'from', 'only']);
 const refineNodeIds = z.array(z.string()).min(1).max(50);
 /** A graph's Markdown text from the editor: no larger than a file Import accepts. */
 const markdownText = z.string().max(MAX_IMPORT_CHARS);
@@ -162,15 +167,16 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('stopPlanner'), graphId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal('setPlannerModel'), graphId: z.string(), sessionId: z.string(), model: z.string().min(1).max(200).optional(), effort: effort.optional() }),
-  z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), sequential: z.boolean().optional() }),
+  z.object({ type: z.literal('startRun'), graphId: z.string(), reviewed: z.string(), mode: runMode.optional(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), sequential: z.boolean().optional() }),
   z.object({ type: z.literal('inspectCheckout') }),
-  z.object({ type: z.literal('previewRun'), graphId: z.string(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),
+  z.object({ type: z.literal('previewRun'), graphId: z.string(), mode: runMode.optional(), fromNodeId: z.string().optional(), sourceRunId: z.string().optional(), requestId: z.string().max(64).optional() }),
   z.object({ type: z.literal('setVariableValue'), graphId: z.string(), name: z.string(), value: z.string().max(MAX_VARIABLE_VALUE_CHARS) }),
   z.object({ type: z.literal('stopRun'), runId: z.string() }),
   z.object({ type: z.literal('selectRun'), runId: z.string() }),
   z.object({ type: z.literal('getNodeLogs'), runId: z.string(), nodeId: z.string() }),
   z.object({ type: z.literal('exportRunReport'), graphId: z.string(), runId: z.string() }),
-  z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional() }),
+  z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional(), scope: z.literal('site').optional() }),
+  z.object({ type: z.literal('browserDone'), waitId: z.string().max(100) }),
 ]);
 
 const hostCommand = z.enum(['newGraph', 'openGraph', 'importGraph', 'exportGraph', 'renameGraph', 'duplicateGraph', 'deleteGraph', 'showSidebar', 'focusChat', 'openGraphMarkdown']);

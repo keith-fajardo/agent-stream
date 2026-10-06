@@ -26,6 +26,8 @@ function patchOf(node: GraphNode, step: DocStep): NodePatch {
   if (step.kind === 'agent' && modelText(node.model) !== modelText(step.model)) patch.model = step.model ?? null;
   if (step.kind === 'agent' && (node.effort ?? '') !== (step.effort ?? '')) patch.effort = step.effort ?? null;
   if (step.kind === 'agent' && JSON.stringify(node.attachments ?? []) !== JSON.stringify(step.attachments ?? [])) patch.attachments = step.attachments ?? [];
+  // Removing the line turns the browser off.
+  if (step.kind === 'agent' && (node.browser === true) !== (step.browser === true)) patch.browser = step.browser === true;
   return patch;
 }
 

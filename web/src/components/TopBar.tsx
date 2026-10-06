@@ -1,6 +1,7 @@
 import { PROVIDER_NAMES, checkoutChip, checkoutTooltip, modelLine, ranIn, statusLabel, waitingText } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
+import { RETRY_LABEL, retryTarget, retryTitle } from '../retry';
 import { useStore } from '../store';
 import { MenuBar } from './MenuBar';
 
@@ -12,6 +13,7 @@ export function TopBar() {
   const graphs = useStore((s) => s.graphs);
   const checkout = useStore((s) => s.checkout);
   const running = run?.status === 'running';
+  const retry = useStore((s) => retryTarget(s));
   const graphName = (id: string) => graphs.find((g) => g.id === id)?.name ?? id;
   return (
     <header className="topbar">
@@ -56,9 +58,16 @@ export function TopBar() {
             ■ Stop
           </button>
         ) : (
-          <button className="primary" disabled={!status?.ok} onClick={actions.run}>
-            ▶ Run
-          </button>
+          <>
+            {retry && (
+              <button disabled={!status?.ok} title={retryTitle(retry)} onClick={actions.retryFromStop}>
+                {RETRY_LABEL}
+              </button>
+            )}
+            <button className="primary" disabled={!status?.ok} onClick={actions.run}>
+              ▶ Run
+            </button>
+          </>
         ))}
     </header>
   );

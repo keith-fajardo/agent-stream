@@ -1,4 +1,4 @@
-import { fenceFor, fmtDuration, longestRun, modelLine, PROVIDER_NAMES, statusLabel, stepAttachmentNames, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { fenceFor, fmtDuration, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, statusLabel, stepAttachmentNames, staleNote, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -136,6 +136,15 @@ function plan(run: RunMeta, order: GraphNode[]): string[] {
   return ['## Plan', '', ...lines];
 }
 
+/** Web addresses in text: up to whitespace, quotes or brackets, without the punctuation that ends a sentence. */
+const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>`]*[^\s"'<>`.,;:!?)\]]/gi;
+
+/**
+ * A tool's result as the report shows it: every address as the step log and Pages visited show it (loggedUrl), without a
+ * username, password or `#…` part (OAuth tokens live there). The report is a document people share.
+ */
+const excerpt = (content: string): string => cut(content.replace(URL_IN_TEXT, (url) => loggedUrl(url)), MAX_RESULT).text;
+
 function toolCalls(events: NodeEvent[]): string[] {
   const results = new Map<string, Extract<NodeEvent, { type: 'tool_result' }>>();
   for (const e of events) if (e.type === 'tool_result') results.set(e.toolUseId, e);
@@ -145,7 +154,7 @@ function toolCalls(events: NodeEvent[]): string[] {
     const target = toolTarget(e.input);
     const result = results.get(e.toolUseId);
     lines.push(`- ${inlineStart(e.name)}${target ? ` ${code(target)}` : ''}${result?.isError ? ' (error)' : ''}${result ? '' : ' (no result)'}`);
-    if (result && result.content.trim()) lines.push('', fenced(cut(result.content, MAX_RESULT).text, '  '), '');
+    if (result && result.content.trim()) lines.push('', fenced(excerpt(result.content), '  '), '');
   }
   while (lines.at(-1) === '') lines.pop();
   return lines.length ? ['**Tool calls**', '', ...lines] : [];
@@ -171,6 +180,8 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   const duration = durationOf(state);
   const out: string[] = [`### ${n.id} · ${inline(n.title)} — ${statusLabel(state.status)}${duration ? `, ${duration}` : ''}`];
   const block = (lines: string[]) => lines.length && out.push('', ...lines);
+  // A kept result the run knows may no longer fit (retry options): said before the step's own details.
+  if (state.stale) block([`**Stale:** ${inline(staleNote(state.stale, n.id))}`]);
   // The model and effort the step ran with, resolved when the run started (step model spec §3.3); runs from before have none.
   const use = n.kind === 'agent' ? run.stepModels?.[n.id] : undefined;
   if (use) block([inline(modelLine({ model: use.model, effort: use.effort, provider: run.provider })), ...(use.note?.trim() ? ['', `_Note:_ ${inline(use.note)}`] : [])]);
@@ -191,6 +202,10 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   const events = step?.events ?? [];
   block(toolCalls(events));
   block(approvals(events, state.status));
+  // A browser step's pages, from run.json (spec §4.4). A URL is page-controlled text: any whitespace or line break in it
+  // becomes a space so it stays on its own list item, and it goes in a code span so nothing in it is markup.
+  const pages = state.browserPages ?? [];
+  if (pages.length) block([`**${PAGES_VISITED}**`, '', ...pages.map((url) => `- ${code(url.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim())}`)]);
   const output = step?.output ?? '';
   if (output.trim()) {
     const shown = cut(output, MAX_OUTPUT);

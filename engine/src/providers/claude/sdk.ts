@@ -1,4 +1,5 @@
 import { createSdkMcpServer, query, tool, type ModelInfo, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { BROWSER_SERVER, type BrowserTool } from '../../browser/tools';
 import type { GraphTool } from '../types';
 
 /** The slice of the SDK's `query` we use; tests substitute a fake. A prompt with images is a stream of one user message. */
@@ -57,6 +58,27 @@ export function graphServer(name: string, tools: GraphTool[]) {
       tool(t.name, t.description, t.schema, async (args) => {
         const r = await t.run(args);
         return r.isError ? { content: [{ type: 'text' as const, text: r.text }], isError: true } : { content: [{ type: 'text' as const, text: r.text }] };
+      }),
+    ),
+  });
+}
+
+/**
+ * The browser tools, served to Claude Code as the in-process MCP server `agent_stream_browser` (their names are
+ * mcp__agent_stream_browser__*, browser spec §3.4). A screenshot is an MCP image block. `signal` is the step's: Stop ends
+ * a wait and cancels a card. So does Claude cancelling the one call (its MCP request's signal), so a card the model
+ * no longer waits for can't act later.
+ */
+export function browserServer(tools: readonly BrowserTool[], signal: AbortSignal) {
+  return createSdkMcpServer({
+    name: BROWSER_SERVER,
+    version: '1.0.0',
+    tools: tools.map((t) =>
+      tool(t.name, t.description, t.schema, async (args, extra) => {
+        const call = (extra as { signal?: AbortSignal } | undefined)?.signal;
+        const r = await t.run(args, call ? AbortSignal.any([signal, call]) : signal);
+        const content = [{ type: 'text' as const, text: r.text }, ...(r.image ? [{ type: 'image' as const, data: r.image.data, mimeType: r.image.mediaType }] : [])];
+        return r.isError ? { content, isError: true } : { content };
       }),
     ),
   });

@@ -128,7 +128,7 @@ export function withStepModelLines(steps: readonly PreviewStep[], graph: Graph, 
   const base = resolveStepModel({}, run, known);
   return steps.map((s) => {
     const n = graph.nodes.find((x) => x.id === s.id);
-    if (!n || n.kind !== 'agent' || s.reused || (!n.model && !n.effort)) return s;
+    if (!n || n.kind !== 'agent' || s.reused || s.notRun || (!n.model && !n.effort)) return s;
     const use = resolveStepModel(n, run, known);
     const differs = use.model !== base.model || use.effort !== base.effort;
     const label = use.model ? findModel(listed(known), use.model)?.label : undefined;

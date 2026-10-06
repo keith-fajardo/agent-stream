@@ -31,10 +31,13 @@ for (const name of names) {
   if (/\.(node|exe|dll|dylib|so)$/i.test(name)) problems.push(`contains a native file: ${name}`);
   if (/claude-agent-sdk-(darwin|linux|win32)/.test(name)) problems.push(`contains a per-platform Claude Code binary: ${name}`);
 }
-for (const required of ['extension/package.json', 'extension/dist/extension.cjs', 'extension/dist/webview/assets/index.js', 'extension/dist/webview/assets/index.css', 'extension/media/icon.svg', 'extension/LICENSE.txt']) {
+const vendor = 'extension/dist/vendor/playwright-core';
+for (const required of ['extension/package.json', 'extension/dist/extension.cjs', 'extension/dist/webview/assets/index.js', 'extension/dist/webview/assets/index.css', 'extension/media/icon.svg', 'extension/LICENSE.txt', `${vendor}/index.js`, `${vendor}/index.mjs`, `${vendor}/browsers.json`, `${vendor}/lib/coreBundle.js`, `${vendor}/LICENSE`]) {
   if (!names.includes(required)) problems.push(`missing ${required}`);
 }
 if (!names.includes('extension.vsixmanifest')) problems.push('missing extension.vsixmanifest');
+// playwright-core ships as JavaScript only: never a browser, an install script, or its trace viewer.
+for (const name of names) if (name.startsWith(`${vendor}/`) && /\/(bin|lib\/vite|lib\/tools)\//.test(name.slice(vendor.length))) problems.push(`contains a playwright-core file it doesn't need: ${name}`);
 if (problems.length) {
   console.error(`The .vsix is not a universal package:\n- ${problems.join('\n- ')}`);
   process.exit(1);

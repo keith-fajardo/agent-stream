@@ -47,13 +47,15 @@ export const missingAttachmentLine = (graphId: string, name: string) => `Attachm
 export type FileNotes = { image?: string; pdf?: string; text?: string };
 export const ATTACHED_IMAGE = 'image, attached to this message';
 export const IMAGE_NOT_SHOWN = "This image couldn't be shown to the model.";
-export const IMAGE_OVER_5_MB = 'image over 5 MB: read it with the Read tool';
+export const IMAGE_TOO_LARGE = 'image over 3.75 MB: read it with the Read tool';
 export const PDF_READ_TOOL = 'PDF: read it with the Read tool';
 export const PDF_MAY_NOT_READ = 'PDF: the model may not be able to read PDFs';
 /** The agent loop's Read takes files up to 2 MB, while a text attachment may be 5 MB: Grep searches one up to 5 MB. */
 export const TEXT_OVER_2_MB = 'larger than 2 MB: search it with Grep';
-/** The Claude API refuses an image block over 5 MB (raw bytes), while attachments allow 10 MB. */
-export const CLAUDE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** The Claude API refuses an image block whose base64 is over 5 MB (it counts the encoded size), while attachments allow 10 MB. */
+export const CLAUDE_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
+/** The largest image whose base64 fits CLAUDE_IMAGE_MAX_BASE64: 3.75 MB. A size check against it is the base64 check, exactly. */
+export const CLAUDE_IMAGE_MAX_BYTES = (CLAUDE_IMAGE_MAX_BASE64 / 4) * 3;
 /**
  * What one request carries inline at most: 20 MB of raw bytes (images, and PDFs sent as documents) and 20 images, filled
  * in order. Keeps a request under the API's size cap, and under the count past which it tightens images' dimensions.
@@ -124,7 +126,7 @@ export function attachedPrompt(
   const images: ImageData[] = [];
   const lines: string[] = [];
   const budget = inlineBudget(o.budget);
-  const notSent = o.notSent ?? { tooBig: IMAGE_OVER_5_MB, overBudget: IMAGE_OVER_BUDGET };
+  const notSent = o.notSent ?? { tooBig: IMAGE_TOO_LARGE, overBudget: IMAGE_OVER_BUDGET };
   for (const f of (files ?? []).filter((x) => !x.missing)) {
     if (f.kind === 'text') {
       lines.push(line(f, o.bigText && (sizeOf(f.path) ?? 0) > o.bigText.maxBytes ? o.bigText.note : undefined));

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { estimateTokens, IMAGE_TOKENS } from '../src/agentLoop/compact';
-import { attachedPrompt, ATTACHED_IMAGE, IMAGE_NOT_SHOWN, IMAGE_OVER_5_MB, IMAGE_OVER_BUDGET, INLINE_MAX_BYTES, INLINE_MAX_IMAGES, inlineBudget, PDF_READ_TOOL, readIfThere, readImages, storeReader, withAttachedFiles, type StepAttachment } from '../src/attachedFiles';
+import { attachedPrompt, ATTACHED_IMAGE, CLAUDE_IMAGE_MAX_BASE64, CLAUDE_IMAGE_MAX_BYTES, IMAGE_NOT_SHOWN, IMAGE_TOO_LARGE, IMAGE_OVER_BUDGET, INLINE_MAX_BYTES, INLINE_MAX_IMAGES, inlineBudget, PDF_READ_TOOL, readIfThere, readImages, storeReader, withAttachedFiles, type StepAttachment } from '../src/attachedFiles';
 import { AttachmentStore } from '../src/attachmentStore';
 import { tmpProject } from './helpers';
 
@@ -58,9 +58,9 @@ describe('what the prompt says about each image is decided from what was read (f
   it('lists an image over the limit with its path and the Read tool note, and does not send it', () => {
     const r = attachedPrompt('Do it.', [sized('big.png', 11), file('mockup.png', 'image')], readIfThere, { send: true, maxBytes: 10 });
     expect(r.images.map((i) => i.name)).toEqual(['mockup.png']);
-    expect(r.text).toContain(`- .agent-stream/attachments/g/big.png (${IMAGE_OVER_5_MB})`);
+    expect(r.text).toContain(`- .agent-stream/attachments/g/big.png (${IMAGE_TOO_LARGE})`);
     expect(r.text).toContain('- .agent-stream/attachments/g/mockup.png (image, attached to this message)');
-    expect(IMAGE_OVER_5_MB).toBe('image over 5 MB: read it with the Read tool');
+    expect(IMAGE_TOO_LARGE).toBe('image over 3.75 MB: read it with the Read tool');
     // Exactly at the limit still goes.
     expect(attachedPrompt('x', [sized('edge.png', 10)], readIfThere, { send: true, maxBytes: 10 }).images).toHaveLength(1);
   });
@@ -117,12 +117,19 @@ describe('the inline budget per request (ruling on I-2)', () => {
     expect(r.text).toContain(`- .agent-stream/attachments/g/tiny.png (${ATTACHED_IMAGE})`);
   });
 
+  it("Claude's image limit is on the base64 it is sent as: 5 MB of base64, 3.75 MB of image", () => {
+    expect(CLAUDE_IMAGE_MAX_BASE64).toBe(5 * 1024 * 1024);
+    expect(CLAUDE_IMAGE_MAX_BYTES).toBe(3.75 * 1024 * 1024);
+    expect(Buffer.alloc(CLAUDE_IMAGE_MAX_BYTES).toString('base64')).toHaveLength(CLAUDE_IMAGE_MAX_BASE64);
+    expect(Buffer.alloc(CLAUDE_IMAGE_MAX_BYTES + 1).toString('base64').length).toBeGreaterThan(CLAUDE_IMAGE_MAX_BASE64);
+  });
+
   it('sends at most 20 images; an image over 5 MB is not sent and counts toward nothing', () => {
     const list = Array.from({ length: 21 }, (_, i) => sized(`i${i}.png`, 10));
     const r = attachedPrompt('Do it.', [sized('huge.png', 5 * MB + 1), ...list], readIfThere, { send: true, maxBytes: 5 * MB });
     expect(r.images).toHaveLength(20);
     expect(r.images.map((i) => i.name)).not.toContain('i20.png');
-    expect(r.text).toContain(`huge.png (${IMAGE_OVER_5_MB})`);
+    expect(r.text).toContain(`huge.png (${IMAGE_TOO_LARGE})`);
     expect(r.text).toContain(`i19.png (${ATTACHED_IMAGE})`);
     expect(r.text).toContain(`i20.png (${IMAGE_OVER_BUDGET})`);
   });

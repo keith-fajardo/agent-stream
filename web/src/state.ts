@@ -17,6 +17,7 @@ import type {
   ProviderId,
   ProviderStatus,
   RunMeta,
+  RunMode,
   RunPreview,
   RunSummary,
 } from '@agent-stream/shared';
@@ -26,8 +27,8 @@ export type Tab = 'node' | 'graph' | 'changes';
 /** Size and collapsed state of the side panel and the logs panel; `logsHeight` null is the stylesheet default. */
 export type PanelLayout = { sideWidth: number; sideCollapsed: boolean; logsHeight: number | null; logsCollapsed: boolean };
 /** `requestedBy: 'planner'`: the planner's request_run asked for this run. */
-export type ConfirmRequest = { fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' };
-export type StartRequest = { graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string };
+export type ConfirmRequest = { mode?: RunMode; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' };
+export type StartRequest = { graphId: string; reviewed: string; mode?: RunMode; fromNodeId?: string; sourceRunId?: string };
 /** A start the engine refused because another run is changing files in this checkout (spec §7). */
 export type Blocked = { message: string; canSetUpTickets: boolean; start?: StartRequest };
 /** What the canvas area shows: the graph, or its Markdown file in an editor (the Graph | Markdown toggle). */
@@ -109,7 +110,7 @@ export type State = {
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
-  return { fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId, ...(msg.requestedBy && { requestedBy: msg.requestedBy }) };
+  return { ...(msg.mode && { mode: msg.mode }), fromNodeId: msg.fromNodeId, sourceRunId: msg.sourceRunId, ...(msg.requestedBy && { requestedBy: msg.requestedBy }) };
 }
 
 const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };

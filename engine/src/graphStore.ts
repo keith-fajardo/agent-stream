@@ -94,14 +94,15 @@ function inOrderOf(graph: Graph, order: Graph): Graph {
 
 /** `node` with `source`'s content fields (absent ones removed), keeping its id, position and authorship. */
 function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
-  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, attachments: _f, ...rest } = node;
-  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort, attachments: source.attachments };
+  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, attachments: _f, browser: _b, ...rest } = node;
+  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort, attachments: source.attachments, browser: source.browser };
   return { ...rest, title: source.title, kind: source.kind, ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)) };
 }
 
 /**
  * Single source of truth for graphs. Every change goes through `apply`. A graph is two files (Markdown graph files spec
  * §5.1): `<id>.md`, its meaning, and `<id>.meta.json`, positions and bookkeeping.
+ * Emits 'fileWarnings' (id, GraphFileError[]) for lines a read dropped (a browser line on a command step).
  */
 export class GraphStore extends EventEmitter {
   private cache = new Map<string, Cached>();
@@ -223,6 +224,7 @@ export class GraphStore extends EventEmitter {
       this.setErrors(id, parsed.errors);
       return { ok: false, error };
     }
+    if (parsed.warnings?.length) this.emit('fileWarnings', id, parsed.warnings);
     const graph = canonicalGraph(graphFromDoc(parsed.doc, parseGraphMeta(metaText), id, this.clock()));
     this.cache.set(id, { graph, text, metaText, md, meta });
     this.failed.delete(id);
@@ -270,6 +272,7 @@ export class GraphStore extends EventEmitter {
     }
     const parsed = parseGraphMarkdown(text);
     if (!parsed.ok) return this.refuseFile(id, cached, md, meta, metaText, parsed.errors);
+    if (parsed.warnings?.length) this.emit('fileWarnings', id, parsed.warnings);
     const at = this.clock();
     // A branch switch changes both files: the side file's bookkeeping first, then the edit on top of it.
     const current = metaText === cached.metaText ? cached.graph : withMeta(cached.graph, parseGraphMeta(metaText), at);

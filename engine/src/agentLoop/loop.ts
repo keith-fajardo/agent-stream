@@ -1,5 +1,7 @@
+import { EARLIER_SCREENSHOT_REMOVED, NEWEST_SCREENSHOT_NOT_SENT } from '@agent-stream/shared';
+import type { inlineBudget } from '../attachedFiles';
 import type { ToolGate } from '../providers/toolGate';
-import type { ChatMessage, ChatModel, ChatPart } from './chatModel';
+import type { ChatMessage, ChatModel, ChatPart, ImagePart } from './chatModel';
 import type { LoopTool, ToolOutput } from './tools';
 import { compactIfNeeded } from './compact';
 
@@ -17,6 +19,11 @@ export type LoopOptions = {
   signal: AbortSignal;
   /** The error when the cap is reached: the provider names its own setting (default: `Stopped after <n> model requests.`). */
   capMessage?: string;
+  /**
+   * Tools' images (browser screenshots) kept in the conversation: the `keep` newest that fit a request's `budget` after
+   * the attached images; older ones become a line saying so. Unset: every image is kept.
+   */
+  toolImages?: { keep: number; budget: () => ReturnType<typeof inlineBudget> };
   onText(text: string): void;
   onToolCall(callId: string, name: string, input: unknown): void;
   onToolResult(callId: string, text: string, isError: boolean): void;
@@ -48,6 +55,40 @@ export function lastAssistantText(messages: ChatMessage[]): string {
     if (text.trim()) return text;
   }
   return '';
+}
+
+const imageBytes = (image: ImagePart) => Buffer.byteLength(image.data, 'base64');
+/** A tool's image is one in a message of tool results: the loop puts them there; attached images go with the prompt's text. */
+const holdsToolResults = (m: ChatMessage) => m.role === 'user' && m.content.some((c) => c.type === 'toolResult');
+
+/**
+ * The conversation with only the `keep` newest tool images that fit the budget, which the attached images fill first
+ * (they are always sent). Each other tool image becomes EARLIER_SCREENSHOT_REMOVED, except the newest, which says it wasn't
+ * sent (NEWEST_SCREENSHOT_NOT_SENT); unchanged messages are kept as they are.
+ */
+export function limitToolImages(messages: ChatMessage[], o: NonNullable<LoopOptions['toolImages']>): ChatMessage[] {
+  const budget = o.budget();
+  for (const m of messages) {
+    if (m.role !== 'user' || holdsToolResults(m)) continue;
+    for (const c of m.content) if (c.type === 'image') budget.take(imageBytes(c), true);
+  }
+  let kept = 0;
+  let newest = true;
+  const out = [...messages];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (m.role !== 'user' || !holdsToolResults(m) || !m.content.some((c) => c.type === 'image')) continue;
+    const content = [...m.content];
+    for (let j = content.length - 1; j >= 0; j--) {
+      const c = content[j];
+      if (c.type !== 'image') continue;
+      if (kept < o.keep && budget.take(imageBytes(c), true)) kept++;
+      else content[j] = { type: 'text', text: newest ? NEWEST_SCREENSHOT_NOT_SENT : EARLIER_SCREENSHOT_REMOVED };
+      newest = false;
+    }
+    if (content.some((c, j) => c !== m.content[j])) out[i] = { role: 'user', content };
+  }
+  return out;
 }
 
 /** Every call of a reply gets a non-empty callId unique within that reply: a missing, empty or repeated one gets `call_<n>`. */
@@ -83,8 +124,8 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
   let messages = [...o.messages];
   let requests = 0;
   let generated = 0;
-  /** The tool calls of the reply being answered, and the results so far; null between rounds. */
-  let round: { calls: ToolCall[]; results: ToolResult[] } | null = null;
+  /** The tool calls of the reply being answered, the results so far and the images they returned; null between rounds. */
+  let round: { calls: ToolCall[]; results: ToolResult[]; images: ImagePart[] } | null = null;
 
   async function runCall(call: ToolCall): Promise<ToolOutput> {
     const tool = byName.get(call.name);
@@ -107,13 +148,15 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
     const cancelled = round.calls
       .filter((c) => !answered.has(c.callId))
       .map((c): ToolResult => ({ type: 'toolResult', callId: c.callId, text: 'Cancelled.', isError: true }));
-    messages = [...messages, { role: 'user', content: [...round.results, ...cancelled] }];
+    // A tool's images (a browser screenshot) follow the results, in the same user message.
+    messages = [...messages, { role: 'user', content: [...round.results, ...cancelled, ...round.images] }];
     round = null;
   }
 
   try {
     for (;;) {
       o.signal.throwIfAborted();
+      if (o.toolImages) messages = limitToolImages(messages, o.toolImages);
       // A summary only when it and the real request both fit under the (normalised) cap (ruling R5). It is counted as
       // it is sent, so one that Stop interrupts still counts.
       const compacted = await compactIfNeeded({
@@ -136,7 +179,7 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
       const calls = content.filter((p): p is ToolCall => p.type === 'toolCall');
       if (calls.length === 0 && textOf(content) === '') return { ok: true, text: '', requests, messages };
       messages = [...messages, { role: 'assistant', content }];
-      if (calls.length > 0) round = { calls, results: [] };
+      if (calls.length > 0) round = { calls, results: [], images: [] };
       for (const p of content) {
         if (p.type === 'toolCall') o.onToolCall(p.callId, p.name, p.input);
         else if (p.text.trim()) o.onText(p.text);
@@ -146,6 +189,7 @@ export async function runAgentLoop(o: LoopOptions): Promise<LoopResult> {
         const r = await runCall(call);
         // A tool that returned did its work, even if Stop landed meanwhile: its real result is kept.
         round.results.push(r.isError ? { type: 'toolResult', callId: call.callId, text: r.text, isError: true } : { type: 'toolResult', callId: call.callId, text: r.text });
+        if (r.images?.length) round.images.push(...r.images);
         o.signal.throwIfAborted();
         o.onToolResult(call.callId, r.text, r.isError === true);
       }

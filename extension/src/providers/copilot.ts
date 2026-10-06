@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import {
   attachedPrompt,
+  browserLoopTools,
   builtinTools,
+  CLAUDE_IMAGE_MAX_BASE64,
   CLAUDE_IMAGE_MAX_BYTES,
   inlineBudget,
   OVER_BUDGET_IN_CHAT,
@@ -41,12 +43,15 @@ export const copilotCapMessage = (n: number, setting: 'maxRequestsPerStep' | 'ma
     : 'Raise the setting to let steps run longer.');
 export const requestLine = (n: number, cap: number) => `Copilot requests: ${n} of ${cap}`;
 /**
- * Copilot sends an image up to 5 MB (Claude's limit, since the picked model may be a Claude model) within the request's
- * inline budget. The agent loop's Read can't show an image, so one that isn't sent is said to be unseen.
+ * Copilot sends an image up to 3.75 MB, which is 5 MB as base64 (Claude's limit, since the picked model may be a Claude
+ * model), within the request's inline budget. The agent loop's Read can't show an image, so one that isn't sent is said to
+ * be unseen.
  */
 const MAX_IMAGE_BYTES = CLAUDE_IMAGE_MAX_BYTES;
+/** How many of a step's browser screenshots stay in its conversation as images. */
+export const SCREENSHOTS_KEPT = 3;
 export const COPILOT_IMAGE_NOT_SENT = {
-  tooBig: "image over 5 MB: it couldn't be shown to the model",
+  tooBig: "image over 3.75 MB: it couldn't be shown to the model",
   overBudget: "image not sent (too many large images): it couldn't be shown to the model",
 };
 
@@ -233,11 +238,15 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
         tools: [
           ...builtinTools({ cwd: ctx.cwd, runShell: d.runShell, readOnly: !isWriteCapable(ctx.node) }),
           ...toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX),
+          // The browser tools (browser spec §3.4): a screenshot goes only to a model that takes images.
+          ...browserLoopTools(ctx.browserTools ?? [], { images: takesImages(picked.model) }),
         ],
         gate,
         maxRequests: cap,
         signal: ctx.signal,
         capMessage: copilotCapMessage(cap, 'maxRequestsPerStep'),
+        // Browser screenshots: the newest few, within the same inline budget as attachments.
+        toolImages: { keep: SCREENSHOTS_KEPT, budget: () => inlineBudget() },
         onText: (text) => ctx.emit({ type: 'text', text }),
         onToolCall: (callId, name, input) => ctx.emit({ type: 'tool_call', toolUseId: callId, name, input }),
         onToolResult: (callId, content, isError) => ctx.emit({ type: 'tool_result', toolUseId: callId, content, isError }),
@@ -257,7 +266,7 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       }
       const picked = await pick(turn.model);
       if ('error' in picked) return { ok: false, error: picked.error };
-      // A chat message's images go to a model that takes them, up to 5 MB each and within the request's inline budget (in
+      // A chat message's images go to a model that takes them, up to 5 MB of base64 (3.75 MB) each and within the request's inline budget (in
       // message order); PDFs can't be sent here (step model spec §6b.5).
       const takes = takesImages(picked.model);
       const budget = inlineBudget();
@@ -267,7 +276,7 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
         const size = Buffer.byteLength(f.data, 'base64');
         if (f.kind === 'pdf') notes.push(notIncluded(f.name, "GitHub Copilot can't read PDFs in the chat"));
         else if (!takes) notes.push(notIncluded(f.name, `${picked.model.name} doesn't take images`));
-        else if (size > MAX_IMAGE_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (images up to 5 MB are sent)'));
+        else if (f.data.length > CLAUDE_IMAGE_MAX_BASE64) notes.push(notIncluded(f.name, 'it is too large to send (images up to 3.75 MB are sent)'));
         else if (!budget.take(size, true)) notes.push(notIncluded(f.name, OVER_BUDGET_IN_CHAT));
         else images.push(f);
       }

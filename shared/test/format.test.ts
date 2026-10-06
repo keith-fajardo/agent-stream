@@ -60,4 +60,15 @@ describe('approval text', () => {
     expect(approvalSentence(a)).toBe("n2 wants to change n4's command");
     expect(approvalSummary(a.toolName, a.input, a.graphChange)).toBe("n2 wants to change n4's command");
   });
+
+  it('names a browser action by what, which element and which site', () => {
+    const browserAction = { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs', element: 'button "Easy Apply"' };
+    expect(approvalSummary('browser_click', { ref: 'e3' }, undefined, browserAction)).toBe('Browser: click button "Easy Apply" on jobs.example');
+    const a = { id: 'a', runId: 'r', graphId: 'g', nodeId: 'n3', nodeTitle: 'Research', toolName: 'browser_press', input: { key: 'Enter' }, createdAt: 't', browserAction: { ...browserAction, element: undefined, key: 'Enter' } };
+    expect(approvalSentence(a)).toBe('n3 Research wants to press Enter on jobs.example');
+    const long = { ...browserAction, text: `${'x'.repeat(70)}\nmore` };
+    expect(approvalSummary('browser_type', {}, undefined, long)).toBe(`Browser: type "${'x'.repeat(59)}…" into button "Easy Apply" on jobs.example`);
+    // Typing that also presses Enter says so: that is what submits the form or sends the message.
+    expect(approvalSummary('browser_type', {}, undefined, { ...browserAction, element: 'textbox "Comment"', text: 'Great post!', submit: true })).toBe('Browser: type "Great post!" into textbox "Comment", then press Enter, on jobs.example');
+  });
 });

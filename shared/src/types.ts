@@ -23,6 +23,8 @@ export type GraphNode = {
   effort?: EffortLevel;
   /** Agent steps: files the step's agent gets every time it runs, by name, in order (step model spec §6b.3). */
   attachments?: string[];
+  /** Agent steps: the step may use the Agent Stream browser (browser spec §2.1). Missing means off; only `true` is stored. */
+  browser?: boolean;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -64,6 +66,7 @@ export type NewNodeInput = {
   model?: StepModel;
   effort?: EffortLevel;
   attachments?: string[];
+  browser?: boolean;
   position?: Position;
 };
 
@@ -85,6 +88,8 @@ export type NodePatch = {
   effort?: EffortLevel | null;
   /** The step's whole attachment list; [] clears it. */
   attachments?: string[];
+  /** true turns the browser on for an agent step; false turns it off. */
+  browser?: boolean;
 };
 
 export type Op =
@@ -123,7 +128,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
@@ -155,14 +160,28 @@ export type NodeUsage = {
   turns: number;
 };
 
+/** How a run uses the run it continues: `resume` runs what didn't finish, `from` a step and what follows it, `only` one step. */
+export type RunMode = 'resume' | 'from' | 'only';
+
+/**
+ * A step whose kept result may no longer fit: `upstream`, it was built on an older result of `nodeId` (a step re-run
+ * alone after it); `edited`, its definition or inputs changed since (`nodeId`: the edited step it follows, which may be itself).
+ * `runId`: the run that marked it. A stale step still counts as done in its run, but is never reused: a later run runs it again.
+ */
+export type StaleMark = { reason: 'upstream' | 'edited'; nodeId?: string; runId: string };
+
 export type NodeRunState = {
   status: NodeStatus;
+  /** Absent in runs recorded before retry options, and for every step whose result is current. */
+  stale?: StaleMark;
   startedAt?: string;
   endedAt?: string;
   durationMs?: number;
   error?: string;
   exitCode?: number | null;
   usage?: NodeUsage;
+  /** A browser step's pages, each URL once in the order first visited, at most 200 (browser spec §4.4). */
+  browserPages?: string[];
 };
 
 /** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
@@ -174,13 +193,27 @@ export type RenderedRun = { goal: string; instructions: string; nodes: Record<st
  * `modelLine`: `Model: … · Effort: …` for an agent step whose own model or effort makes it differ from the run's;
  * `modelNote`: why it doesn't run its own (step model spec §3.3). Both are shown, neither blocks the run.
  */
-export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean; modelLine?: string; modelNote?: string };
+export type PreviewStep = {
+  id: string;
+  title: string;
+  kind: NodeKind;
+  description?: string;
+  text?: string;
+  reused: boolean;
+  /** Reused, but its kept result will be marked stale (`Run only` after it, or an edit since). */
+  stale?: boolean;
+  /** Neither runs nor is reused: it didn't succeed in the source run, and `Run only` runs nothing else. */
+  notRun?: boolean;
+  modelLine?: string;
+  modelNote?: string;
+};
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
 export type RunPreview = {
   graphId: string;
   fromNodeId?: string;
   sourceRunId?: string;
+  mode?: RunMode;
   /** Block Start. */
   problems: string[];
   /** Shown, don't block. */
@@ -235,6 +268,8 @@ export type RunMeta = {
   endedAt?: string;
   sourceRunId?: string;
   fromNodeId?: string;
+  /** How this run used `sourceRunId`; absent in runs recorded before retry options (`fromNodeId` then means `from`). */
+  mode?: RunMode;
   snapshot: Graph;
   nodes: Record<string, NodeRunState>;
   rendered?: RenderedRun;
@@ -269,7 +304,8 @@ export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summa
 /** `amendments`: how many changes step agents made to the run, when there were any. */
 export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number; checkout?: RunCheckout; waitingFor?: WaitingFor; model?: string; effort?: EffortLevel };
 
-export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
+/** `scope: 'site'`: a browser action allowed on its site for the rest of the step (browser spec §4.2). */
+export type Decision = { decision: 'approve'; scope?: 'site' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
 export type NodeEventBody =
   /** `model`/`effort`: what an agent step actually ran with, as the provider sent it (absent: the provider's default). */
@@ -278,8 +314,13 @@ export type NodeEventBody =
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError: boolean }
   | { type: 'approval_requested'; approvalId: string; toolName: string; input: unknown }
-  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string }
+  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string; scope?: 'site' }
   | { type: 'retry'; attempt: number; maxRetries: number; error: string }
+  /** A browser step's page log line: `🌐 opened <url>`, `🌐 searched "<query>"`, `🌐 now on <url>` (browser spec §4.4). */
+  | { type: 'browser'; text: string }
+  /** browser_wait_for_you (browser spec §5.3): `Step <id> is waiting for you in the browser: <reason>`, until its done event. */
+  | { type: 'browser_wait'; waitId: string; text: string }
+  | { type: 'browser_wait_done'; waitId: string; by: 'user' | 'stopped' }
   | { type: 'stdout'; chunk: string }
   | { type: 'stderr'; chunk: string }
   | { type: 'result'; ok: boolean; durationMs: number; error?: string; exitCode?: number | null; usage?: NodeUsage }
@@ -298,7 +339,16 @@ export type ApprovalRequest = {
   createdAt: string;
   /** A step agent's graph change: what it wants (`summary`) and the exact text that would run (`detail`). */
   graphChange?: GraphChangeRequest;
+  /** A browser step's click, typing, choice or key press (browser spec §4.2): what the card shows. */
+  browserAction?: BrowserActionRequest;
 };
+
+/**
+ * What a browser action card shows (spec §4.2): the site (host), the page's URL and title, the element's role and name
+ * (`button "Easy Apply"`), the exact text to type (and `submit` when Enter is pressed after it), the option to pick or the key
+ * to press, and a small screenshot (JPEG, base64).
+ */
+export type BrowserActionRequest = { site: string; url: string; title: string; element?: string; text?: string; submit?: true; key?: string; option?: string; screenshot?: string };
 
 export type GraphChangeRequest = { summary: string; detail: string };
 
@@ -389,7 +439,7 @@ export type ServerMessage =
   | { type: 'models'; provider: ProviderId; models: ModelChoice[]; defaultEfforts: EffortLevel[] }
   | { type: 'sessions'; sessions: SessionListItem[] }
   /** Asks the graph's tab to confirm a run. `requestedBy: 'planner'`: the planner's request_run asked for it. */
-  | { type: 'confirmRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
+  | { type: 'confirmRun'; graphId: string; mode?: RunMode; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
   | { type: 'runPreview'; preview: RunPreview; requestId?: string }
   | { type: 'variableValues'; graphId: string; values: Record<string, string> }
   /** Where this folder's graphs work and who holds its write lease: after hello, on request, and when a run starts, ends or stops waiting. */
@@ -437,17 +487,23 @@ export type ClientMessage =
   | { type: 'stopPlanner'; graphId: string; sessionId: string }
   /** The conversation's model and effort from its next turn; an absent field is Default. */
   | { type: 'setPlannerModel'; graphId: string; sessionId: string; model?: string; effort?: EffortLevel }
-  /** `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs. */
-  | { type: 'startRun'; graphId: string; reviewed: string; fromNodeId?: string; sourceRunId?: string; sequential?: boolean }
+  /**
+   * `reviewed` is the signature of the run preview the user confirmed; the engine refuses if a re-render differs.
+   * `mode`: `resume` needs `sourceRunId` and no `fromNodeId`; `from` and `only` need both. Absent: `from` when `fromNodeId` is set.
+   */
+  | { type: 'startRun'; graphId: string; reviewed: string; mode?: RunMode; fromNodeId?: string; sourceRunId?: string; sequential?: boolean }
   | { type: 'inspectCheckout' }
-  | { type: 'previewRun'; graphId: string; fromNodeId?: string; sourceRunId?: string; requestId?: string }
+  | { type: 'previewRun'; graphId: string; mode?: RunMode; fromNodeId?: string; sourceRunId?: string; requestId?: string }
   | { type: 'setVariableValue'; graphId: string; name: string; value: string }
   | { type: 'stopRun'; runId: string }
   | { type: 'selectRun'; runId: string }
   | { type: 'getNodeLogs'; runId: string; nodeId: string }
   /** Asks for the run's Markdown report; the engine answers with runReport. */
   | { type: 'exportRunReport'; graphId: string; runId: string }
-  | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string };
+  /** The step log's Done for a browser step waiting for the user (browser spec §5.3). */
+  | { type: 'browserDone'; waitId: string }
+  /** `scope: 'site'` with approve: Allow on this site for this step (browser spec §4.2). */
+  | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string; scope?: 'site' };
 
 /** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
 export type ChatTarget = { graphId: string; graphName: string; sessionId: string; sessionName: string };
@@ -479,7 +535,7 @@ export type WebviewMessage = ClientMessage | WebviewHostMessage;
 export type HostMessage =
   | ServerMessage
   | { type: 'revealNode'; nodeId: string }
-  | { type: 'openRunDialog'; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
+  | { type: 'openRunDialog'; mode?: RunMode; fromNodeId?: string; sourceRunId?: string; requestedBy?: 'planner' }
   | { type: 'openVariables' }
   | { type: 'prefs'; minimap: boolean }
   | { type: 'chatTarget'; target?: ChatTarget };

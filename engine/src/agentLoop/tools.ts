@@ -8,11 +8,12 @@ import { writeFileAtomic } from '../fsutil';
 import { PRIVATE_FOLDER } from '../privatePaths';
 import { truncateHead } from '../prompt';
 import type { RunShell } from '../shell';
-import type { ToolSpec } from './chatModel';
+import type { ImagePart, ToolSpec } from './chatModel';
 import { globToRegExp } from './glob';
 
 /** What a tool returns to the model. */
-export type ToolOutput = { text: string; isError?: boolean };
+/** `images`: pictures the tool returns (a browser screenshot), sent to the model after the round's tool results. */
+export type ToolOutput = { text: string; isError?: boolean; images?: ImagePart[] };
 /** A tool the agent loop offers: what the model sees, the name the gate decides on, and what it does. */
 export type LoopTool = { spec: ToolSpec; gateName: string; run(input: unknown, signal: AbortSignal): Promise<ToolOutput> };
 

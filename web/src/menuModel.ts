@@ -1,5 +1,6 @@
 import { refinable, type HostCommand } from '@agent-stream/shared';
 import { actions, approvableApprovals } from './actions';
+import { onlyAvailability, retryTarget } from './retry';
 import { MOD } from './shortcuts';
 import type { State, Tab } from './state';
 
@@ -80,7 +81,9 @@ export function buildMenus(s: State): Menu[] {
       items: [
         item('Run…', hasGraph && signedIn && !running, actions.run),
         item('Stop', running, actions.stop),
+        item('Retry from where it stopped', signedIn && !!retryTarget(s), actions.retryFromStop),
         item('Re-run from selected step…', signedIn && !running && selected && s.runs.length > 0, actions.rerunFromSelected),
+        item('Run only selected step…', signedIn && selected && onlyAvailability(s, s.selectedNodeId!).enabled, actions.runOnlySelected),
         SEPARATOR,
         item(`Approve all (${pending})`, pending > 0, actions.approveAll),
         SEPARATOR,

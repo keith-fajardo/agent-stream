@@ -96,6 +96,8 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'host', command: 'rm' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'chatCommand', command: 'other' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'decide', approvalId: 'a', decision: 'maybe' }).ok).toBe(false);
+    expect(parseWebviewMessage({ type: 'decide', approvalId: 'a', decision: 'approve', scope: 'site' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'decide', approvalId: 'a', decision: 'approve', scope: 'everywhere' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'startRun', graphId: 'g' }).ok).toBe(false);
     expect(parseWebviewMessage({ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x'.repeat(10_001) }).ok).toBe(false);
   });

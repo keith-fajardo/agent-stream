@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { realGit } from '@agent-stream/engine';
+import { createBrowserService, realGit, type BrowserService, type BrowserState, type BrowserWait } from '@agent-stream/engine';
 import { PROVIDER_IDS, type HostCommand, type ProviderId, type ProviderStatus } from '@agent-stream/shared';
 import { ApprovalsView, approvalsBadge } from './approvalsView';
+import { browserCommands, browserStatusText, notifyWait, readBrowserSettings, startPageHtml, type BrowserUi } from './browser';
 import { ChatViewController, ChatViewProvider, type ChatSource } from './chatView';
 import { graphCommands } from './commands';
 import { EngineManager, isChecking, type EngineEvents, type Folder } from './engines';
@@ -22,6 +23,7 @@ import { sessionStatusText, signInDetails, statusBarText } from './statusBar';
 import { vscodeUi } from './ui';
 
 let engines: EngineManager | undefined;
+let browserService: BrowserService | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -49,7 +51,33 @@ export async function activate(context: vscode.ExtensionContext) {
     log: (message) => output.appendLine(message),
     graphFileErrors: (folder, graphId, errors) => publishGraphFileErrors(diagnostics, folder, graphId, errors),
   };
+  // The window's one Agent Stream browser (browser spec §3), shared by every folder's engine.
+  const browser = createBrowserService({ home: homedir(), platform: process.platform, env: process.env, settings: readBrowserSettings, startPage: startPageHtml() });
+  browserService = browser;
+  const browserStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+  browserStatus.command = 'agentStream.openBrowser';
+  const showBrowserState = (state: BrowserState) => {
+    const t = browserStatusText(state);
+    if (!t) return browserStatus.hide();
+    browserStatus.text = t.text;
+    browserStatus.tooltip = t.tooltip;
+    browserStatus.show();
+  };
+  browser.on('state', showBrowserState);
+  const browserUi: BrowserUi = {
+    info: (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
+    error: (message) => void vscode.window.showErrorMessage(message),
+    confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
+  };
+  browser.on('wait', (wait: BrowserWait) => notifyWait({ browser, ui: browserUi }, wait));
+  const browserCmds = browserCommands({ browser, ui: browserUi });
+  context.subscriptions.push(
+    browserStatus,
+    vscode.commands.registerCommand('agentStream.openBrowser', browserCmds.openBrowser),
+    vscode.commands.registerCommand('agentStream.clearBrowserData', browserCmds.clearBrowserData),
+  );
   const manager = new EngineManager({
+    browser,
     settings: readSettings,
     platform: process.platform,
     env: process.env,
@@ -139,9 +167,9 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   for (const [name, command] of Object.entries(run)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, command));
   context.subscriptions.push(approvalsTree);
-  events.confirmRun = (folder, graphId, fromNodeId, sourceRunId, requestedBy) => {
+  events.confirmRun = (folder, graphId, fromNodeId, sourceRunId, requestedBy, mode) => {
     // An open tab already got confirmRun from the engine; a closed one is opened first.
-    if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', fromNodeId, sourceRunId, ...(requestedBy && { requestedBy }) });
+    if (!panels.get(folder.key, graphId)) void openAndSend(panels, folder, graphId, { type: 'openRunDialog', ...(mode && { mode }), fromNodeId, sourceRunId, ...(requestedBy && { requestedBy }) });
   };
   events.graphDeleted = (folder, graphId, reason) => {
     publishGraphFileErrors(diagnostics, folder, graphId, []);
@@ -416,7 +444,11 @@ export async function activate(context: vscode.ExtensionContext) {
   return { engines: manager, panels, sessions };
 }
 
-export function deactivate(): void {
+/** VS Code waits for the returned promise: the runs stop, then the browser this window opened closes (browser spec §3). */
+export async function deactivate(): Promise<void> {
   engines?.dispose();
   engines = undefined;
+  const browser = browserService;
+  browserService = undefined;
+  await browser?.dispose();
 }

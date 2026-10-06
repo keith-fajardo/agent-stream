@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
   contentSignature,
+  onlyRunPlan,
   parallelWriteSteps,
   reusableNodeIds,
+  runModeProblem,
   topoOrder,
   validateRunnable,
   workspaceOf,
@@ -12,6 +14,7 @@ import {
   type RenderedRun,
   type RunAttachment,
   type RunMeta,
+  type RunMode,
   type RunPreview,
 } from '@agent-stream/shared';
 import { renderTemplate, templateErrorMessage, templateNames, type EnvLookup } from './templates';
@@ -48,7 +51,10 @@ export type PreviewInput = {
   values: Record<string, string>;
   env: EnvLookup;
   source?: RunMeta;
+  /** The step `from` re-runs from, or `only` runs alone. */
   fromNodeId?: string;
+  /** How the run uses `source`; absent: `from` with a step, else a retry from where it stopped. */
+  mode?: RunMode;
   /** Why command steps can't run on this machine (Git Bash missing on Windows), if so. */
   commandShellProblem?: string | null;
   /** The checkout the run will use (ruling R8): refuses workspaces outside Git or before the first commit, notes uncommitted changes. */
@@ -70,6 +76,9 @@ function tracking(env: EnvLookup, seen: Set<string>): EnvLookup {
 export function previewRun(input: PreviewInput): PreviewOutcome {
   const { graph } = input;
   const problems = validateRunnable(graph);
+  const modeProblem = runModeProblem(input.mode, input.fromNodeId, input.source?.id);
+  if (modeProblem) problems.push(modeProblem);
+  const mode: RunMode | undefined = input.source ? (input.mode ?? (input.fromNodeId ? 'from' : 'resume')) : input.mode;
   const warnings: string[] = [];
   const defined = new Set(graph.variables.map((v) => v.name));
   const agentIds = graph.nodes.filter((n) => n.kind === 'agent').map((n) => n.id);
@@ -175,12 +184,27 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     notes.push(`Workspaces start from ${input.checkout.head.slice(0, 7)}; uncommitted changes in this checkout aren't included.`);
   }
 
-  const rendered: RenderedRun | undefined = problems.length === 0 ? { goal: goal ?? '', instructions: instructions ?? '', nodes } : undefined;
-  const reused = input.source && rendered ? reusableNodeIds(graph, input.source, input.fromNodeId, rendered, input.attachments) : new Set<string>();
+  let rendered: RenderedRun | undefined = problems.length === 0 ? { goal: goal ?? '', instructions: instructions ?? '', nodes } : undefined;
+  let reused = new Set<string>();
+  let notRun = new Set<string>();
+  let stale = new Map<string, unknown>();
+  /** Every reused step whose kept result is stale: the marks this run adds and the ones it carries forward. */
+  const staleIds = new Set<string>();
+  if (input.source && rendered) {
+    if (mode === 'only') {
+      const plan = onlyRunPlan(graph, input.source, input.fromNodeId!, rendered, input.attachments);
+      if (plan.ok) ({ reuse: reused, notRun, stale } = plan);
+      else {
+        problems.push(plan.error);
+        rendered = undefined;
+      }
+    } else reused = reusableNodeIds(graph, input.source, mode === 'resume' ? undefined : input.fromNodeId, rendered, input.attachments);
+    for (const id of reused) if (stale.has(id) || input.source.nodes[id]?.stale) staleIds.add(id);
+  }
   // A missing attachment never blocks: the step runs without it (spec §6b.5). Only steps that will run are named.
   const missing = new Set((input.attachments ?? []).filter((a) => !a.sha256).map((a) => a.name));
   const folder = `.agent-stream/attachments/${graph.id}/`;
-  const runs = (id: string) => !reused.has(id);
+  const runs = (id: string) => !reused.has(id) && !notRun.has(id);
   for (const name of graph.attachments ?? []) {
     if (missing.has(name) && graph.nodes.some((n) => n.kind === 'agent' && runs(n.id))) warnings.push(`The graph's attachment ${name} is missing from ${folder}, so agent steps run without it.`);
   }
@@ -192,7 +216,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   const ids = order.length === graph.nodes.length ? order : graph.nodes.map((n) => n.id);
   const steps: PreviewStep[] = ids.map((id) => {
     const n = graph.nodes.find((x) => x.id === id)!;
-    return { id, title: n.title, kind: n.kind, ...(n.description?.trim() && { description: n.description.trim() }), ...(Object.hasOwn(nodes, id) ? { text: nodes[id] } : {}), reused: reused.has(id) };
+    return { id, title: n.title, kind: n.kind, ...(n.description?.trim() && { description: n.description.trim() }), ...(Object.hasOwn(nodes, id) ? { text: nodes[id] } : {}), reused: reused.has(id), ...(staleIds.has(id) && { stale: true }), ...(notRun.has(id) && { notRun: true }) };
   });
   const variables = [...usedVariables]
     .sort()
@@ -204,6 +228,10 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
         content: contentSignature(graph),
         rendered: rendered ?? null,
         reused: [...reused].sort(),
+        // Only `Run only` leaves steps unrun or marks any stale; absent otherwise, so other runs keep their signature.
+        ...(notRun.size > 0 && { notRun: [...notRun].sort() }),
+        ...(staleIds.size > 0 && { stale: [...staleIds].sort() }),
+        ...(mode && { mode }),
         fromNodeId: input.fromNodeId ?? null,
         sourceRunId: input.source?.id ?? null,
         // Workspaces start from HEAD: a commit since review would run other code. Graphs without them keep their signature.
@@ -216,6 +244,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
       graphId: graph.id,
       fromNodeId: input.fromNodeId,
       sourceRunId: input.source?.id,
+      ...(mode && { mode }),
       problems,
       warnings,
       notes,

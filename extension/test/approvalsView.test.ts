@@ -55,6 +55,30 @@ describe('ApprovalsView', () => {
     expect(entries.filter((e) => e.command === 'agentStream.approve').map((e) => e.when)).toEqual(['view == agentStream.approvals && viewItem == approval']);
   });
 
+  it('gives a browser action its own context value, with what the card shows as its tooltip', () => {
+    const browserAction = { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs', element: 'textbox "Search jobs"', text: `${'long text '.repeat(400)}end` };
+    const item = new ApprovalItem(a, { ...request('b', 't', { ref: 'e4', text: browserAction.text }), toolName: 'browser_type', browserAction });
+    expect(item.contextValue).toBe('browserApproval');
+    expect(item.description).toBe(`Browser: type "${'long text '.repeat(6).slice(0, 59)}…" into textbox "Search jobs" on jobs.example`);
+    expect(String(item.tooltip)).toBe(`Site: jobs.example\nPage: Jobs\nElement: textbox "Search jobs"\nText: ${browserAction.text}`);
+    expect(item.command).toEqual({ command: 'agentStream.revealApproval', title: 'Show step', arguments: [item] });
+  });
+
+  it('a browser action that also presses Enter says so in its tooltip', () => {
+    const browserAction = { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs', element: 'textbox "Comment"', text: 'Great post!', submit: true as const };
+    const item = new ApprovalItem(a, { ...request('b', 't', { ref: 'e4', text: 'Great post!', submit: true }), toolName: 'browser_type', browserAction });
+    expect(item.description).toBe('Browser: type "Great post!" into textbox "Comment", then press Enter, on jobs.example');
+    expect(String(item.tooltip)).toBe('Site: jobs.example\nPage: Jobs\nElement: textbox "Comment"\nText: Great post!\nThen: presses Enter');
+  });
+
+  it('offers Show and Deny for a browser action in the sidebar, never Approve', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const entries: { command: string; when: string }[] = manifest.contributes.menus['view/item/context'];
+    expect(entries.filter((e) => e.when.includes('viewItem == browserApproval')).map((e) => e.command).sort()).toEqual(['agentStream.deny', 'agentStream.revealApproval']);
+    // Every Approve entry names the one kind it is for, and it isn't a regex that could match a browser action.
+    expect(entries.filter((e) => e.command === 'agentStream.approve').map((e) => e.when)).toEqual(['view == agentStream.approvals && viewItem == approval']);
+  });
+
   it('badges the count', () => {
     expect(approvalsBadge(0)).toBeUndefined();
     expect(approvalsBadge(1)).toEqual({ value: 1, tooltip: '1 approval waiting' });

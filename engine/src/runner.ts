@@ -3,9 +3,14 @@ import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { isAbsolute, join, relative } from 'node:path';
 import {
+  MAX_BROWSER_PAGES,
+  MAX_BROWSER_URL_CHARS,
   edgeId,
   isWriteCapable,
+  loggedUrl,
+  onlyRunPlan,
   reusableNodeIds,
+  runModeProblem,
   toRunCheckout,
   topoOrder,
   upstream,
@@ -24,6 +29,8 @@ import {
   type ProviderId,
   type RenderedRun,
   type RunMeta,
+  type RunMode,
+  type StaleReason,
   type StepModelUse,
   type WaitingFor,
 } from '@agent-stream/shared';
@@ -65,7 +72,10 @@ export type StartRunInput = {
   graph: Graph;
   rendered: RenderedRun;
   sourceRunId?: string;
+  /** With `sourceRunId`: the step `from` re-runs from, or `only` runs alone. */
   fromNodeId?: string;
+  /** How the run uses `sourceRunId` (see the startRun message). Absent: `from` with a step, else a retry from where it stopped. */
+  mode?: RunMode;
   /** Runs this run's agent steps instead of `executors.agent`: the provider chosen when the run started. */
   agent?: NodeExecutor;
   /** Which provider runs the agent steps, recorded in the run. */
@@ -156,27 +166,39 @@ export class Runner extends EventEmitter {
     if (this.activeFor(graph.id)) return { ok: false, error: 'A run is already in progress for this graph.' };
     // Its run.json and its variant worktree paths are keyed by the id: two active runs must never share one.
     if (input.runId !== undefined && this.runs.has(input.runId)) return { ok: false, error: `Run ${input.runId} is already in progress.` };
+    const modeProblem = runModeProblem(input.mode, input.fromNodeId, input.sourceRunId);
+    if (modeProblem) return { ok: false, error: modeProblem };
     if (input.fromNodeId && !graph.nodes.some((n) => n.id === input.fromNodeId)) {
       return { ok: false, error: `node ${input.fromNodeId} does not exist` };
     }
     for (const n of graph.nodes) {
       if (input.rendered.nodes[n.id] === undefined) return { ok: false, error: `The run has no reviewed text for step ${n.id}.` };
     }
-    for (const n of graph.nodes) {
-      const ws = workspaceOf(n);
-      if (ws !== null && !input.workspaces?.[ws]) return { ok: false, error: `Step ${n.id} uses workspace "${ws}", but this run has no worktree for it.` };
-    }
     let source: RunMeta | undefined;
     if (input.sourceRunId) {
       source = this.deps.runStore.get(input.sourceRunId);
       if (!source) return { ok: false, error: `run ${input.sourceRunId} not found` };
     }
-    const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered, input.attachments) : new Set<string>();
+    const mode: RunMode | undefined = source ? (input.mode ?? (input.fromNodeId ? 'from' : 'resume')) : undefined;
+    // `reuse`: steps that keep their old result; `notRun`: steps that neither run nor keep one (only `Run only` leaves any).
+    let reuse = new Set<string>();
+    let notRun = new Set<string>();
+    let stale = new Map<string, StaleReason>();
+    if (source && mode === 'only') {
+      const plan = onlyRunPlan(graph, source, input.fromNodeId!, input.rendered, input.attachments);
+      if (!plan.ok) return { ok: false, error: plan.error };
+      ({ reuse, notRun, stale } = plan);
+    } else if (source) reuse = reusableNodeIds(graph, source, mode === 'resume' ? undefined : input.fromNodeId, input.rendered, input.attachments);
+    const skipped = new Set([...reuse, ...notRun]);
+    for (const n of graph.nodes) {
+      const ws = workspaceOf(n);
+      if (ws !== null && !skipped.has(n.id) && !input.workspaces?.[ws]) return { ok: false, error: `Step ${n.id} uses workspace "${ws}", but this run has no worktree for it.` };
+    }
 
     const runId = input.runId ?? this.makeRunId();
     const leaseRoot = input.checkout?.root ?? this.deps.projectDir;
     const startedAt = this.clock();
-    const needsLease = needsCheckoutLease(graph, reuse);
+    const needsLease = needsCheckoutLease(graph, skipped);
     let holdsLease = false;
     let waitFor: { holder: LeaseHolder; otherWindow: boolean } | undefined;
     if (needsLease) {
@@ -216,9 +238,16 @@ export class Runner extends EventEmitter {
     };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
+    if (mode) meta.mode = mode;
     if (input.fromNodeId) meta.fromNodeId = input.fromNodeId;
     for (const n of graph.nodes) {
-      meta.nodes[n.id] = source && reuse.has(n.id) ? { ...source.nodes[n.id], status: 'reused' } : { status: 'queued' };
+      const mark = stale.get(n.id);
+      meta.nodes[n.id] =
+        source && reuse.has(n.id)
+          ? { ...source.nodes[n.id], status: 'reused', ...(mark && { stale: { ...mark, runId } }) }
+          : notRun.has(n.id)
+            ? { status: 'not_run' }
+            : { status: 'queued' };
     }
     try {
       this.deps.runStore.create(meta);
@@ -287,6 +316,21 @@ export class Runner extends EventEmitter {
     this.safeEmit('run', meta);
     this.schedule(run);
     return { ok: true };
+  }
+
+  /**
+   * A page a browser step visited (browser spec §4.4): kept in run.json as the step's `browserPages`, each URL once in
+   * first-visit order, at most MAX_BROWSER_PAGES. Ignored for a run or step that isn't running here.
+   */
+  recordBrowserPage(runId: string, nodeId: string, url: string): void {
+    const run = this.runs.get(runId);
+    const state = run?.meta.nodes[nodeId];
+    if (!run || !state) return;
+    // The cleaned form (no userinfo, no fragment) is what is kept, whoever calls; it is idempotent.
+    const page = loggedUrl(url).slice(0, MAX_BROWSER_URL_CHARS);
+    const pages = state.browserPages ?? [];
+    if (pages.includes(page) || pages.length >= MAX_BROWSER_PAGES) return;
+    this.setNode(run, nodeId, { browserPages: [...pages, page] });
   }
 
   stop(runId: string): boolean {

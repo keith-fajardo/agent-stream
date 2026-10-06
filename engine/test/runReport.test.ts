@@ -180,6 +180,17 @@ describe('buildRunReport', () => {
     expect(n2).toContain('**Error**\n\n```\nCommand exited with code 2\n```');
   });
 
+  it('says why a kept result is stale, and nothing for a current one', () => {
+    const { input } = fixture();
+    const stale = { ...input, run: { ...run, nodes: { ...run.nodes, n1: { ...run.nodes.n1, status: 'reused' as const, stale: { reason: 'upstream' as const, nodeId: 'n2', runId: RUN_ID } } } } };
+    const md = buildRunReport(stale);
+    const n1 = md.slice(md.indexOf('### n1'), md.indexOf('### n2'));
+    expect(n1).toContain('**Stale:** built on an older result of n2');
+    expect(md.slice(md.indexOf('### n2'))).not.toContain('**Stale:**');
+    const edited = { ...input, run: { ...run, nodes: { ...run.nodes, n1: { ...run.nodes.n1, stale: { reason: 'edited' as const, runId: RUN_ID } } } } };
+    expect(buildRunReport(edited)).toContain('**Stale:** edited since this result');
+  });
+
   it('lists approvals with their decisions and notes', () => {
     const md = buildRunReport(fixture().input);
     expect(md).toContain('**Approvals**\n\n- 2026-10-03T10:00:05.000Z Bash: approved\n- 2026-10-03T10:00:09.000Z Write: denied — read-only step, no writes\n');

@@ -68,4 +68,23 @@ describe('ApprovalNotifier', () => {
     await vi.waitFor(() => expect(s.d.reveal).toHaveBeenCalledWith(a, { ...change, id: 'c2' }));
     expect(s.d.decide).not.toHaveBeenCalled();
   });
+
+  it('never offers a one-click Approve for a browser action: the card shows the screenshot and the whole text', async () => {
+    const s = setup();
+    const typing: ApprovalRequest = {
+      ...request('b1'),
+      toolName: 'browser_type',
+      input: { ref: 'e4', text: 'a long text '.repeat(10) },
+      browserAction: { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs', element: 'textbox "Search jobs"', text: 'a long text '.repeat(10) },
+    };
+    s.setPending([{ folder: a, request: typing }, { folder: a, request: { ...typing, id: 'b2' } }]);
+    s.notifier.update();
+    expect(s.d.ask).toHaveBeenNthCalledWith(1, expect.stringContaining('n2 Build new wants to type "a long text'), 'Show', 'Deny');
+    expect(s.d.ask.mock.calls.flat()).not.toContain('Approve');
+    s.answers[0]('Approve');
+    s.answers[1]('Show');
+    await vi.waitFor(() => expect(s.d.reveal).toHaveBeenCalledWith(a, { ...typing, id: 'b2' }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.d.decide).not.toHaveBeenCalled();
+  });
 });

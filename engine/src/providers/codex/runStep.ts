@@ -1,5 +1,6 @@
 import { isWriteCapable, type ModelChoice, type NodeEventBody, type NodeUsage } from '@agent-stream/shared';
 import { toLoopTools } from '../../agentLoop/graphLoopTools';
+import { browserLoopTools } from '../../browser/loopTools';
 import { clipResult } from '../../agentLoop/tools';
 import type { NodeContext, NodeOutcome } from '../../executors';
 import { ATTACHED_IMAGE, PDF_MAY_NOT_READ, withAttachedFiles } from '../../attachedFiles';
@@ -106,7 +107,8 @@ export function codexRunStep(deps: CodexRunDeps) {
     // The model and effort the step actually runs with: an effort the model doesn't offer is already dropped.
     ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: text, ...(ctx.model && { model: ctx.model }), ...(effort && { effort }) });
     const readOnly = !isWriteCapable(ctx.node);
-    const tools = readOnly ? [] : toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX);
+    // The graph tools for a step that can change files; the browser tools for any Browser step (Access is about files, browser spec §2.3).
+    const tools = [...(readOnly ? [] : toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX)), ...browserLoopTools(ctx.browserTools ?? [], { images: true })];
     /** Aborted when the step ends or Codex exits: approval cards still open are withdrawn (R18). */
     const ended = new AbortController();
     const fileChanges = new Map<string, FileUpdateChange[]>();

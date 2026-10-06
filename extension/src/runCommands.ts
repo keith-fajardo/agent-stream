@@ -3,6 +3,9 @@ import type { GraphTarget } from './commands';
 import type { EngineManager, Folder } from './engines';
 import type { GraphPanels } from './graphEditor';
 
+/** What the sidebar and the Command Palette say instead of approving a browser action (it is approved on the step's card). */
+const BROWSER_CARD_ONLY = "A browser action is approved on the step's card, where you can see what it will do. Open the graph and use Show.";
+
 type ApprovalTarget = { folder: Folder; request: ApprovalRequest };
 
 export type RunCommandDeps = {
@@ -43,7 +46,10 @@ export function runCommands(d: RunCommandDeps) {
       if (t) await d.openAndSend(t, { type: 'openVariables' });
     },
     approve(item: ApprovalTarget): void {
-      if (isItem(item)) decide(item, 'approve');
+      if (!isItem(item)) return;
+      // A browser action is approved only on the step's card, where its details (the exact text, the screenshot) show.
+      if (item.request.browserAction) return d.info(BROWSER_CARD_ONLY);
+      decide(item, 'approve');
     },
     deny(item: ApprovalTarget): void {
       if (isItem(item)) decide(item, 'deny');

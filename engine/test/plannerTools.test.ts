@@ -19,8 +19,8 @@ function setup(checkout?: CheckoutSource) {
     graphId,
     source: { kind: 'planner', sessionId: 's' },
     checkout: checkout ?? outsideGit(paths.root),
-    requestRun: (fromNodeId) => {
-      runRequests.push(fromNodeId);
+    requestRun: (fromNodeId, mode) => {
+      runRequests.push(mode ? `${mode}:${fromNodeId ?? ''}` : fromNodeId);
       return runError;
     },
   });
@@ -147,6 +147,10 @@ describe('planner graph tools', () => {
     const s = setup();
     expect((await s.call('request_run', { fromNodeId: 'n1' })).isError).toBe(false);
     expect(s.runRequests).toEqual(['n1']);
+    expect((await s.call('request_run', { mode: 'resume' })).isError).toBe(false);
+    expect((await s.call('request_run', { mode: 'only', fromNodeId: 'n2' })).isError).toBe(false);
+    expect(s.runRequests).toEqual(['n1', 'resume:', 'only:n2']);
+    expect((await s.call('request_run', { mode: 'again' })).isError).toBe(true);
     s.failRuns("The graph can't run yet");
     expect(await s.call('request_run')).toEqual({ text: "The graph can't run yet", isError: true });
   });
@@ -171,6 +175,29 @@ describe('planner graph tools', () => {
     expect(text).toContain('error: exited with code 2');
     expect(text).toContain('Compilation Error in model orders');
     expect(await s.call('get_run', { runId: '20990101-000000-ffff' })).toEqual({ text: 'Run 20990101-000000-ffff not found.', isError: true });
+  });
+
+  it('shows which steps of a run are stale, and why', async () => {
+    const s = setup();
+    await s.call('add_node', { kind: 'command', title: 'Build', command: 'dbt build' });
+    await s.call('add_node', { kind: 'command', title: 'Test', command: 'dbt test' });
+    await s.call('add_node', { kind: 'command', title: 'Docs', command: 'dbt docs' });
+    s.runStore.create({
+      id: '20261002-100000-aaaa',
+      graphId: s.graphId,
+      status: 'succeeded',
+      startedAt: 't',
+      snapshot: s.graphStore.get(s.graphId),
+      nodes: {
+        n1: { status: 'succeeded' },
+        n2: { status: 'reused', stale: { reason: 'upstream', nodeId: 'n1', runId: '20261002-100000-aaaa' } },
+        n3: { status: 'reused', stale: { reason: 'edited', nodeId: 'n3', runId: '20261002-100000-aaaa' } },
+      },
+    });
+    const { text } = await s.call('get_run');
+    expect(text).toContain('## n1 · Build — succeeded\n');
+    expect(text).toContain('## n2 · Test — reused (stale: built on an older result of n1)');
+    expect(text).toContain('## n3 · Docs — reused (stale: edited since this result)');
   });
 
   it('sets the instructions as the agent and shows them in get_graph', async () => {

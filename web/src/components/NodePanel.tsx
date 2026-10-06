@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
+import { BROWSER_HINT, parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions, registerNodeDraft } from '../actions';
 import { AttachmentList } from './AttachmentList';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
+import { onlyAvailability } from '../retry';
 import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModelMenus';
 import { dispatch, useStore } from '../store';
 
 /** `model`: `<provider>/<id>`, '' for Default; `effort`: a level, '' for Default. */
-type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; prompt: string; command: string; timeoutSec: string };
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
@@ -19,6 +20,7 @@ const toDraft = (n: GraphNode): Draft => ({
   workspace: n.workspace ?? '',
   model: n.model ? stepModelText(n.model) : '',
   effort: n.effort ?? '',
+  browser: n.browser === true,
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
@@ -104,6 +106,7 @@ function StepModelFields({ model, effort, onChange }: { model: string; effort: s
 function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: GraphNode; workspaces: string[] }) {
   const run = useStore((s) => s.run);
   const runs = useStore((s) => s.runs);
+  const openGraph = useStore((s) => s.graph);
   const status = useStore((s) => s.status);
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
@@ -143,6 +146,8 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
       patch.model = parsed?.ok ? parsed.model : null;
     }
     if (draft.kind === 'agent' && draft.effort !== base.draft.effort) patch.effort = (draft.effort || null) as EffortLevel | null;
+    // Only agent steps use the browser; becoming a command step drops it in the engine (browser spec §2.1).
+    if (draft.kind === 'agent' && draft.browser !== base.draft.browser) patch.browser = draft.browser;
     if (draft.prompt !== base.draft.prompt) patch.prompt = draft.prompt;
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
@@ -156,6 +161,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), [node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
+  const only = onlyAvailability({ run, runs, graph: openGraph }, node.id);
 
   return (
     <>
@@ -213,6 +219,15 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         </datalist>
       </div>
       {draft.kind === 'agent' && <StepModelFields model={draft.model} effort={draft.effort} onChange={(next) => setDraft({ ...draft, ...next })} />}
+      {draft.kind === 'agent' && (
+        <div className="field">
+          <label className="switch-row" htmlFor="node-browser">
+            <input id="node-browser" type="checkbox" role="switch" checked={draft.browser} onChange={(e) => setDraft({ ...draft, browser: e.target.checked })} />
+            Browser
+          </label>
+          <p className="static-note">{BROWSER_HINT}</p>
+        </div>
+      )}
       {node.kind === 'agent' && (
         <AttachmentList graphId={graphId} target={{ kind: 'step', nodeId: node.id }} names={node.attachments ?? []} hint="Drop or paste files here. This step's agent gets them every time it runs." />
       )}
@@ -283,6 +298,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           onClick={actions.rerunFromSelected}
         >
           Re-run from here
+        </button>
+        <button disabled={!only.enabled} title={only.title} onClick={actions.runOnlySelected}>
+          Run only this step
         </button>
         <button className="danger" onClick={actions.deleteSelectedStep}>
           Delete

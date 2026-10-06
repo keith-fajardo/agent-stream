@@ -1,5 +1,6 @@
 import type { EffortLevel, Graph, GraphNode, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { StepAttachment } from './attachedFiles';
+import type { BrowserTool } from './browser/tools';
 import type { GraphTool } from './providers/types';
 
 export type NodeOutcome = { ok: boolean; output: string; error?: string; exitCode?: number | null; usage?: NodeUsage };
@@ -22,6 +23,8 @@ export type NodeContext = {
   attachments?: StepAttachment[];
   /** Reads one of `attachments` by its path, through the attachment store, when the step sends it (a link swapped in since the start is not followed). */
   readAttachment?: (path: string) => Buffer | undefined;
+  /** Agent steps with Browser on: the browser tools (browser spec §4), each provider serving them its own way. */
+  browserTools?: BrowserTool[];
 };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeOutcome>;

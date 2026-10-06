@@ -1,4 +1,5 @@
-import { EFFORT_LEVELS, type ApprovalRequest, type EffortLevel, type GraphChangeRequest, type ProviderStatus, type NodeStatus, type ProviderId, type RunStatus } from './types';
+import { browserActionText } from './browser';
+import { EFFORT_LEVELS, type ApprovalRequest, type BrowserActionRequest, type EffortLevel, type GraphChangeRequest, type ProviderStatus, type NodeStatus, type ProviderId, type RunStatus } from './types';
 
 export const isEffortLevel = (value: unknown): value is EffortLevel => typeof value === 'string' && (EFFORT_LEVELS as readonly string[]).includes(value);
 
@@ -75,8 +76,9 @@ const patchPaths = (input: unknown): string[] | undefined => {
 const listPaths = (paths: string[]) => (paths.length <= 3 ? paths.join(', ') : `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`);
 
 /** One line for lists: "Bash: dbt build …", "Edit: models/x.sql", or a graph change's own summary. */
-export function approvalSummary(toolName: string, input: unknown, graphChange?: GraphChangeRequest): string {
+export function approvalSummary(toolName: string, input: unknown, graphChange?: GraphChangeRequest, browserAction?: BrowserActionRequest): string {
   if (graphChange) return graphChange.summary;
+  if (browserAction) return `Browser: ${browserActionText(toolName, browserAction)}`;
   const f = fieldsOf(input);
   if ((toolName === 'Bash' || toolName === 'PowerShell') && typeof f.command === 'string') return `${toolName}: ${firstLine(f.command)}`;
   if (typeof f.file_path === 'string') return `${toolName}: ${f.file_path}`;
@@ -90,6 +92,7 @@ export function approvalSentence(a: ApprovalRequest): string {
   if (a.graphChange) return a.graphChange.summary;
   const f = fieldsOf(a.input);
   const who = `${a.nodeId} ${a.nodeTitle}`;
+  if (a.browserAction) return `${who} wants to ${browserActionText(a.toolName, a.browserAction)}`;
   if ((a.toolName === 'Bash' || a.toolName === 'PowerShell') && typeof f.command === 'string') return `${who} wants to run: ${firstLine(f.command)}`;
   if (a.toolName === 'Edit' && typeof f.file_path === 'string') return `${who} wants to edit ${f.file_path}`;
   if (a.toolName === 'Write' && typeof f.file_path === 'string') return `${who} wants to write ${f.file_path}`;

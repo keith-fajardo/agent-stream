@@ -56,6 +56,7 @@ dbt run-operation table_exists --args '{table: dim_customer}'
 - workspace: wh_a
 - model: claude/sonnet
 - effort: low
+- browser: on
 - attach: expected_rows.csv
 
 > Builds the model for the first time.
@@ -108,10 +109,11 @@ A step section holds, in this order:
    - `timeout`: a whole number of seconds, from 1 to 2147483.
    - `model`: the agent step's own model, written `<provider>/<model id>`: `claude/opus`, `codex/gpt-6-astra`, `copilot/auto`. The provider is `claude`, `codex` or `copilot`; the model id is everything after the first `/`, exactly as that provider's model list names it (1 to 200 characters, no spaces). Missing means the run's model (the `agentStream.model` setting). Agent Stream doesn't check here that the model exists, so the graph still opens on a machine with another plan or provider: a run checks it when it starts, and a step whose model isn't offered, or belongs to another provider than the run's, uses the run's model, with a warning.
    - `effort`: the agent step's own effort, one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Missing means the run's effort. A level the step's model doesn't offer is left out when the step runs.
+   - `browser`: `on` lets the agent step use the Agent Stream browser, with your logins; clicking and typing ask you first. `off` is the same as no line, and Agent Stream writes the line only when it is on. Any other value is an error. A command step can't use the browser: the line is removed from it, with a warning in the Agent Stream output channel. Graphs from before this setting have no line and load unchanged.
 
    - `attach`: a file the agent step gets every time it runs, by name. Repeat the line for each file; the order is kept.
 
-   Command steps have no model, effort or attachments: any of those lines on a command step is an error.
+   Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
 3. **Exactly one code block:**
    - ```` ```prompt ```` (or `text`, `md`) for an agent step's prompt;

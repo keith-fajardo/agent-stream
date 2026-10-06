@@ -1,5 +1,5 @@
 import { z, type ZodRawShape } from 'zod';
-import { CLI_DEFAULT_MODEL, EFFORT_LEVELS, parseStepModel, stepModelText, type ChangeSource, type CheckoutInfo, type EffortLevel, type Graph, type LeaseHolder, type ModelChoice, type NodePatch, type Op, type ProviderId, type StepModel } from '@agent-stream/shared';
+import { CLI_DEFAULT_MODEL, EFFORT_LEVELS, parseStepModel, staleNote, stepModelText, type ChangeSource, type CheckoutInfo, type EffortLevel, type Graph, type LeaseHolder, type ModelChoice, type NodePatch, type Op, type ProviderId, type RunMode, type StepModel } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
 import { ALL_HAVE_WORKTREES_ADVICE, MISSING_WORKTREES_ADVICE, OUTSIDE_GIT_ADVICE } from './policy';
@@ -17,7 +17,7 @@ export type PlannerToolDeps = {
   /** Which agent the edits are recorded as: the planner in its work session. */
   source: ChangeSource;
   /** Opens the run confirmation dialog in the graph's tab; returns an error message or null. */
-  requestRun: (fromNodeId?: string) => string | null;
+  requestRun: (fromNodeId?: string, mode?: RunMode) => string | null;
   /** checkout_info and check_tickets read it. */
   checkout: CheckoutSource;
   /** list_models reads it: the current provider and its models ([] when they can't be listed). */
@@ -62,13 +62,14 @@ export function summarizeGraph(graph: Graph) {
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
     // Names only, as context: the planner never gets their contents, and can't add or remove them (step model spec §6b.1).
     ...(graph.attachments?.length && { attachments: graph.attachments }),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, createdBy, updatedBy }) => ({
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, browser, createdBy, updatedBy }) => ({
       id, title, kind: k, description, prompt, command, timeoutSec,
       ...(a === 'read' && { access: 'read' as const }),
       ...(workspace && { workspace }),
       ...(model && { model: stepModelText(model) }),
       ...(e && { effort: e }),
       ...(attachments?.length && { attachments }),
+      ...(browser && { browser: true }),
       createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
@@ -98,7 +99,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s. `browser` true lets an agent step use the Agent Stream browser, with the user\'s logins (clicks and typing ask the user first): set it only for steps that need websites.',
       {
         kind,
         title: z.string(),
@@ -111,11 +112,12 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         workspace: z.string().optional(),
         model: z.string().optional(),
         effort: effort.optional(),
+        browser: z.boolean().optional(),
       },
       async (a) => {
         const m = modelArg(a.model || undefined);
         if (!m.ok) return reply(m.error, true);
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }) } });
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }), ...(a.browser !== undefined && { browser: a.browser }) } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -128,7 +130,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s. `browser` true or false switches the Agent Stream browser on or off for an agent step.',
       {
         id: z.string(),
         title: z.string().optional(),
@@ -141,6 +143,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         workspace: z.string().optional(),
         model: z.string().optional(),
         effort: z.union([effort, z.literal('')]).optional(),
+        browser: z.boolean().optional(),
       },
       async ({ id, model, effort: e, ...rest }) => {
         const m = modelArg(model);
@@ -182,10 +185,10 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'request_run',
-      "Ask the user to start a run. This opens a confirmation dialog in Agent Stream; the user decides whether to start it. Pass fromNodeId to re-run from that step, reusing the latest run's results for unchanged steps.",
-      { fromNodeId: z.string().optional() },
-      async ({ fromNodeId }) => {
-        const error = d.requestRun(fromNodeId);
+      "Ask the user to start a run. This opens a confirmation dialog in Agent Stream; the user decides whether to start it. With no mode and no fromNodeId it asks for a fresh run. mode 'resume' retries from where the latest run stopped: it runs the steps that didn't finish and everything after them, and reuses the rest. mode 'from' (or just fromNodeId) re-runs that step and everything after it, reusing the latest run's results for the rest. mode 'only' runs just that step, reusing the latest run for everything else; steps after it keep their old results, marked stale. 'from' and 'only' need fromNodeId; 'resume' takes none. All three need an earlier run.",
+      { mode: z.enum(['resume', 'from', 'only']).optional(), fromNodeId: z.string().optional() },
+      async ({ mode, fromNodeId }) => {
+        const error = d.requestRun(fromNodeId, mode);
         return error ? reply(error, true) : reply('Asked the user to confirm the run in the UI. Call get_run later to see results.');
       },
     ),
@@ -198,7 +201,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         const state = meta.nodes[n.id];
         const output = d.runStore.readOutput(meta.id, n.id);
         const excerpt = n.kind === 'command' ? truncateTail(output, RUN_EXCERPT_CHARS) : truncateHead(output, RUN_EXCERPT_CHARS);
-        lines.push(`\n## ${n.id} · ${n.title} — ${state?.status ?? 'unknown'}`);
+        lines.push(`\n## ${n.id} · ${n.title} — ${state?.status ?? 'unknown'}${state?.stale ? ` (stale: ${staleNote(state.stale, n.id)})` : ''}`);
         if (state?.error) lines.push(`error: ${state.error}`);
         if (excerpt.trim()) lines.push(`output:\n${excerpt}`);
       }

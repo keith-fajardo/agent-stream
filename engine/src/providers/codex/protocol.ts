@@ -139,4 +139,5 @@ export type PermissionsRequestApprovalParams = { threadId: string; turnId: strin
 /** An empty grant is the protocol's "no" (ruling R3). */
 export type PermissionsRequestApprovalResponse = { permissions: Record<string, never>; scope: 'turn' | 'session' };
 export type DynamicToolCallParams = { threadId: string; turnId: string; callId: string; namespace: string | null; tool: string; arguments: unknown };
-export type DynamicToolCallResponse = { contentItems: { type: 'inputText'; text: string }[]; success: boolean };
+/** codex-cli 0.160's DynamicToolCallOutputContentItem: text, an image (a data: URL works) or audio. */
+export type DynamicToolCallResponse = { contentItems: DynamicToolContentItem[]; success: boolean };

@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOp, emptyGraph, type CheckoutInfo, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
+import { applyOp, emptyGraph, onlyRunPlan, type CheckoutInfo, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
@@ -796,5 +796,206 @@ describe('Runner variant workspaces', () => {
     const { runner, runStore } = setup();
     expect(runner.start(withRendered(graphOf([inWs('a', 'wh_a')])))).toEqual({ ok: false, error: 'Step n1 uses workspace "wh_a", but this run has no worktree for it.' });
     expect(runStore.list('g')).toEqual([]);
+  });
+});
+
+describe('retry options', () => {
+  /** Runs `graph` to the end, finishing every step as `outcomes` says (default: succeeds). */
+  async function firstRun(ctx: ReturnType<typeof setup>, graph: Graph, outcomes: Record<string, NodeOutcome> = {}, extra: Partial<Parameters<Runner['start']>[0]> = {}) {
+    const r = started(ctx.runner.start({ ...withRendered(graph), ...extra }));
+    for (let i = 0; i < graph.nodes.length * 2; i++) {
+      await tick();
+      for (const n of graph.nodes) ctx.fake.finish(n.id, outcomes[n.id]);
+    }
+    const done = await r.done;
+    ctx.fake.started.length = 0;
+    return done;
+  }
+  const chain = () => graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
+  const inWs = (title: string, workspace: string): Op => ({ type: 'addNode', node: { title, kind: 'agent', prompt: `do ${title}`, workspace } });
+  const places = (...names: string[]) => Object.fromEntries(names.map((n) => [n, { path: mkdtempSync(join(tmpdir(), `agent-stream-ws-${n}-`)), head: '0123456789abcdef0123456789abcdef01234567' }]));
+
+  it('retries from where it stopped: reuses what finished, runs the rest, and records the mode', async () => {
+    const ctx = setup();
+    const g = chain();
+    const first = started(ctx.runner.start(withRendered(g)));
+    await tick();
+    ctx.fake.finish('n1');
+    await tick();
+    ctx.runner.stop(first.run.id);
+    const stopped = await first.done;
+    expect(stopped.status).toBe('cancelled');
+    ctx.fake.started.length = 0;
+    const retry = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: stopped.id }), mode: 'resume' }));
+    expect(retry.run).toMatchObject({ mode: 'resume', sourceRunId: stopped.id });
+    expect(retry.run).not.toHaveProperty('fromNodeId');
+    expect(retry.run.nodes.n1.status).toBe('reused');
+    await tick();
+    expect(ctx.fake.started).toEqual(['n2']);
+    ctx.fake.finish('n2');
+    await tick();
+    ctx.fake.finish('n3');
+    expect((await retry.done).status).toBe('succeeded');
+  });
+
+  it('runs only the chosen step, reuses the rest, and marks the steps after it stale', async () => {
+    const ctx = setup();
+    const g = chain();
+    const first = await firstRun(ctx, g);
+    const only = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: first.id, fromNodeId: 'n2' }), mode: 'only' }));
+    expect(only.run).toMatchObject({ mode: 'only', sourceRunId: first.id, fromNodeId: 'n2' });
+    expect(only.run.nodes.n1).toMatchObject({ status: 'reused' });
+    expect(only.run.nodes.n1).not.toHaveProperty('stale');
+    expect(only.run.nodes.n3).toMatchObject({ status: 'reused', stale: { reason: 'upstream', nodeId: 'n2', runId: only.run.id } });
+    expect(ctx.runStore.readOutput(only.run.id, 'n3')).toBe('out-n3');
+    await tick();
+    expect(ctx.fake.started).toEqual(['n2']);
+    ctx.fake.finish('n2');
+    const done = await only.done;
+    expect(done.status).toBe('succeeded');
+    expect(ctx.runStore.get(done.id)?.nodes.n3.stale).toEqual({ reason: 'upstream', nodeId: 'n2', runId: only.run.id });
+    ctx.fake.started.length = 0;
+    // A later retry runs the stale step again.
+    const next = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: done.id }), mode: 'resume' }));
+    expect(next.run.nodes.n3.status).not.toBe('reused');
+    expect(next.run.nodes.n1.status).toBe('reused');
+    expect(next.run.nodes.n2.status).toBe('reused');
+    await tick();
+    expect(ctx.fake.started).toEqual(['n3']);
+    ctx.fake.finish('n3');
+    const finished = await next.done;
+    expect(finished.status).toBe('succeeded');
+    expect(finished.nodes.n3).not.toHaveProperty('stale');
+  });
+
+  it('does not run steps that never succeeded when running only one step, and the run is not a success', async () => {
+    const ctx = setup();
+    const g = graphOf([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
+    const first = await firstRun(ctx, g, { n2: { ok: false, output: '', error: 'boom' } });
+    expect(first.nodes).toMatchObject({ n1: { status: 'succeeded' }, n2: { status: 'failed' }, n3: { status: 'not_run' } });
+    const only = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: first.id, fromNodeId: 'n1' }), mode: 'only' }));
+    expect(only.run.nodes).toMatchObject({ n2: { status: 'not_run' }, n3: { status: 'not_run' } });
+    await tick();
+    ctx.fake.finish('n1');
+    const done = await only.done;
+    expect(ctx.fake.started).toEqual(['n1']);
+    expect(done.status).toBe('failed');
+  });
+
+  it('refuses to run only a step whose earlier steps have no current result', async () => {
+    const ctx = setup();
+    const g = chain();
+    const first = await firstRun(ctx, g, { n1: { ok: false, output: '', error: 'boom' } });
+    expect(ctx.runner.start({ ...withRendered(g, { sourceRunId: first.id, fromNodeId: 'n3' }), mode: 'only' })).toEqual({
+      ok: false,
+      error: 'Run only n3 needs n1 to have a current result: run it first.',
+    });
+    expect(ctx.runStore.list('g')).toHaveLength(1);
+  });
+
+  it('refuses a mode that does not fit its step and source run', () => {
+    const { runner } = setup();
+    const g = chain();
+    expect(runner.start({ ...withRendered(g), mode: 'resume' })).toEqual({ ok: false, error: 'There is no previous run to retry.' });
+    expect(runner.start({ ...withRendered(g, { sourceRunId: '20990101-000000-ffff', fromNodeId: 'n1' }), mode: 'resume' })).toEqual({ ok: false, error: 'Retry from where it stopped takes no step.' });
+    expect(runner.start({ ...withRendered(g, { sourceRunId: '20990101-000000-ffff' }), mode: 'only' })).toEqual({ ok: false, error: 'Run only needs a step.' });
+  });
+
+  it('reuses a workspace step it does not run, and needs no worktree or lease for it', async () => {
+    const ctx = setup();
+    const g = graphOf([agent('a'), inWs('b', 'wh_a'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
+    const first = await firstRun(ctx, g, {}, { workspaces: places('wh_a') });
+    const only = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: first.id, fromNodeId: 'n3' }), mode: 'only' }));
+    expect(only.run.nodes.n2.status).toBe('reused');
+    expect(only.run.nodes.n1.status).toBe('reused');
+    await tick();
+    expect(ctx.fake.started).toEqual(['n3']);
+    ctx.fake.finish('n3');
+    expect((await only.done).status).toBe('succeeded');
+  });
+
+  it('still reads a run.json written by hand before stale marks and modes', () => {
+    const { runStore, projectDir } = setup();
+    const id = '20261002-000000-0aaa';
+    const dir = join(projectDir, '.agent-stream', 'runs', id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ id, graphId: 'g', status: 'succeeded', startedAt: 't', snapshot: chain(), nodes: { n1: { status: 'succeeded' }, n2: { status: 'reused' } } }));
+    const read = runStore.get(id)!;
+    expect(read.nodes.n1).toEqual({ status: 'succeeded' });
+    expect(read).not.toHaveProperty('mode');
+    expect(runStore.list('g')).toEqual([{ id, graphId: 'g', status: 'succeeded', startedAt: 't' }]);
+    // As a source it counts as current: nothing stale in it.
+    const plan = onlyRunPlan(chain(), read, 'n2');
+    expect(plan.ok).toBe(true);
+  });
+
+  describe('write leases', () => {
+    const checkout: CheckoutInfo = { git: false, root: join(tmpdir(), 'agent-stream-checkout'), reason: 'Not a Git repository' };
+    const other = { runId: '20261003-090000-beef', graphId: 'x', folder: 'f', startedAt: 't' };
+    // A writer n1, then a read-only n2 after it.
+    const g = () => graphOf([agent('a'), reader('b'), link('n1', 'n2')]);
+
+    async function finishedRun(leases: WriteLeases) {
+      const ctx = setup(3, leases);
+      const first = started(ctx.runner.start({ ...withRendered(g()), checkout }));
+      await tick();
+      ctx.fake.finish('n1');
+      await tick();
+      ctx.fake.finish('n2');
+      await first.done;
+      ctx.fake.started.length = 0;
+      return { ctx, first: await first.done };
+    }
+
+    it('runs only a read-only step while another run holds the lease: its reused writer takes none', async () => {
+      const leases = testLeases();
+      const { ctx, first } = await finishedRun(leases);
+      expect(leases.acquire(checkout.root, other)).toEqual({ ok: true });
+      const only = started(ctx.runner.start({ ...withRendered(g(), { sourceRunId: first.id, fromNodeId: 'n2' }), mode: 'only', checkout }));
+      expect(only.run.waitingFor).toBeUndefined();
+      expect(leases.holder(checkout.root)?.runId).toBe(other.runId);
+      await tick();
+      expect(ctx.fake.started).toEqual(['n2']);
+      ctx.fake.finish('n2');
+      expect((await only.done).status).toBe('succeeded');
+      expect(leases.holder(checkout.root)?.runId).toBe(other.runId);
+    });
+
+    it('takes no lease for a write-capable step it leaves unrun', async () => {
+      const leases = testLeases();
+      const ctx = setup(3, leases);
+      // Two unconnected steps: the writer fails in the first run, so a Run only on the reader leaves it not_run.
+      const two = graphOf([agent('a'), reader('b')]);
+      const first = started(ctx.runner.start({ ...withRendered(two), checkout }));
+      await tick();
+      ctx.fake.finish('n1', { ok: false, output: '', error: 'boom' });
+      ctx.fake.finish('n2');
+      const done = await first.done;
+      ctx.fake.started.length = 0;
+      expect(leases.acquire(checkout.root, other)).toEqual({ ok: true });
+      const only = started(ctx.runner.start({ ...withRendered(two, { sourceRunId: done.id, fromNodeId: 'n2' }), mode: 'only', checkout }));
+      expect(only.run.nodes.n1.status).toBe('not_run');
+      expect(only.run.waitingFor).toBeUndefined();
+      await tick();
+      expect(ctx.fake.started).toEqual(['n2']);
+      ctx.fake.finish('n2');
+      await only.done;
+      expect(leases.holder(checkout.root)?.runId).toBe(other.runId);
+    });
+
+    it('still takes the lease for the write-capable step it runs', async () => {
+      const leases = testLeases();
+      const { ctx, first } = await finishedRun(leases);
+      expect(leases.acquire(checkout.root, other)).toEqual({ ok: true });
+      const blocked = ctx.runner.start({ ...withRendered(g(), { sourceRunId: first.id, fromNodeId: 'n1' }), mode: 'only', checkout });
+      expect(blocked).toMatchObject({ ok: false, blocked: { holder: { runId: other.runId } } });
+      leases.release(checkout.root, other.runId);
+      const only = started(ctx.runner.start({ ...withRendered(g(), { sourceRunId: first.id, fromNodeId: 'n1' }), mode: 'only', checkout }));
+      expect(leases.holder(checkout.root)?.runId).toBe(only.run.id);
+      await tick();
+      ctx.fake.finish('n1');
+      await only.done;
+      expect(leases.holder(checkout.root)).toBeUndefined();
+    });
   });
 });

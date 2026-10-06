@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { ApprovalRequest, Decision } from '@agent-stream/shared';
+import type { ApprovalRequest, Decision, Graph, GraphNode, NodeEventBody } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 
 type Pending = { request: ApprovalRequest; resolve: (decision: Decision) => void };
@@ -64,4 +64,37 @@ export class ApprovalBroker extends EventEmitter {
     }
     return true;
   }
+}
+
+/**
+ * One approval request of a step, logged on the step like any other: the request goes to the broker and onto the step's
+ * log, the wait ends with the user's decision (or a cancel: Stop, or the signal), and the decision is logged with its
+ * note or scope. A request that can't be logged is cancelled and the error thrown. The caller words what a refusal means.
+ */
+export async function requestApproval(o: {
+  broker: ApprovalBroker;
+  ctx: { runId: string; graph: Pick<Graph, 'id'>; node: Pick<GraphNode, 'id' | 'title'>; emit: (event: NodeEventBody) => void };
+  toolName: string;
+  input: unknown;
+  /** The card: a graph change or a browser action. */
+  card: Pick<ApprovalInput, 'graphChange' | 'browserAction'>;
+  signal: AbortSignal;
+}): Promise<Decision> {
+  const { broker, ctx, toolName, input } = o;
+  const { id, decision } = broker.request({ runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName, input, ...o.card }, o.signal);
+  try {
+    ctx.emit({ type: 'approval_requested', approvalId: id, toolName, input });
+  } catch (error) {
+    broker.decide(id, { decision: 'cancelled' });
+    throw error;
+  }
+  const decided = await decision;
+  ctx.emit({
+    type: 'approval_decided',
+    approvalId: id,
+    decision: decided.decision,
+    ...(decided.decision === 'deny' && decided.note && { note: decided.note }),
+    ...(decided.decision === 'approve' && decided.scope && { scope: decided.scope }),
+  });
+  return decided;
 }

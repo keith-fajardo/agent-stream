@@ -50,7 +50,7 @@ function setup(status: ProviderStatus = signedIn, command: NodeExecutor = instan
 type TestClient = ReturnType<ReturnType<typeof setup>['client']>;
 
 /** Asks for a run preview like the dialog does and returns it (its signature is what Start sends). */
-async function reviewed(app: ReturnType<typeof setup>['app'], c: TestClient, graphId: string, extra: { fromNodeId?: string; sourceRunId?: string } = {}) {
+async function reviewed(app: ReturnType<typeof setup>['app'], c: TestClient, graphId: string, extra: { mode?: 'resume' | 'from' | 'only'; fromNodeId?: string; sourceRunId?: string } = {}) {
   await app.handle(c.c, { type: 'previewRun', graphId, ...extra });
   return c.of('runPreview').at(-1)!.preview;
 }
@@ -243,6 +243,26 @@ describe('app', () => {
     expect(a.of('approvals').at(-1)?.approvals).toEqual([]);
   });
 
+  it('passes the site scope of a browser approval to the broker, and of nothing else', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const card = { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs', element: 'button "Go"' };
+    const request = (browserAction?: typeof card) => app.broker.request({ runId: 'r', graphId: 'g', nodeId: 'n1', nodeTitle: 't', toolName: 'browser_click', input: {}, browserAction });
+    const first = request(card);
+    await app.handle(a.c, { type: 'decide', approvalId: first.id, decision: 'approve', scope: 'site' });
+    await expect(first.decision).resolves.toEqual({ decision: 'approve', scope: 'site' });
+    const second = request(card);
+    await app.handle(a.c, { type: 'decide', approvalId: second.id, decision: 'approve' });
+    await expect(second.decision).resolves.toEqual({ decision: 'approve' });
+    const third = request(card);
+    await app.handle(a.c, { type: 'decide', approvalId: third.id, decision: 'deny', scope: 'site' });
+    await expect(third.decision).resolves.toEqual({ decision: 'deny' });
+    // A request that is not a browser action has no site to allow: the scope is ignored.
+    const bash = request(undefined);
+    await app.handle(a.c, { type: 'decide', approvalId: bash.id, decision: 'approve', scope: 'site' });
+    await expect(bash.decision).resolves.toEqual({ decision: 'approve' });
+  });
+
   it('asks the browser to confirm planner-requested runs', () => {
     const { app, client } = setup();
     const a = client();
@@ -253,6 +273,100 @@ describe('app', () => {
     expect(app.requestRun(g.id, 'n1')).toBe('There is no previous run to re-run from.');
     expect(app.requestRun(g.id)).toBeNull();
     expect(a.of('confirmRun')).toEqual([{ type: 'confirmRun', graphId: g.id, requestedBy: 'planner' }]);
+  });
+
+  it('asks the browser to confirm a planner-requested retry or single-step run', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'agent');
+    expect(app.requestRun(g.id, undefined, 'resume')).toBe('There is no previous run to retry.');
+    expect(app.requestRun(g.id, 'n1', 'only')).toBe('There is no previous run to retry.');
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const runId = a.of('run').at(-1)!.run.id;
+    expect(app.requestRun(g.id, 'n1', 'resume')).toBe('Retry from where it stopped takes no step.');
+    expect(app.requestRun(g.id, undefined, 'only')).toBe('Run only needs a step.');
+    expect(app.requestRun(g.id, 'n9', 'only')).toBe('node n9 does not exist');
+    expect(app.requestRun(g.id, undefined, 'resume')).toBeNull();
+    expect(app.requestRun(g.id, 'n1', 'only')).toBeNull();
+    expect(a.of('confirmRun')).toEqual([
+      { type: 'confirmRun', graphId: g.id, mode: 'resume', sourceRunId: runId, requestedBy: 'planner' },
+      { type: 'confirmRun', graphId: g.id, mode: 'only', fromNodeId: 'n1', sourceRunId: runId, requestedBy: 'planner' },
+    ]);
+  });
+
+  it("tells the planner why Run only can't start, instead of opening a blocked dialog", () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    const add = (title: string, workspace?: string) => app.graphStore.apply(g.id, { type: 'addNode', node: { title, kind: 'agent', prompt: 'p', ...(workspace && { workspace }) } }, 'user');
+    add('a');
+    add('b');
+    add('c', 'w1');
+    add('d', 'w1');
+    for (const [from, to] of [['n1', 'n2'], ['n2', 'n3'], ['n3', 'n4']]) app.graphStore.apply(g.id, { type: 'connect', from, to }, 'user');
+    const nodes = { n1: { status: 'succeeded' as const }, n2: { status: 'failed' as const }, n3: { status: 'not_run' as const }, n4: { status: 'not_run' as const } };
+    app.runStore.create({ id: '20261002-100000-aaaa', graphId: g.id, status: 'failed', startedAt: 't', snapshot: app.graphStore.get(g.id), nodes });
+    expect(app.requestRun(g.id, 'n3', 'only')).toBe('Run only n3 needs n2 to have a current result: run it first.');
+    const done = { n1: { status: 'succeeded' as const }, n2: { status: 'succeeded' as const }, n3: { status: 'succeeded' as const }, n4: { status: 'succeeded' as const } };
+    app.runStore.create({ id: '20261002-110000-bbbb', graphId: g.id, status: 'succeeded', startedAt: 't', snapshot: app.graphStore.get(g.id), nodes: done });
+    expect(app.requestRun(g.id, 'n4', 'only')).toBe('Run only n4 needs the changes n3 made in its workspace: use Re-run from n3 instead.');
+    expect(a.of('confirmRun')).toEqual([]);
+    expect(app.requestRun(g.id, 'n2', 'only')).toBeNull();
+    expect(a.of('confirmRun')).toHaveLength(1);
+  });
+
+  it('retries from where it stopped, runs only one step, and refuses a review made for another mode', async () => {
+    const ran: string[] = [];
+    let failN2 = true;
+    const { app, client } = setup(signedIn, async (ctx) => {
+      ran.push(ctx.node.id);
+      const fail = ctx.node.id === 'n2' && failN2;
+      if (ctx.node.id === 'n2') failN2 = false;
+      return fail ? { ok: false, output: '', error: 'boom' } : { ok: true, output: `out-${ctx.node.id}` };
+    });
+    const a = client();
+    const g = app.graphStore.create('G');
+    for (const t of ['a', 'b', 'c']) app.graphStore.apply(g.id, { type: 'addNode', node: { title: t, kind: 'command', command: `echo ${t}` } }, 'user');
+    app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+    app.graphStore.apply(g.id, { type: 'connect', from: 'n2', to: 'n3' }, 'user');
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, a, g.id)).signature });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('failed'));
+    const failedId = a.of('run').at(-1)!.run.id;
+    ran.length = 0;
+
+    const resume = { mode: 'resume' as const, sourceRunId: failedId };
+    const review = await reviewed(app, a, g.id, resume);
+    expect(review).toMatchObject({ mode: 'resume', problems: [] });
+    expect(review.steps.map((s) => [s.id, s.reused])).toEqual([['n1', true], ['n2', false], ['n3', false]]);
+    // A review made for a retry doesn't start a single-step run, nor a re-run from a step.
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: review.signature, mode: 'only', fromNodeId: 'n1', sourceRunId: failedId });
+    expect(a.of('error').at(-1)?.message).toContain('Something changed since you reviewed');
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: review.signature, ...resume });
+    await vi.waitFor(() => expect(a.of('run').at(-1)?.run.status).toBe('succeeded'));
+    expect(ran).toEqual(['n2', 'n3']);
+    const retryId = a.of('run').at(-1)!.run.id;
+    expect(app.runStore.get(retryId)).toMatchObject({ mode: 'resume', sourceRunId: failedId });
+
+    ran.length = 0;
+    const only = { mode: 'only' as const, fromNodeId: 'n2', sourceRunId: retryId };
+    const onlyReview = await reviewed(app, a, g.id, only);
+    expect(onlyReview.steps.map((s) => [s.id, s.reused, !!s.stale])).toEqual([['n1', true, false], ['n2', false, false], ['n3', true, true]]);
+    await app.handle(a.c, { type: 'startRun', graphId: g.id, reviewed: onlyReview.signature, ...only });
+    await vi.waitFor(() => expect(a.of('run').filter((m) => m.run.id !== retryId && m.run.id !== failedId).at(-1)?.run.status).toBe('succeeded'));
+    expect(ran).toEqual(['n2']);
+    const onlyRun = a.of('run').filter((m) => m.run.id !== retryId && m.run.id !== failedId).at(-1)!.run;
+    expect(app.runStore.get(onlyRun.id)?.nodes.n3).toMatchObject({ status: 'reused', stale: { reason: 'upstream', nodeId: 'n2', runId: onlyRun.id } });
+  });
+
+  it('refuses to preview a mode without the run it needs', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'a', kind: 'agent', prompt: 'p' } }, 'user');
+    await app.handle(a.c, { type: 'previewRun', graphId: g.id, mode: 'resume' });
+    expect(a.of('runPreview').at(-1)?.preview.problems).toEqual(['There is no previous run to retry.']);
   });
 
   it('marks runs left running by a previous server as interrupted', () => {
@@ -1190,6 +1304,37 @@ describe('the checkout and the write lease', () => {
     await vi.waitFor(() => expect(ca.all('run').at(-1)?.run.status).toBe('succeeded'));
   });
 
+  it('runs only a read-only step beside another window\'s run, but blocks one that writes', async () => {
+    const leases = testLeases();
+    const gate = deferred<void>();
+    const a = gitApp({ leases, git: main, over: { executors: { agent: held(gate), command: held(gate) } } });
+    const b = gitApp({ leases, git: () => main(a.root) });
+    const ga = graphWith(a.app, 'Orders', writer);
+    const reader: Op = { type: 'addNode', node: { title: 'look', kind: 'agent', prompt: 'p', access: 'read' } };
+    const gb = graphWith(b.app, 'Billing', writer, reader, { type: 'connect', from: 'n1', to: 'n2' });
+    const ca = client(a.app);
+    const cb = client(b.app);
+    await b.app.handle(cb.client, { type: 'startRun', graphId: gb.id, reviewed: (await reviewedBy(b.app, cb, gb.id)).signature });
+    await vi.waitFor(() => expect(cb.all('run').at(-1)?.run.status).toBe('succeeded'));
+    const first = cb.all('run').at(-1)!.run.id;
+    await a.app.handle(ca.client, { type: 'startRun', graphId: ga.id, reviewed: (await reviewedBy(a.app, ca, ga.id)).signature });
+    const runA = ca.all('run')[0].run.id;
+    const only = (fromNodeId: string) => ({ graphId: gb.id, mode: 'only' as const, fromNodeId, sourceRunId: first });
+    // n2 only reads: the writer n1 is reused, so the other run's lease doesn't matter.
+    await b.app.handle(cb.client, { type: 'previewRun', ...only('n2') });
+    await b.app.handle(cb.client, { type: 'startRun', ...only('n2'), reviewed: cb.last('runPreview').preview.signature });
+    await vi.waitFor(() => expect(cb.all('run').at(-1)?.run.id).not.toBe(first));
+    await vi.waitFor(() => expect(cb.all('run').filter((m) => m.run.id !== first).at(-1)?.run.status).toBe('succeeded'));
+    expect(cb.all('runBlocked')).toEqual([]);
+    // n1 writes in the checkout: it needs the lease the other run holds.
+    await b.app.handle(cb.client, { type: 'previewRun', ...only('n1') });
+    await b.app.handle(cb.client, { type: 'startRun', ...only('n1'), reviewed: cb.last('runPreview').preview.signature });
+    expect(cb.last('runBlocked')).toMatchObject({ type: 'runBlocked', graphId: gb.id, holder: expect.objectContaining({ runId: runA }) });
+    expect(b.app.runStore.list(gb.id)).toHaveLength(2);
+    gate.resolve();
+    await vi.waitFor(() => expect(ca.all('run').at(-1)?.run.status).toBe('succeeded'));
+  });
+
   it('offers only sequential execution outside Git', async () => {
     const leases = testLeases();
     const gate = deferred<void>();
@@ -1289,6 +1434,32 @@ describe('the checkout and the write lease', () => {
     expect(ran).toEqual(expect.arrayContaining([{ id: 'n1', cwd: pathA }, { id: 'n2', cwd: pathB }, { id: 'n3', cwd: projectDir }]));
     // Kept after the run for inspection (spec §4.3a): nothing removes them.
     expect(removed).toEqual([]);
+  });
+
+  it('makes no worktree for a workspace step that Run only reuses', async () => {
+    const added: string[] = [];
+    const { app } = gitApp({
+      git: (root) => repoGit({ root, branch: 'main', head: SHA, answers: { 'worktree add --detach *': (_cwd, args) => (added.push(args[3]), {}) } }).exec,
+    });
+    const c = client(app);
+    const g = graphWith(
+      app,
+      'AB',
+      { type: 'addNode', node: { title: 'a', kind: 'command', command: 'make', workspace: 'wh_a' } },
+      { type: 'addNode', node: { title: 'compare', kind: 'agent', prompt: 'p', access: 'read' } },
+      { type: 'connect', from: 'n1', to: 'n2' },
+    );
+    await app.handle(c.client, { type: 'startRun', graphId: g.id, reviewed: (await reviewedBy(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.all('run').at(-1)?.run.status).toBe('succeeded'));
+    expect(added).toHaveLength(1);
+    const first = c.all('run').at(-1)!.run.id;
+    const only = { graphId: g.id, mode: 'only' as const, fromNodeId: 'n2', sourceRunId: first };
+    await app.handle(c.client, { type: 'previewRun', ...only });
+    await app.handle(c.client, { type: 'startRun', ...only, reviewed: c.last('runPreview').preview.signature });
+    await vi.waitFor(() => expect(c.all('run').filter((m) => m.run.id !== first).at(-1)?.run.status).toBe('succeeded'));
+    expect(added).toHaveLength(1);
+    expect(c.all('error')).toEqual([]);
+    expect(c.all('run').filter((m) => m.run.id !== first).at(-1)!.run).not.toHaveProperty('workspaces');
   });
 
   it("refuses the run when a workspace can't be created, removing this attempt's worktrees", async () => {

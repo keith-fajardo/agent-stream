@@ -357,9 +357,10 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     expect(calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- notes.md\n');
   });
 
-  it('an image over 5 MB is not sent: it is listed with its path and a note to read it with the Read tool', async () => {
+  it('an image over 3.75 MB (over 5 MB as base64) is not sent: it is listed with its path and a note to read it with the Read tool', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'claude-attach-big-'));
-    writeFileSync(join(dir, 'big.png'), Buffer.alloc(5 * 1024 * 1024 + 1, 1));
+    // 4 MB: under 5 MB itself, but over 5 MB as the base64 the API counts.
+    writeFileSync(join(dir, 'big.png'), Buffer.alloc(4 * 1024 * 1024, 1));
     writeFileSync(join(dir, 'small.png'), 'PNG');
     const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
     const big = fake(async function* () {
@@ -368,7 +369,7 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     });
     const a = ctx();
     await runStep({ queryFn: big.fn }, { ...a.c, attachments: [at('big.png')] });
-    expect(big.calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/big.png (image over 5 MB: read it with the Read tool)\n');
+    expect(big.calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/big.png (image over 3.75 MB: read it with the Read tool)\n');
 
     const both = fake(async function* () {
       yield init();
@@ -382,14 +383,14 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     for await (const m of prompt) messages.push(m);
     const content = messages[0].message.content as { type: string }[];
     expect(content.map((c) => c.type)).toEqual(['text', 'image']);
-    expect(JSON.stringify(content[0])).toContain('big.png (image over 5 MB: read it with the Read tool)');
+    expect(JSON.stringify(content[0])).toContain('big.png (image over 3.75 MB: read it with the Read tool)');
     expect(JSON.stringify(content[0])).toContain('small.png (image, attached to this message)');
   });
 
   it('sends images in order until the request’s 20 MB inline budget is spent; the rest are read with the Read tool', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'claude-attach-budget-'));
-    const names = ['own1.png', 'own2.png', 'own3.png', 'graph1.png', 'graph2.png'];
-    for (const n of names) writeFileSync(join(dir, n), Buffer.alloc(Math.floor(4.5 * 1024 * 1024), 1));
+    const names = ['own1.png', 'own2.png', 'own3.png', 'graph1.png', 'graph2.png', 'graph3.png'];
+    for (const n of names) writeFileSync(join(dir, n), Buffer.alloc(Math.floor(3.5 * 1024 * 1024), 1));
     const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
     const { fn, calls } = fake(async function* () {
       yield init();
@@ -402,9 +403,9 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     const messages: SDKUserMessage[] = [];
     for await (const m of prompt) messages.push(m);
     const content = messages[0].message.content as { type: string; text?: string }[];
-    expect(content.map((c) => c.type)).toEqual(['text', 'image', 'image', 'image', 'image']);
-    expect(content[0].text).toContain('graph1.png (image, attached to this message)');
-    expect(content[0].text).toContain('- .agent-stream/attachments/g/graph2.png (image not sent inline (too many large images): read it with the Read tool)');
+    expect(content.map((c) => c.type)).toEqual(['text', 'image', 'image', 'image', 'image', 'image']);
+    expect(content[0].text).toContain('graph2.png (image, attached to this message)');
+    expect(content[0].text).toContain('- .agent-stream/attachments/g/graph3.png (image not sent inline (too many large images): read it with the Read tool)');
   });
 
   it('an image that vanished after the run started is left out of the list, not described as attached', async () => {

@@ -30,6 +30,8 @@ function stepLines(node: GraphNode): string[] {
   if (node.timeoutSec !== undefined) fields.push(`- timeout: ${timeoutValue(node.timeoutSec)}`);
   if (node.kind === 'agent' && node.model) fields.push(`- model: ${stepModelText(node.model)}`);
   if (node.kind === 'agent' && node.effort) fields.push(`- effort: ${node.effort}`);
+  // Written only when on (browser spec §2.1).
+  if (node.kind === 'agent' && node.browser) fields.push('- browser: on');
   if (node.kind === 'agent') for (const name of node.attachments ?? []) fields.push(`- attach: ${name}`);
   const description = oneLine(node.description ?? '');
   const text = normText((node.kind === 'agent' ? node.prompt : node.command) ?? '');

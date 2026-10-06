@@ -2,6 +2,7 @@ import { MAX_IMPORT_CHARS, TIDY_LABEL, type ApprovalRequest, type ChangeTarget, 
 import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
+import { onlyAvailability, retryTarget } from './retry';
 import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
 import { cantSaveToast, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
@@ -99,7 +100,18 @@ export const actions = {
   rerunFromSelected(): void {
     const { selectedNodeId, runs } = getState();
     const latest = runs[0];
-    if (selectedNodeId && latest) dispatch({ kind: 'openConfirm', request: { fromNodeId: selectedNodeId, sourceRunId: latest.id } });
+    if (selectedNodeId && latest) dispatch({ kind: 'openConfirm', request: { mode: 'from', fromNodeId: selectedNodeId, sourceRunId: latest.id } });
+  },
+  /** Retry from where it stopped: the steps that didn't finish in the newest run, and everything after them. */
+  retryFromStop(): void {
+    const target = retryTarget(getState());
+    if (target) dispatch({ kind: 'openConfirm', request: { mode: 'resume', sourceRunId: target.id } });
+  },
+  /** Run only the selected step, reusing the newest run for everything else. */
+  runOnlySelected(): void {
+    const s = getState();
+    const latest = s.runs[0];
+    if (s.selectedNodeId && latest && onlyAvailability(s, s.selectedNodeId).enabled) dispatch({ kind: 'openConfirm', request: { mode: 'only', fromNodeId: s.selectedNodeId, sourceRunId: latest.id } });
   },
   stop(): void {
     const { run } = getState();

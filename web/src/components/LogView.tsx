@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Markdown } from '../markdown';
-import { fmtDuration, type NodeEvent } from '@agent-stream/shared';
+import { DONE, fmtDuration, type NodeEvent } from '@agent-stream/shared';
+import { send } from '../bridge';
 
 export const LOG_STREAM_CAP = 200_000;
 
@@ -27,7 +28,7 @@ function Collapsible({ text }: { text: string }) {
   );
 }
 
-function LogEvent({ event: e }: { event: NodeEvent }) {
+function LogEvent({ event: e, ended, live }: { event: NodeEvent; ended: ReadonlySet<string>; live: boolean }) {
   const time = <span className="t">{new Date(e.at).toLocaleTimeString()}</span>;
   switch (e.type) {
     case 'start':
@@ -76,7 +77,32 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
       return (
         <div className={`ev approval ${e.decision}`}>
           {time}
-          {e.decision === 'approve' ? '✔ Approved' : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
+          {e.decision === 'approve' ? `✔ Approved${e.scope === 'site' ? ': on this site for this step' : ''}` : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
+        </div>
+      );
+    case 'browser':
+      return (
+        <div className="ev browser">
+          {time}
+          {e.text}
+        </div>
+      );
+    case 'browser_wait':
+      return (
+        <div className="ev browser-wait">
+          {time}⏸ {e.text}
+          {live && !ended.has(e.waitId) && (
+            <button className="primary" onClick={() => send({ type: 'browserDone', waitId: e.waitId })}>
+              {DONE}
+            </button>
+          )}
+        </div>
+      );
+    case 'browser_wait_done':
+      return (
+        <div className="ev browser-wait">
+          {time}
+          {e.by === 'user' ? '✔ Done' : '■ Stopped (run stopped)'}
         </div>
       );
     case 'retry':
@@ -117,8 +143,11 @@ function LogEvent({ event: e }: { event: NodeEvent }) {
 }
 
 /** Renders a node's events; consecutive stdout/stderr chunks merge into one block. */
-export function LogView({ events }: { events: NodeEvent[] }) {
+/** `live`: the step is still running, so a wait without its done event is still going on (default: yes). */
+export function LogView({ events, live = true }: { events: NodeEvent[]; live?: boolean }) {
   const items: ReactNode[] = [];
+  /** Waits that already ended: their line keeps no Done button. */
+  const ended = new Set(events.flatMap((e) => (e.type === 'browser_wait_done' ? [e.waitId] : [])));
   let stream: { kind: 'stdout' | 'stderr'; text: string } | undefined;
   const flush = (key: number) => {
     if (!stream) return;
@@ -143,7 +172,7 @@ export function LogView({ events }: { events: NodeEvent[] }) {
       return;
     }
     flush(i);
-    items.push(<LogEvent key={i} event={e} />);
+    items.push(<LogEvent key={i} event={e} ended={ended} live={live} />);
   });
   flush(events.length);
   return <div className="logview">{items}</div>;

@@ -262,8 +262,9 @@ describe('Claude planner: an image over 5 MB', () => {
     });
     await provider.status();
     const events: { type: string; text?: string }[] = [];
-    const big = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
-    const exact = Buffer.alloc(5 * 1024 * 1024).toString('base64');
+    // 4 MB is under 5 MB itself but over it as base64, which is what the API counts; 3.75 MB is exactly 5 MB of base64.
+    const big = Buffer.alloc(4 * 1024 * 1024).toString('base64');
+    const exact = Buffer.alloc(3.75 * 1024 * 1024).toString('base64');
     const gate = { privacy: () => null, isReadOnly: () => true, isSelfApproving: () => false, approve: async () => ({ allow: true as const, by: 'user' as const }), decide: async () => ({ allow: true as const, by: 'user' as const }) };
     await provider.planTurn({
       prompt: 'Look.',
@@ -285,11 +286,11 @@ describe('Claude planner: an image over 5 MB', () => {
     for await (const m of prompt) sent.push(m);
     // The model is told too: one line naming the file and why, never a path.
     expect(sent[0].message.content).toEqual([
-      { type: 'text', text: "Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB).\n" },
+      { type: 'text', text: "Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 3.75 MB).\n" },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: exact } },
     ]);
     expect((sent[0].message.content as { type: string; text?: string }[])[0].text).not.toMatch(/[\\/]/);
-    expect(events).toContainEqual({ type: 'note', text: "big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB)." });
+    expect(events).toContainEqual({ type: 'note', text: "big.png couldn't be included: it is too large to send (Claude takes images up to 3.75 MB)." });
   });
 
   it('with only an oversize image, the plain text prompt still carries the line (and no path)', async () => {
@@ -316,7 +317,7 @@ describe('Claude planner: an image over 5 MB', () => {
       signal: new AbortController().signal,
       onEvent: () => {},
     });
-    expect(prompts[0]).toBe("Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB).\n");
+    expect(prompts[0]).toBe("Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 3.75 MB).\n");
   });
 });
 
@@ -358,7 +359,7 @@ describe('Claude planner: the inline budget per request (ruling on I-2)', () => 
   const together = (name: string) => `${name} couldn't be included: the message's files were too large to send together.`;
 
   it('fills 20 MB in message order, PDFs counting too; a file past it gets a line naming it (no path)', async () => {
-    const { content, events } = await send([pdf('spec.pdf', 18 * MB), png('big.png', 4 * MB), png('small.png', MB)]);
+    const { content, events } = await send([pdf('spec.pdf', 18 * MB), png('big.png', 3 * MB), png('small.png', MB)]);
     expect(content.map((c) => c.type)).toEqual(['text', 'document', 'image']);
     expect(content[0].text).toBe(`Look.\n\nNote: ${together('big.png')}\n`);
     expect(events).toContainEqual({ type: 'note', text: together('big.png') });

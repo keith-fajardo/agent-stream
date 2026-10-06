@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { fmtDuration, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
+import { fmtDuration, staleNote, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
 import { badgeText } from '../changeLabels';
 import type { ModelChip } from '../stepModelMenus';
 import { workspaceColor } from '../workspaceColor';
@@ -42,6 +42,11 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
       <div className="step-meta">
         <span>{node.id}</span>
         {node.access === 'read' && <span className="read-badge">read-only</span>}
+        {node.kind === 'agent' && node.browser && (
+          <span className="browser-badge" title="Browser on: this step uses the Agent Stream browser">
+            🌐
+          </span>
+        )}
         {node.workspace && (
           <span className={`ws-badge ws-color-${workspaceColor(node.workspace)}`} title={`Runs in workspace ${node.workspace}`}>
             ⎇ {node.workspace}
@@ -61,6 +66,11 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
           node.updatedBy === 'agent' && <span className="by-agent">by agent</span>
         )}
         {status && <span className="status">{statusLabel(status)}</span>}
+        {state?.stale && (
+          <span className="stale-badge" title={`Stale: ${staleNote(state.stale, node.id)}`}>
+            stale
+          </span>
+        )}
         {state?.durationMs !== undefined && <span>{fmtDuration(state.durationMs)}</span>}
       </div>
       {waiting && <div className="needs-approval">⏸ Needs approval</div>}

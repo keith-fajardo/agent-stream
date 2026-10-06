@@ -19,6 +19,8 @@ export type DocStep = {
   /** Agent steps only. */
   model?: StepModel;
   effort?: EffortLevel;
+  /** Agent steps only: `- browser: on` (browser spec §2.1). */
+  browser?: true;
   attachments?: string[];
   description?: string;
   prompt?: string;
@@ -31,7 +33,8 @@ export type DocVariable = { name: string; description: string; line: number };
 export type DocAttachments = { names: string[]; line: number };
 /** A graph's meaning as its Markdown file states it (Markdown graph files spec §3.1). Positions and bookkeeping are in the side file. */
 export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; attachments?: DocAttachments; steps: DocStep[]; edges: FlowEdge[] };
-export type ParseGraphResult = { ok: true; doc: GraphDoc } | { ok: false; errors: GraphFileError[] };
+/** `warnings`: lines Agent Stream dropped while reading (a browser line on a command step); the file still reads. */
+export type ParseGraphResult = { ok: true; doc: GraphDoc; warnings?: GraphFileError[] } | { ok: false; errors: GraphFileError[] };
 
 /** CRLF and lone CR as LF. */
 export const normText = (text: string): string => text.replace(/\r\n?/g, '\n');
@@ -72,7 +75,7 @@ export function canonicalGraph(graph: Graph): Graph {
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, ...rest } = node;
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, browser, ...rest } = node;
   const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
   const summary = oneLine(description ?? '');
   return {
@@ -86,6 +89,7 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(node.kind === 'agent' && model && { model: { provider: model.provider, id: model.id } }),
     ...(node.kind === 'agent' && effort && { effort }),
     ...(node.kind === 'agent' && attachments?.length && { attachments: [...attachments] }),
+    ...(node.kind === 'agent' && browser === true && { browser: true }),
   };
 }
 

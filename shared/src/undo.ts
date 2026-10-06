@@ -53,7 +53,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
     instructions: g.instructions,
     variables: g.variables.map((v) => ({ name: v.name, description: v.description, line: 1 })),
     ...(g.attachments?.length && { attachments: { names: [...g.attachments], line: 1 } }),
-    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, attachments, description, prompt, command }) => ({
+    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, browser, attachments, description, prompt, command }) => ({
       id,
       title,
       kind,
@@ -62,6 +62,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
       ...(timeoutSec !== undefined && { timeoutSec }),
       ...(model && { model }),
       ...(effort && { effort }),
+      ...(kind === 'agent' && browser === true && { browser: true as const }),
       ...(attachments?.length && { attachments: [...attachments] }),
       ...(description && { description }),
       ...(prompt && { prompt }),

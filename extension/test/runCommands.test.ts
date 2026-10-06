@@ -104,6 +104,17 @@ describe('run commands', () => {
     expect(await change.decision).toEqual({ decision: 'approve' });
   });
 
+  it('does not approve a browser action from the sidebar or the palette: the step card shows what it would do', async () => {
+    const s = setup();
+    const browserAction = { site: 'example.com', url: 'https://example.com/', title: 'Example', element: 'button "Send"' };
+    const req = s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: 'browser_click', input: {}, browserAction } as never);
+    s.cmds.approve({ folder: s.f, request: s.app.broker.pending()[0] });
+    expect(s.app.broker.pending().map((p) => p.id)).toEqual([req.id]);
+    expect(s.info).toHaveBeenCalledWith('A browser action is approved on the step\'s card, where you can see what it will do. Open the graph and use Show.');
+    s.cmds.deny({ folder: s.f, request: s.app.broker.pending()[0] });
+    expect(await req.decision).toEqual({ decision: 'deny' });
+  });
+
   it('does nothing when an approval command gets no item', async () => {
     const s = setup();
     const req = s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: 'Bash', input: {} });

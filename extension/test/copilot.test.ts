@@ -439,20 +439,21 @@ describe('Copilot: the 5 MB image rule and the inline budget per request (ruling
   };
 
   it('a step sends no image over 5 MB and at most 20 images, filling 20 MB in order; the list says why for the rest', async () => {
-    const s = step({ attachments: [image('huge.png', 5 * MB + 1), ...Array.from({ length: 21 }, (_, i) => image(`i${i}.png`, 10))] });
+    // 4 MB: under 5 MB itself, but over 5 MB as the base64 a model is sent.
+    const s = step({ attachments: [image('huge.png', 4 * MB), ...Array.from({ length: 21 }, (_, i) => image(`i${i}.png`, 10))] });
     const m = takingImages();
     await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
     const content = m.requests[0].messages[1].content;
     expect(content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(20);
     const listText = (content[0] as vscode.LanguageModelTextPart).value;
-    expect(listText).toContain("- huge.png (image over 5 MB: it couldn't be shown to the model)");
+    expect(listText).toContain("- huge.png (image over 3.75 MB: it couldn't be shown to the model)");
     expect(listText).toContain('- i19.png (image, attached to this message)');
     expect(listText).toContain("- i20.png (image not sent (too many large images): it couldn't be shown to the model)");
 
-    const bytes = step({ attachments: ['b1', 'b2', 'b3', 'b4', 'b5'].map((n) => image(`${n}.png`, Math.floor(4.5 * MB))) });
+    const bytes = step({ attachments: ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'].map((n) => image(`${n}.png`, Math.floor(3.5 * MB))) });
     const m2 = takingImages();
     await provider({ lm: models(m2.model) }).runStep(bytes.ctx, allowAll);
-    expect(m2.requests[0].messages[1].content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(4);
+    expect(m2.requests[0].messages[1].content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(5);
   });
 
   it('a text file over 2 MB is listed with a note to search it with Grep (Read takes up to 2 MB)', async () => {
@@ -476,7 +477,7 @@ describe('Copilot: the 5 MB image rule and the inline budget per request (ruling
       systemAppend: '',
       cwd,
       tools: [],
-      files: [png('huge.png', 5 * MB + 1), ...Array.from({ length: 21 }, (_, i) => png(`i${i}.png`, 10))],
+      files: [png('huge.png', 4 * MB), ...Array.from({ length: 21 }, (_, i) => png(`i${i}.png`, 10))],
       gate: createPlannerGate({ projectDir: cwd, privateFiles: [], graphToolNames: new Set() }),
       signal: new AbortController().signal,
       onEvent: (e) => events.push(e),
@@ -485,7 +486,7 @@ describe('Copilot: the 5 MB image rule and the inline budget per request (ruling
     const content = m.requests[0].messages.at(-1)!.content;
     expect(content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(20);
     expect(content[0]).toEqual(
-      text("Look.\n\nNote: huge.png couldn't be included: it is too large to send (images up to 5 MB are sent).\nNote: i20.png couldn't be included: the message's files were too large to send together.\n"),
+      text("Look.\n\nNote: huge.png couldn't be included: it is too large to send (images up to 3.75 MB are sent).\nNote: i20.png couldn't be included: the message's files were too large to send together.\n"),
     );
     expect(events).toContainEqual({ type: 'note', text: "i20.png couldn't be included: the message's files were too large to send together." });
   });

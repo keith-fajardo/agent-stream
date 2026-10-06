@@ -29,7 +29,7 @@ export function RunConfirmDialog() {
     if (confirm && graph) {
       const requestId = `preview-${++requestCounter}`;
       dispatch({ kind: 'previewRequested', requestId });
-      send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId, requestId });
+      send({ type: 'previewRun', graphId: graph.id, mode: confirm.mode, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId, requestId });
     }
   }, [confirm, graph, variableValues, models]);
 
@@ -70,21 +70,32 @@ export function RunConfirmDialog() {
   const close = () => dispatch({ kind: 'closeConfirm' });
   const start = () => {
     if (!preview) return;
-    const request = { graphId: graph.id, reviewed: preview.signature, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId };
+    const request = { graphId: graph.id, reviewed: preview.signature, mode: confirm.mode, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId };
     send({ type: 'startRun', ...request });
     dispatch({ kind: 'startRequested', start: request });
     close();
   };
-  const executing = preview?.steps.filter((s) => !s.reused) ?? [];
+  // What the run is, in words: a retry names the run it continues; Run only and a re-run name their step.
+  const what =
+    confirm.mode === 'resume'
+      ? `Retry run ${confirm.sourceRunId}`
+      : confirm.mode === 'only' && confirm.fromNodeId
+        ? `Run only ${confirm.fromNodeId}`
+        : confirm.fromNodeId
+          ? `Re-run from ${confirm.fromNodeId}`
+          : undefined;
+  const executing = preview?.steps.filter((s) => !s.reused && !s.notRun) ?? [];
   const commands = executing.filter((s) => s.kind === 'command');
   const agents = executing.filter((s) => s.kind === 'agent');
-  const reused = preview?.steps.filter((s) => s.reused) ?? [];
+  const reused = preview?.steps.filter((s) => s.reused && !s.stale) ?? [];
+  const kept = preview?.steps.filter((s) => s.reused && s.stale) ?? [];
+  const notRun = preview?.steps.filter((s) => s.notRun) ?? [];
 
   return (
     <div className="modal-backdrop" onClick={close}>
       <div className="modal" role="dialog" aria-label="Run confirmation" onClick={(e) => e.stopPropagation()}>
-        <h2>{confirm.requestedBy === 'planner' ? 'The planner asks to run this graph' : confirm.fromNodeId ? `Re-run from ${confirm.fromNodeId}` : 'Run workflow'}</h2>
-        {confirm.requestedBy === 'planner' && confirm.fromNodeId && <p className="muted">Re-run from {confirm.fromNodeId}</p>}
+        <h2>{confirm.requestedBy === 'planner' ? 'The planner asks to run this graph' : (what ?? 'Run workflow')}</h2>
+        {confirm.requestedBy === 'planner' && what && <p className="muted">{what}</p>}
         {!preview ? (
           <p className="muted">Checking the run…</p>
         ) : (
@@ -176,6 +187,8 @@ export function RunConfirmDialog() {
                 Reused from run {preview.sourceRunId}: {reused.map((s) => s.id).join(', ')}
               </p>
             )}
+            {kept.length > 0 && <p className="muted">Kept, marked stale: {kept.map((s) => s.id).join(', ')}</p>}
+            {notRun.length > 0 && <p className="muted">Not run: {notRun.map((s) => s.id).join(', ')}</p>}
           </>
         )}
         <div className="modal-actions">

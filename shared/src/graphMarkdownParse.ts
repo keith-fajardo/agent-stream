@@ -8,6 +8,7 @@ import { parseFlow, type FlowEdge } from './graphFlow';
 import type { EffortLevel, GraphFileError, NodeKind, StepModel } from './types';
 import { isEffortLevel } from './format';
 import { parseStepModel } from './stepModels';
+import { commandBrowserWarning } from './browser';
 import { variableNameProblem } from './variables';
 
 type TextItem = { kind: 'text'; line: number; text: string };
@@ -22,7 +23,7 @@ const STEP_HEADING_RE = new RegExp(`^([A-Za-z0-9_-]+)${STEP_SEPARATOR.trimEnd()}
 const FIELD_RE = /^[-*][ \t]+([A-Za-z]+)[ \t]*:[ \t]*(.*?)[ \t]*$/;
 const VARIABLE_RE = /^[-*][ \t]+`([^`]*)`(?:[ \t]*:[ \t]*(.*?))?[ \t]*$/;
 const QUOTE_RE = /^>[ \t]?(.*)$/;
-const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'attach'];
+const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach'];
 /** A field a step may repeat: one line per attachment, in order (spec §6b.3). */
 const LIST_FIELDS = new Set(['attach']);
 const ATTACHMENT_RE = /^[-*][ \t]+`([^`]*)`[ \t]*$/;
@@ -161,7 +162,7 @@ function readFlow(section: Section, stepIds: ReadonlySet<string>, errors: GraphF
   return r.edges;
 }
 
-function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
+function readStep(section: Section, errors: GraphFileError[], warnings: GraphFileError[]): DocStep | null {
   const before = errors.length;
   const fail = (line: number, message: string) => void errors.push({ line, message });
   const { id, title } = stepHeading(section.title);
@@ -188,7 +189,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     if (field) {
       const key = field[1].toLowerCase();
       if (phase !== 'fields') fail(item.line, `fields go at the top of step ${label}, before the description and the code block.`);
-      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort and attach.`);
+      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort, browser and attach.`);
       else if (LIST_FIELDS.has(key)) lists.set(key, [...(lists.get(key) ?? []), { value: field[2], line: item.line }]);
       else if (fields.has(key)) fail(item.line, `the field ${key} appears twice in step ${label}. Keep one.`);
       else fields.set(key, { value: field[2], line: item.line });
@@ -267,6 +268,15 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
   if (attachLines.length && finalKind === 'command') {
     for (const a of attachLines) fail(a.line, `step ${label} is a command step, so it can't have attachments. Remove this line, or make it an agent step.`);
   } else attachments = attachmentNames(attachLines, `step ${label}`, errors);
+  // Whether the step may use the browser (browser spec §2.1): on, or off (the same as no line). A command step never
+  // has it: the line is dropped with a warning and the file still reads (ruling R1).
+  let browser: true | undefined;
+  const b = fields.get('browser');
+  if (b) {
+    if (b.value !== 'on' && b.value !== 'off') fail(b.line, `browser is "${b.value}"; use on or off.`);
+    else if (finalKind === 'command') warnings.push({ line: b.line, message: commandBrowserWarning(label) });
+    else if (b.value === 'on') browser = true;
+  }
   if (errors.length > before || !code || !finalKind) return null;
   const description = quote
     .map((q) => q.trim())
@@ -282,6 +292,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     ...(timeoutSec !== undefined && { timeoutSec }),
     ...(model && { model }),
     ...(effort && { effort }),
+    ...(browser && { browser }),
     ...(attachments.length > 0 && { attachments }),
     ...(description && { description }),
     ...(text && (finalKind === 'agent' ? { prompt: text } : { command: text })),
@@ -344,10 +355,11 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
     if (earlier !== undefined) errors.push({ line: s.line, message: `the step id ${id} is used twice (also on line ${earlier}). Give one of them another id, or remove the id to get a new one.` });
     else idLines.set(id, s.line);
   }
-  const steps = stepSections.map((s) => readStep(s, errors)).filter((s): s is DocStep => s !== null);
+  const warnings: GraphFileError[] = [];
+  const steps = stepSections.map((s) => readStep(s, errors, warnings)).filter((s): s is DocStep => s !== null);
   const edges = flow ? readFlow(flow, new Set(idLines.keys()), errors) : [];
   if (errors.length) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
-  return { ok: true, doc: { name: h1!.title, goal, instructions, variables, ...(attachments?.names.length && { attachments }), steps, edges } };
+  return { ok: true, doc: { name: h1!.title, goal, instructions, variables, ...(attachments?.names.length && { attachments }), steps, edges }, ...(warnings.length > 0 && { warnings }) };
 }
 
 /** The file's lines: a leading BOM dropped, CRLF and CR read as LF. */

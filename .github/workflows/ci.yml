@@ -26,7 +26,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # GitHub's Windows, macOS and Linux runners have Chrome: the real-browser suite must run, never skip (browser spec §7).
       - run: npm test
+        env:
+          AGENT_STREAM_REQUIRE_BROWSER: '1'
       - run: npm run build
       - name: Integration test in VS Code
         if: runner.os != 'Linux'

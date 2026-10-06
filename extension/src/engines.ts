@@ -12,11 +12,12 @@ import {
   valuesFileFor,
   type AgentProvider,
   type App,
+  type BrowserService,
   type Found,
   type GitExec,
   type WriteLeases,
 } from '@agent-stream/engine';
-import type { ApprovalRequest, GraphFileError, GraphListItem, ProviderId, ProviderStatus, ServerMessage, SessionListItem } from '@agent-stream/shared';
+import type { ApprovalRequest, GraphFileError, GraphListItem, ProviderId, ProviderStatus, RunMode, ServerMessage, SessionListItem } from '@agent-stream/shared';
 import { createCopilotProvider, type LmAccess } from './providers/copilot';
 import { parseProviderSetting } from './providers/registry';
 import type { Settings } from './settings';
@@ -28,7 +29,7 @@ export type FolderApproval = { folder: Folder; request: ApprovalRequest };
 export type EngineEvents = {
   graphs(folder: Folder, graphs: GraphListItem[]): void;
   approvals(): void;
-  confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string, requestedBy?: 'planner'): void;
+  confirmRun(folder: Folder, graphId: string, fromNodeId?: string, sourceRunId?: string, requestedBy?: 'planner', mode?: RunMode): void;
   /** `reason: 'file'`: the graph's Markdown file disappeared; the graph comes back with it (Markdown graph files spec §6.5). */
   graphDeleted(folder: Folder, graphId: string, reason?: 'file'): void;
   /** The graph's Markdown file has these problems; [] once they are fixed (spec §6.3). */
@@ -58,6 +59,8 @@ export type EngineManagerDeps = {
   createApp?: typeof realCreateApp;
   /** Test seam: how each provider is built. */
   providers?: Partial<Record<ProviderId, () => AgentProvider>>;
+  /** The window's Agent Stream browser (browser spec §3): one for every folder's engine. */
+  browser?: BrowserService;
 };
 
 export const CHECKING_LABEL = 'checking';
@@ -186,6 +189,8 @@ export class EngineManager {
       leases: this.leases,
       git: this.d.git,
       home: this.d.home,
+      browser: this.d.browser,
+      log: (message) => this.d.events.log?.(message),
       // Read when a run starts and per planner turn, so a settings change reaches the next one.
       modelDefaults: () => {
         const { model, effort } = this.d.settings();
@@ -230,7 +235,7 @@ export class EngineManager {
       case 'approvals':
         return this.d.events.approvals();
       case 'confirmRun':
-        return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId, msg.requestedBy);
+        return this.d.events.confirmRun(folder, msg.graphId, msg.fromNodeId, msg.sourceRunId, msg.requestedBy, msg.mode);
       case 'graphDeleted':
         return this.d.events.graphDeleted(folder, msg.graphId, msg.reason);
       case 'graphFileErrors':

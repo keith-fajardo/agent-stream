@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { applyOp, changedFields, nextNodeId, validateRunnable, type ChangedField, type ChangeSource, type Decision, type Graph, type GraphNode, type Op, type RunMeta } from '@agent-stream/shared';
-import type { ApprovalBroker } from './approvals';
+import { requestApproval, type ApprovalBroker } from './approvals';
 import type { NodeContext } from './executors';
 import type { GraphStore } from './graphStore';
 import { defineTool, reply } from './plannerTools';
@@ -28,8 +28,8 @@ const TITLE_PROBLEM = `a step title must be one line of at most ${MAX_TITLE_CHAR
 const titleProblem = (title: string | undefined) => (title !== undefined && (/[\r\n\u2028\u2029\u0085\v\f]/.test(title) || title.length > MAX_TITLE_CHARS) ? TITLE_PROBLEM : null);
 
 /** Changed fields in the order a person reads them: the text that runs first. */
-const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments'];
-const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace', model: 'model', effort: 'effort', attachments: 'attachments' };
+const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments', 'browser'];
+const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace', model: 'model', effort: 'effort', attachments: 'attachments', browser: 'browser' };
 /** "command", "prompt and description", "prompt, title and description". */
 const listed = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 const unique = (ids: string[]) => [...new Set(ids)];
@@ -130,25 +130,8 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
   }
 
   /** One approval request, logged on the calling step like any other (createStepGate). */
-  async function ask(input: unknown, summary: string, detail: string): Promise<Decision> {
-    const { id, decision } = d.broker.request(
-      { runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName: TOOL_NAME, input, graphChange: { summary, detail } },
-      d.signal,
-    );
-    try {
-      ctx.emit({ type: 'approval_requested', approvalId: id, toolName: TOOL_NAME, input });
-    } catch (error) {
-      d.broker.decide(id, { decision: 'cancelled' });
-      throw error;
-    }
-    const decided = await decision;
-    ctx.emit(
-      decided.decision === 'deny' && decided.note
-        ? { type: 'approval_decided', approvalId: id, decision: decided.decision, note: decided.note }
-        : { type: 'approval_decided', approvalId: id, decision: decided.decision },
-    );
-    return decided;
-  }
+  const ask = (input: unknown, summary: string, detail: string): Promise<Decision> =>
+    requestApproval({ broker: d.broker, ctx, toolName: TOOL_NAME, input, card: { graphChange: { summary, detail } }, signal: d.signal });
 
   /** Check, fill in, ask; on approval check again, then change the run and the graph. Nothing changes otherwise. */
   async function propose(input: unknown, make: () => Proposal | string): Promise<ToolReply> {

@@ -146,6 +146,62 @@ describe('previewRun', () => {
   });
 });
 
+describe('previewRun retry modes', () => {
+  const g = graphOf([cmd('A', 'a'), cmd('B', 'b'), cmd('C', 'c'), link('n1', 'n2'), link('n2', 'n3')]);
+  const first = previewRun({ graph: g, values: {}, env: env() });
+  const source = (nodes: RunMeta['nodes']): RunMeta => ({ id: '20261002-100000-aaaa', graphId: 'g', status: 'cancelled', startedAt: 't', snapshot: g, nodes, rendered: first.rendered });
+  const stopped = source({ n1: { status: 'succeeded' }, n2: { status: 'cancelled' }, n3: { status: 'cancelled' } });
+  const done = source({ n1: { status: 'succeeded' }, n2: { status: 'succeeded' }, n3: { status: 'succeeded' } });
+  const flags = (steps: { id: string; reused: boolean; stale?: boolean; notRun?: boolean }[]) => steps.map((s) => [s.id, s.reused, !!s.stale, !!s.notRun]);
+
+  it('retries from where it stopped: keeps what succeeded, runs the rest', () => {
+    const out = previewRun({ graph: g, values: {}, env: env(), source: stopped, mode: 'resume' });
+    expect(out.preview.mode).toBe('resume');
+    expect(flags(out.preview.steps)).toEqual([['n1', true, false, false], ['n2', false, false, false], ['n3', false, false, false]]);
+  });
+
+  it('shows what Run only keeps stale and what it does not run', () => {
+    const out = previewRun({ graph: g, values: {}, env: env(), source: done, mode: 'only', fromNodeId: 'n2' });
+    expect(out.preview.problems).toEqual([]);
+    expect(flags(out.preview.steps)).toEqual([['n1', true, false, false], ['n2', false, false, false], ['n3', true, true, false]]);
+    const partial = previewRun({ graph: g, values: {}, env: env(), source: stopped, mode: 'only', fromNodeId: 'n1' });
+    expect(flags(partial.preview.steps)).toEqual([['n1', false, false, false], ['n2', false, false, true], ['n3', false, false, true]]);
+  });
+
+  it('lists a reused step that already carries a stale mark as kept stale', () => {
+    const carried = source({ n1: { status: 'succeeded' }, n2: { status: 'succeeded' }, n3: { status: 'succeeded', stale: { reason: 'edited', nodeId: 'n3', runId: 'r0' } } });
+    // n3 is reused with its old mark; n2 is not after n3, so only n3 shows as kept stale when the chosen step is n2.
+    const out = previewRun({ graph: g, values: {}, env: env(), source: carried, mode: 'only', fromNodeId: 'n2' });
+    expect(flags(out.preview.steps)).toEqual([['n1', true, false, false], ['n2', false, false, false], ['n3', true, true, false]]);
+    const clean = previewRun({ graph: g, values: {}, env: env(), source: done, mode: 'only', fromNodeId: 'n2' });
+    expect(out.preview.signature).toBe(clean.preview.signature);
+    // A branch the chosen step isn't on: the carried mark alone makes it stale, and the review says so.
+    const wide = graphOf([cmd('A', 'a'), cmd('B', 'b'), cmd('C', 'c'), link('n1', 'n2'), link('n1', 'n3')]);
+    const wideFirst = previewRun({ graph: wide, values: {}, env: env() });
+    const wideSource: RunMeta = { ...carried, snapshot: wide, rendered: wideFirst.rendered, nodes: { n1: { status: 'succeeded' }, n2: { status: 'succeeded' }, n3: { status: 'succeeded', stale: { reason: 'edited', nodeId: 'n3', runId: 'r0' } } } };
+    const branch = previewRun({ graph: wide, values: {}, env: env(), source: wideSource, mode: 'only', fromNodeId: 'n2' });
+    expect(flags(branch.preview.steps)).toEqual([['n1', true, false, false], ['n2', false, false, false], ['n3', true, true, false]]);
+  });
+
+  it('blocks Run only when an earlier step has no current result', () => {
+    const out = previewRun({ graph: g, values: {}, env: env(), source: stopped, mode: 'only', fromNodeId: 'n3' });
+    expect(out.preview.problems).toEqual(['Run only n3 needs n2 to have a current result: run it first.']);
+    expect(out.rendered).toBeUndefined();
+  });
+
+  it('blocks a mode without the run or step it needs', () => {
+    expect(previewRun({ graph: g, values: {}, env: env(), mode: 'resume' }).preview.problems).toEqual(['There is no previous run to retry.']);
+    expect(previewRun({ graph: g, values: {}, env: env(), source: done, mode: 'only' }).preview.problems).toEqual(['Run only needs a step.']);
+  });
+
+  it("covers the mode in the signature, so one mode's review can't start another", () => {
+    const sig = (mode: 'resume' | 'from' | 'only', fromNodeId?: string) => previewRun({ graph: g, values: {}, env: env(), source: done, mode, fromNodeId }).preview.signature;
+    expect(new Set([sig('from', 'n3'), sig('only', 'n3'), sig('resume')]).size).toBe(3);
+    // A request without a mode is a re-run from the step.
+    expect(previewRun({ graph: g, values: {}, env: env(), source: done, fromNodeId: 'n3' }).preview.signature).toBe(sig('from', 'n3'));
+  });
+});
+
 describe('envLookup', () => {
   it('ignores case only on Windows', () => {
     expect(envLookup({ Path: 'x' }, 'win32')('PATH')).toBe('x');

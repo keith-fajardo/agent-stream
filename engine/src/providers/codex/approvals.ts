@@ -117,7 +117,9 @@ export function createServerRequestHandler(c: ApprovalContext): (method: string,
     if (!d.allow) return reply(d.reason, false);
     try {
       const out = await tool.run(args, c.signal);
-      return reply(out.text, out.isError !== true);
+      // A tool's images (a browser screenshot) go back as data URLs after its text.
+      const images = (out.images ?? []).map((i) => ({ type: 'inputImage' as const, imageUrl: `data:${i.mediaType};base64,${i.data}` }));
+      return { contentItems: [{ type: 'inputText', text: out.text }, ...images], success: out.isError !== true };
     } catch (e) {
       return reply(e instanceof Error ? e.message : String(e), false);
     }
