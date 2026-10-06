@@ -20,6 +20,8 @@ const effort = z.enum(EFFORT_LEVELS);
 const attachmentNames = z.array(z.string().max(200)).max(MAX_ATTACHMENTS);
 const attachTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('graph') }), z.object({ kind: z.literal('step'), nodeId: z.string() })]);
 /** A file's bytes as base64: an image of 10 MB is under 14 million characters. */
+/** All files of one attach together: 20 files of 5 MB, as base64 characters. */
+const MAX_ATTACH_PAYLOAD_CHARS = 140_000_000;
 const upload = z.object({ name: z.string().min(1).max(1000), data: z.string().max(14_000_000) });
 
 const graphNodeSchema = z.object({
@@ -151,7 +153,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
   z.object({ type: z.literal('ops'), graphId: z.string(), ops: z.array(opSchema).min(1).max(500), label: z.string().min(1).max(MAX_UNDO_LABEL_CHARS) }),
   z.object({ type: z.literal('undo'), graphId: z.string() }),
-  z.object({ type: z.literal('attach'), graphId: z.string(), target: attachTarget, files: z.array(upload).min(1).max(MAX_ATTACHMENTS) }),
+  z.object({ type: z.literal('attach'), graphId: z.string(), target: attachTarget, files: z.array(upload).min(1).max(MAX_ATTACHMENTS) }).refine((m) => m.files.reduce((n, f) => n + f.data.length, 0) <= MAX_ATTACH_PAYLOAD_CHARS, 'The files are too large to attach in one go.'),
   z.object({ type: z.literal('detach'), graphId: z.string(), target: attachTarget, name: z.string().max(200) }),
   z.object({ type: z.literal('getGraphMarkdown'), graphId: z.string() }),
   z.object({ type: z.literal('saveGraphMarkdown'), graphId: z.string(), text: markdownText, base: markdownText, force: z.boolean().optional() }),

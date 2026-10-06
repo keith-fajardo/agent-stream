@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -70,5 +70,25 @@ describe('Add… and Open in a graph tab (step model spec §6b.4)', () => {
     s.handler.handle({ type: 'openAttachment', name: '../../.ssh/id_rsa' });
     expect(s.openPath).toHaveBeenCalledTimes(1);
     expect(s.received.at(-1)).toEqual({ type: 'error', message: "Agent Stream can't open ../../.ssh/id_rsa." });
+  });
+
+  it('F7: checks the count against the room before reading any file', async () => {
+    const s = setup(undefined);
+    const files = Array.from({ length: 21 }, (_, i) => file(`f${i}.md`, 'x'));
+    const t = setup(files);
+    t.handler.handle({ type: 'pickAttachments', target: { kind: 'graph' } });
+    await vi.waitFor(() => expect(t.received).toContainEqual({ type: 'opRejected', graphId: t.graph.id, error: 'The graph can have at most 20 attachments.' }), { timeout: 5000 });
+    for (const f of files) expect(f.read).not.toHaveBeenCalled();
+    expect(s.received).toEqual([]);
+  });
+
+  it('F3: Open refuses a symlinked attachments folder', () => {
+    const s = setup([]);
+    const out = mkdtempSync(join(tmpdir(), 'cs-out-'));
+    mkdirSync(join(s.path, '.agent-stream', 'attachments'), { recursive: true });
+    symlinkSync(out, join(s.path, '.agent-stream', 'attachments', s.graph.id));
+    s.handler.handle({ type: 'openAttachment', name: 'a.png' });
+    expect(s.openPath).not.toHaveBeenCalled();
+    expect(s.received.at(-1)).toMatchObject({ type: 'error' });
   });
 });

@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import { isGraphId, type App, type Client } from '@agent-stream/engine';
-import { attachmentFileProblem, attachmentNameProblem, parseWebviewMessage, safeAttachmentName, type AttachTarget, type AttachmentUpload, type HostCommand, type HostMessage } from '@agent-stream/shared';
+import { attachmentFileProblem, MAX_ATTACHMENTS, parseWebviewMessage, safeAttachmentName, type AttachTarget, type AttachmentUpload, type HostCommand, type HostMessage } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 import { folderUri } from './folders';
 import { openExternalUrl } from './ui';
@@ -144,6 +144,11 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
   async function attachPicked(target: AttachTarget): Promise<void> {
     const picked = await d.pickFiles?.();
     if (!picked?.length) return;
+    const g = d.app.graphStore.get(d.panel.graphId);
+    const have = target.kind === 'graph' ? g.attachments : g.nodes.find((n) => n.id === target.nodeId)?.attachments;
+    if ((have?.length ?? 0) + picked.length > MAX_ATTACHMENTS) {
+      return d.client.send({ type: 'opRejected', graphId: d.panel.graphId, error: `${target.kind === 'graph' ? 'The graph' : `Step ${target.nodeId}`} can have at most ${MAX_ATTACHMENTS} attachments.` });
+    }
     const files: AttachmentUpload[] = [];
     for (const f of picked) {
       const problem = attachmentFileProblem(safeAttachmentName(f.name), f.size);
@@ -198,9 +203,12 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
           attachPicked(msg.target).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
           return;
         case 'openAttachment':
-          // Only a safe name: never a path out of the graph's attachments folder.
-          if (attachmentNameProblem(msg.name)) return fail(`Agent Stream can't open ${msg.name}.`);
-          d.openPath?.(join(d.panel.folder.path, '.agent-stream', 'attachments', d.panel.graphId, msg.name));
+          // Only a safe name inside the graph's own attachments folder, through the engine's checks (links refused).
+          {
+            const open = d.app.attachments.openPath(d.panel.graphId, msg.name);
+            if (!open.ok) return fail(open.error);
+            d.openPath?.(open.path);
+          }
           return;
       }
     },

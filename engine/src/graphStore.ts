@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
@@ -36,7 +36,8 @@ import {
 } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
-import { graphAttachmentsDir, isGraphId, type ProjectPaths } from './paths';
+import { AttachmentStore } from './attachmentStore';
+import { isGraphId, type ProjectPaths } from './paths';
 import { renameReferences } from './templates';
 
 export function slugify(name: string): string {
@@ -396,8 +397,8 @@ export class GraphStore extends EventEmitter {
     for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
     const copy = this.uniqueId(name);
     // Its attachments come along (step model spec §6b.2), before its file names them.
-    const files = graphAttachmentsDir(this.paths, id);
-    if (existsSync(files)) cpSync(files, graphAttachmentsDir(this.paths, copy), { recursive: true });
+    const copied = new AttachmentStore(this.paths).copyFolder(id, copy);
+    if (!copied.ok) return copied;
     const graph = this.save({ ...r.graph, id: copy, name, updatedAt: this.clock() });
     return { ok: true, graph };
   }
@@ -407,7 +408,7 @@ export class GraphStore extends EventEmitter {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     if (!existsSync(this.file(id))) return { ok: false, error: `graph "${id}" not found` };
     for (const f of [this.file(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
-    rmSync(graphAttachmentsDir(this.paths, id), { recursive: true, force: true });
+    new AttachmentStore(this.paths).removeFolder(id);
     this.forget(id);
     return { ok: true };
   }

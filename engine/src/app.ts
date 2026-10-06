@@ -33,6 +33,7 @@ import {
   type SessionTab,
   supportsEffort,
   ATTACHMENT_NOTICE,
+  attachmentKey,
   MAX_ATTACHMENTS,
   ONLY_AGENT_STEPS_ATTACH,
   type AttachTarget,
@@ -527,6 +528,8 @@ export function createApp(d: AppDeps) {
       undo.clear(client, graphId);
       return done(UNDO_CHANGED);
     }
+    const unsafe = entry.files ? attachments.problem(graphId) : null;
+    if (unsafe) return done(`Can't undo ${entry.label}: ${unsafe}`);
     // A removed attachment's file comes back before the graph names it again.
     for (const f of entry.files?.deleted ?? []) attachments.restore(graphId, f);
     const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo', order: entry.before });
@@ -535,7 +538,7 @@ export function createApp(d: AppDeps) {
       return done(`Can't undo ${entry.label}: ${r.error}`);
     }
     // An attached file nothing uses any more goes again.
-    for (const name of entry.files?.written ?? []) if (!attachedNames(r.graph).includes(name)) attachments.remove(graphId, name);
+    for (const name of entry.files?.written ?? []) if (!stillUsed(graphId, r.graph, name)) attachments.remove(graphId, name);
     // A deleted variable's saved value comes back with it (the delete took it away).
     const have = values.get(graphId);
     for (const [name, value] of Object.entries(entry.values ?? {})) if (!Object.hasOwn(have, name)) values.set(graphId, name, value);
@@ -545,6 +548,12 @@ export function createApp(d: AppDeps) {
 
   /** Every attachment name the graph uses: its own list and every step's. */
   const attachedNames = (g: Graph): string[] => [...(g.attachments ?? []), ...g.nodes.flatMap((n) => n.attachments ?? [])];
+  /** Whether the graph still uses the file: by any list, or by the agent-change baseline (a Revert can bring it back); names compare as the file system does. */
+  function stillUsed(graphId: string, g: Graph, name: string): boolean {
+    const base = graphStore.baseline(graphId);
+    const used = [...attachedNames(g), ...(base.ok && base.graph ? attachedNames(base.graph) : [])];
+    return used.some((n) => attachmentKey(n) === attachmentKey(name));
+  }
   /** The target's attachment list, or why it has none. */
   function attachmentList(g: Graph, target: AttachTarget): { ok: true; names: string[] } | { ok: false; error: string } {
     if (target.kind === 'graph') return { ok: true, names: g.attachments ?? [] };
@@ -574,7 +583,13 @@ export function createApp(d: AppDeps) {
     const added = attachments.add(msg.graphId, files, attachedNames(g.graph));
     if (!added.ok) return reject(added.error);
     const op = listOp(msg.target, [...list.names, ...added.names]);
-    const r = graphStore.apply(msg.graphId, op, 'user');
+    let r: ReturnType<typeof graphStore.apply>;
+    try {
+      r = graphStore.apply(msg.graphId, op, 'user');
+    } catch (e) {
+      for (const name of added.names) attachments.remove(msg.graphId, name);
+      throw e;
+    }
     if (!r.ok) {
       for (const name of added.names) attachments.remove(msg.graphId, name);
       return reject(r.error);
@@ -590,10 +605,12 @@ export function createApp(d: AppDeps) {
     const list = attachmentList(g.graph, msg.target);
     if (!list.ok) return reject(list.error);
     if (!list.names.includes(msg.name)) return reject(`${msg.name} isn't attached there.`);
+    const unsafe = attachments.problem(msg.graphId);
+    if (unsafe) return reject(unsafe);
     const op = listOp(msg.target, list.names.filter((n) => n !== msg.name));
     const r = graphStore.apply(msg.graphId, op, 'user');
     if (!r.ok) return reject(r.error);
-    const bytes = attachedNames(r.graph).includes(msg.name) ? undefined : attachments.read(msg.graphId, msg.name);
+    const bytes = stillUsed(msg.graphId, r.graph, msg.name) ? undefined : attachments.read(msg.graphId, msg.name);
     if (bytes) attachments.remove(msg.graphId, msg.name);
     recordUndo(client, msg.graphId, g.graph, r.graph, `removed ${msg.name}`, [op], {}, bytes ? { deleted: [{ name: msg.name, bytes }] } : undefined);
   }

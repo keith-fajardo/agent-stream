@@ -56,7 +56,9 @@ export function attachmentNameProblem(name: string): string | null {
   return null;
 }
 
-const key = (name: string) => name.normalize('NFC').toLowerCase();
+/** How file systems (macOS, Windows) tell names apart: composed form, any letter case. Every "same file" decision uses it. */
+export const attachmentKey = (name: string): string => name.normalize('NFC').toLowerCase();
+const key = attachmentKey;
 
 /** Why a list of attachment names can't be stored, or null: each name safe, none twice (in any letter case), at most 20. */
 export function attachmentListProblem(names: readonly string[]): string | null {
