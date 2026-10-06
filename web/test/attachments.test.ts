@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyGraph, type Graph } from '@agent-stream/shared';
+import { emptyGraph, MAX_IMAGE_BYTES, type Graph } from '@agent-stream/shared';
 
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { post, send } = await import('../src/bridge');
@@ -36,6 +36,23 @@ function drop(target: Element, files: File[]) {
   e.dataTransfer = { files, types: ['Files'] };
   target.dispatchEvent(e);
 }
+/** A paste, as a browser sends it: its files and its text. */
+function paste(target: Element, files: File[], text = '') {
+  const e = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+  e.clipboardData = { files, types: [...(files.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])], getData: (t: string) => (t === 'text/plain' ? text : '') };
+  target.dispatchEvent(e);
+  return e;
+}
+/** A file the tab sees as `bytes` long, without holding that many bytes. */
+function sized(name: string, bytes: number): File {
+  const f = new File(['x'], name);
+  Object.defineProperty(f, 'size', { value: bytes });
+  return f;
+}
+const typeInto = (box: HTMLTextAreaElement, value: string) => {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, value);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+};
 const flush = () => act(async () => new Promise((r) => setTimeout(r, 0)));
 
 beforeEach(() => {
@@ -88,6 +105,31 @@ describe('a step’s attachments in the Node panel', () => {
     await flush();
     expect(send).not.toHaveBeenCalled();
     expect(getState().toast).toContain("tool.exe can't be attached.");
+  });
+
+  it('does not call a step changed underneath when only its attachments change while the draft is dirty', async () => {
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    const el = await mount(NodePanel);
+    await act(async () => typeInto(el.querySelector('textarea') as HTMLTextAreaElement, 'my edit'));
+    const withMore = { ...agent, attachments: ['mockup.png', 'shot.png'], updatedAt: 't2' };
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...graph, nodes: [withMore, graph.nodes[1]] } } }));
+    expect(el.textContent).toContain('shot.png');
+    expect(el.textContent).not.toContain('changed since you started editing');
+    expect(button('Discard my edits')).toBeUndefined();
+    // The notice still shows for a change to what the panel edits.
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...graph, nodes: [{ ...withMore, prompt: 'planner text', updatedAt: 't3' }, graph.nodes[1]] } } }));
+    expect(el.textContent).toContain('This step changed since you started editing');
+  });
+
+  it('toasts when a dropped file can’t be read, sending nothing', async () => {
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    const el = await mount(NodePanel);
+    const folder = new File(['x'], 'assets.md');
+    Object.defineProperty(folder, 'arrayBuffer', { value: () => Promise.reject(new Error('EISDIR')) });
+    await act(async () => drop(el.querySelector('.attachments')!, [folder]));
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+    expect(getState().toast).toBe("assets.md couldn't be read.");
   });
 
   it('has none for a command step', async () => {
@@ -145,5 +187,75 @@ describe('chat attachments', () => {
     await flush();
     await act(async () => button('Remove a.md')!.click());
     expect(el.querySelector('.chat-pending')).toBeNull();
+  });
+
+  const sendText = async (el: HTMLElement, text: string) => {
+    await act(async () => typeInto(el.querySelector('textarea') as HTMLTextAreaElement, text));
+    await act(async () => button('Send')!.click());
+  };
+
+  it('counts the files added over several adds against the limit of 20, and keeps the ones it has', async () => {
+    const el = await mount(ChatPanel);
+    const area = el.querySelector('.chat-input')!;
+    await act(async () => drop(area, Array.from({ length: 15 }, (_, i) => new File(['a'], `f${i}.md`))));
+    await flush();
+    await act(async () => drop(area, Array.from({ length: 6 }, (_, i) => new File(['a'], `g${i}.md`))));
+    await flush();
+    expect(el.querySelector('.chat-pending .field-error')?.textContent).toBe('Only 5 more can be attached here (at most 20).');
+    expect(el.querySelectorAll('.chat-pending .attachment-chip')).toHaveLength(15);
+    await act(async () => drop(area, Array.from({ length: 5 }, (_, i) => new File(['a'], `g${i}.md`))));
+    await flush();
+    expect(el.querySelectorAll('.chat-pending .attachment-chip')).toHaveLength(20);
+    await act(async () => drop(area, [new File(['a'], 'last.md')]));
+    await flush();
+    expect(el.querySelector('.chat-pending .field-error')?.textContent).toBe('This list already has 20 attachments, the most it can have.');
+  });
+
+  it('refuses the file that would take the message past the size the engine accepts, keeping the chips and the text', async () => {
+    const el = await mount(ChatPanel);
+    const area = el.querySelector('.chat-input')!;
+    await act(async () => typeInto(el.querySelector('textarea') as HTMLTextAreaElement, 'Look at these'));
+    // Ten 10 MB images are 139,810,160 base64 characters: under the 140,000,000 the engine takes. An eleventh is not.
+    const images = Array.from({ length: 11 }, (_, i) => sized(`p${i}.png`, MAX_IMAGE_BYTES));
+    await act(async () => drop(area, images));
+    await flush();
+    expect(el.querySelectorAll('.chat-pending .attachment-chip')).toHaveLength(10);
+    expect(el.querySelector('.chat-pending .field-error')?.textContent).toContain('p10.png');
+    expect(el.querySelector('.chat-pending .field-error')?.textContent).toContain('too large to send');
+    expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Look at these');
+    await act(async () => button('Send')!.click());
+    expect(vi.mocked(send).mock.calls[0][0]).toMatchObject({ type: 'chat', text: 'Look at these' });
+  });
+
+  it('pastes text natively, and attaches only when the clipboard has files and no text', async () => {
+    const el = await mount(ChatPanel);
+    const area = el.querySelector('.chat-input')!;
+    const textual = paste(area, [new File(['png'], 'cells.png')], 'a\tb');
+    await flush();
+    expect(textual.defaultPrevented).toBe(false);
+    expect(el.querySelector('.chat-pending')).toBeNull();
+    const filesOnly = paste(area, [new File(['png'], 'shot.png')]);
+    await flush();
+    expect(filesOnly.defaultPrevented).toBe(true);
+    expect(el.querySelector('.chat-pending')?.textContent).toContain('shot.png');
+  });
+
+  it('takes no dropped or pasted files while the chat is unavailable', async () => {
+    dispatch({ kind: 'server', msg: { type: 'auth', status: { provider: 'claude', ok: false, label: 'Claude', error: 'Sign in' } } });
+    const el = await mount(ChatPanel);
+    const area = el.querySelector('.chat-input')!;
+    await act(async () => drop(area, [new File(['a'], 'a.md')]));
+    paste(area, [new File(['a'], 'b.md')]);
+    await flush();
+    expect(el.querySelector('.chat-pending')).toBeNull();
+  });
+
+  it('says so when a dropped file can’t be read, instead of failing silently', async () => {
+    const el = await mount(ChatPanel);
+    const folder = new File(['x'], 'assets.md');
+    Object.defineProperty(folder, 'arrayBuffer', { value: () => Promise.reject(new Error('EISDIR')) });
+    await act(async () => drop(el.querySelector('.chat-input')!, [folder]));
+    await flush();
+    expect(el.querySelector('.chat-pending .field-error')?.textContent).toBe("assets.md couldn't be read.");
   });
 });

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { MAX_ATTACHMENTS, type AttachmentUpload } from '@agent-stream/shared';
+import { attachmentFileProblem, MAX_ATTACH_PAYLOAD_CHARS, MAX_ATTACHMENTS, safeAttachmentName, type AttachmentUpload } from '@agent-stream/shared';
 import { send } from '../bridge';
 import { Markdown } from '../markdown';
 import { useStore } from '../store';
-import { filesOf, readUploads } from '../uploads';
+import { base64Chars, filesOf, readUploads, unreadable } from '../uploads';
 
 export function ChatPanel() {
   const chat = useStore((s) => s.chat);
@@ -17,9 +17,30 @@ export function ChatPanel() {
   const picker = useRef<HTMLInputElement>(null);
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
-    const r = await readUploads(files, MAX_ATTACHMENTS - pending.length);
-    setProblem(r.ok ? undefined : r.error);
-    if (r.ok) setPending((p) => [...p, ...r.uploads]);
+    // Files go in order until one would take the message past what the engine accepts; that one and any after are refused.
+    let chars = pending.reduce((n, f) => n + f.data.length, 0);
+    const fits: File[] = [];
+    let tooLarge: File | undefined;
+    for (const f of files) {
+      // A file of a type or size that can't be attached is readUploads's to refuse, with its own words.
+      if (attachmentFileProblem(safeAttachmentName(f.name), f.size)) {
+        fits.push(f);
+        continue;
+      }
+      chars += base64Chars(f.size);
+      if (chars > MAX_ATTACH_PAYLOAD_CHARS) {
+        tooLarge = f;
+        break;
+      }
+      fits.push(f);
+    }
+    try {
+      const r = await readUploads(fits, MAX_ATTACHMENTS - pending.length);
+      if (r.ok) setPending((p) => [...p, ...r.uploads]);
+      setProblem(!r.ok ? r.error : tooLarge ? `${tooLarge.name} would make this message's files too large to send. Send these first, or attach fewer or smaller files.` : undefined);
+    } catch {
+      setProblem(unreadable(fits));
+    }
   };
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -130,13 +151,14 @@ export function ChatPanel() {
         }}
         onDrop={(e) => {
           e.preventDefault();
-          void addFiles(filesOf(e.dataTransfer));
+          if (canType) void addFiles(filesOf(e.dataTransfer));
         }}
         onPaste={(e) => {
+          // Text on the clipboard pastes into the box as usual, even when a file came with it (cells copied from a sheet).
           const files = filesOf(e.clipboardData);
-          if (!files.length) return;
+          if (!files.length || e.clipboardData.getData('text/plain')) return;
           e.preventDefault();
-          void addFiles(files);
+          if (canType) void addFiles(files);
         }}
       >
         <input

@@ -5,6 +5,8 @@ export const MAX_ATTACHMENT_NAME_CHARS = 100;
 export const MAX_ATTACHMENTS = 20;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_OTHER_BYTES = 5 * 1024 * 1024;
+/** All files of one `attach`, or of one chat message, together: 20 files of 5 MB, as base64 characters. The engine refuses more. */
+export const MAX_ATTACH_PAYLOAD_CHARS = 140_000_000;
 /** A chat message's text file is inlined up to this many characters (spec §6b.5: 100 KB). */
 export const MAX_INLINED_TEXT_CHARS = 100 * 1024;
 

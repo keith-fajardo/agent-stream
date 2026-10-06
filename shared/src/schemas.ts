@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
-import { attachmentListProblem, MAX_ATTACHMENTS, ONLY_AGENT_STEPS_ATTACH } from './attachments';
+import { attachmentListProblem, MAX_ATTACHMENTS, MAX_ATTACH_PAYLOAD_CHARS, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { legacyNodeIdProblem, topoOrder } from './graph';
 import { MODEL_ID_RE, ONLY_AGENT_STEPS_MODEL } from './stepModels';
 import { MAX_UNDO_LABEL_CHARS } from './undo';
@@ -20,8 +20,6 @@ const effort = z.enum(EFFORT_LEVELS);
 const attachmentNames = z.array(z.string().max(200)).max(MAX_ATTACHMENTS);
 const attachTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('graph') }), z.object({ kind: z.literal('step'), nodeId: z.string() })]);
 /** A file's bytes as base64: an image of 10 MB is under 14 million characters. */
-/** All files of one attach together: 20 files of 5 MB, as base64 characters. */
-const MAX_ATTACH_PAYLOAD_CHARS = 140_000_000;
 const upload = z.object({ name: z.string().min(1).max(1000), data: z.string().max(14_000_000) });
 
 const graphNodeSchema = z.object({

@@ -2,7 +2,7 @@ import { MAX_ATTACHMENTS, type AttachTarget } from '@agent-stream/shared';
 import { useState } from 'react';
 import { post, send } from '../bridge';
 import { dispatch } from '../store';
-import { filesOf, readUploads } from '../uploads';
+import { filesOf, readUploads, unreadable } from '../uploads';
 
 /**
  * A step's or the graph's attachments (step model spec §6b.4): each name with Open and Remove, Add… (VS Code's file
@@ -12,9 +12,14 @@ export function AttachmentList({ graphId, target, names, hint }: { graphId: stri
   const [over, setOver] = useState(false);
   const attach = async (files: File[]) => {
     if (!files.length) return;
-    const r = await readUploads(files, MAX_ATTACHMENTS - names.length);
-    if (!r.ok) return dispatch({ kind: 'showToast', message: r.error });
-    send({ type: 'attach', graphId, target, files: r.uploads });
+    try {
+      const r = await readUploads(files, MAX_ATTACHMENTS - names.length);
+      if (!r.ok) return dispatch({ kind: 'showToast', message: r.error });
+      send({ type: 'attach', graphId, target, files: r.uploads });
+    } catch {
+      // A dropped folder, or a file that went away before it was read.
+      dispatch({ kind: 'showToast', message: unreadable(files) });
+    }
   };
   return (
     <div

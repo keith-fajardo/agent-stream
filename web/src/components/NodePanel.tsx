@@ -113,7 +113,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     reportDraft('node', dirty);
   }, [dirty]);
   useEffect(() => () => reportDraft('node', false), []);
-  const changedUnderneath = node.updatedAt !== base.at;
+  // Someone changed what this panel edits. A change to the step's attachments alone (they save at once, from their own
+  // list) also bumps updatedAt but is no conflict with the draft.
+  const changedUnderneath = node.updatedAt !== base.at && !sameDraft(toDraft(node), base.draft);
 
   useEffect(() => {
     if (changedUnderneath && !dirty) {

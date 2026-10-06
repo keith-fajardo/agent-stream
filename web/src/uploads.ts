@@ -23,3 +23,9 @@ export async function readUploads(files: readonly File[], room: number): Promise
 
 /** The files a drop or a paste carries (a paste of text carries none). */
 export const filesOf = (data: DataTransfer | null): File[] => (data ? [...data.files] : []);
+
+/** What base64 makes of `bytes` bytes, in characters (what the engine's payload cap counts). */
+export const base64Chars = (bytes: number): number => Math.ceil(bytes / 3) * 4;
+
+/** Why a file couldn't be read (a dropped folder, a file that went away), in words for the user. */
+export const unreadable = (files: readonly File[]): string => (files.length === 1 ? `${files[0].name} couldn't be read.` : "Some of those files couldn't be read.");
