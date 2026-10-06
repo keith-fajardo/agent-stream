@@ -15,16 +15,27 @@ export function ChatPanel() {
   const [pending, setPending] = useState<AttachmentUpload[]>([]);
   const [problem, setProblem] = useState<string | undefined>();
   const picker = useRef<HTMLInputElement>(null);
+  const targetKey = `${target?.graphId}/${target?.sessionId}`;
+  /** The conversation now: files read for one the user has since left are dropped, not added to this one. */
+  const current = useRef(targetKey);
+  current.current = targetKey;
+  // Pending files belong to the conversation they were added in: another graph or session starts with none.
+  useEffect(() => {
+    setPending([]);
+    setProblem(undefined);
+  }, [targetKey]);
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
+    const addedTo = current.current;
     // Files go in order until one would take the message past what the engine accepts; that one and any after are refused.
     const { fits, tooLarge } = withinPayload(files, pending.reduce((n, f) => n + f.data.length, 0));
     try {
       const r = await readUploads(fits, MAX_ATTACHMENTS - pending.length);
+      if (addedTo !== current.current) return;
       if (r.ok) setPending((p) => [...p, ...r.uploads]);
       setProblem(!r.ok ? r.error : tooLarge ? `${tooLarge.name} would make this message's files too large to send. Send these first, or attach fewer or smaller files.` : undefined);
     } catch {
-      setProblem(unreadable(fits));
+      if (addedTo === current.current) setProblem(unreadable(fits));
     }
   };
   const end = useRef<HTMLDivElement>(null);

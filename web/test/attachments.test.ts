@@ -276,6 +276,26 @@ describe('chat attachments', () => {
     expect(el.querySelector('.chat-pending')).toBeNull();
   });
 
+  it('drops the pending files and the problem line when the chat switches to another session or graph', async () => {
+    const el = await mount(ChatPanel);
+    const area = el.querySelector('.chat-input')!;
+    await act(async () => drop(area, [new File(['a'], 'a.md'), new File(['MZ'], 'tool.exe')]));
+    await flush();
+    await act(async () => drop(area, [new File(['a'], 'a.md')]));
+    await flush();
+    expect(el.querySelector('.chat-pending')?.textContent).toContain('a.md');
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'chatTarget', target: { graphId: 'g', graphName: 'G', sessionId: 'other', sessionName: 'Other' } } }));
+    expect(el.querySelector('.chat-pending')).toBeNull();
+    await act(async () => drop(area, [new File(['MZ'], 'tool.exe')]));
+    await flush();
+    expect(el.querySelector('.chat-pending .field-error')).not.toBeNull();
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'chatTarget', target: { graphId: 'h', graphName: 'H', sessionId: 'other', sessionName: 'Other' } } }));
+    expect(el.querySelector('.chat-pending')).toBeNull();
+    await act(async () => typeInto(el.querySelector('textarea') as HTMLTextAreaElement, 'Hi'));
+    await act(async () => button('Send')!.click());
+    expect(send).toHaveBeenCalledWith({ type: 'chat', graphId: 'h', sessionId: 'other', text: 'Hi' });
+  });
+
   it('says so when a dropped file can’t be read, instead of failing silently', async () => {
     const el = await mount(ChatPanel);
     const folder = new File(['x'], 'assets.md');
