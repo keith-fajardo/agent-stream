@@ -10,7 +10,7 @@ const { dispatch, getState } = await import('../src/store');
 const { NodePanel } = await import('../src/components/NodePanel');
 const { GraphPanel } = await import('../src/components/GraphPanel');
 const { ChatPanel } = await import('../src/components/ChatPanel');
-const { readUploads } = await import('../src/uploads');
+const { readUploads, withinPayload } = await import('../src/uploads');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 // jsdom lays nothing out: the chat's scroll to its last line does nothing here.
@@ -78,6 +78,18 @@ describe('files checked in the tab before sending (step model spec §6b.4)', () 
     expect(await readUploads([big], 20)).toEqual({ ok: false, error: 'big.pdf is larger than 5 MB.' });
     expect(await readUploads([new File(['a'], 'a.md'), new File(['b'], 'b.md')], 1)).toEqual({ ok: false, error: 'Only 1 more can be attached here (at most 20).' });
   });
+
+  it('keeps files in order while they fit in one message to the engine; the first that doesn’t, and any after, are left out', () => {
+    // Ten 10 MB images are 139,810,160 base64 characters: under the 140,000,000 the engine takes. An eleventh is not.
+    const images = Array.from({ length: 12 }, (_, i) => sized(`p${i}.png`, MAX_IMAGE_BYTES));
+    const r = withinPayload(images);
+    expect(r.fits.map((f) => f.name)).toEqual(images.slice(0, 10).map((f) => f.name));
+    expect(r.tooLarge?.name).toBe('p10.png');
+    // What is already pending counts; a file that can't be attached at all is kept for readUploads to refuse.
+    expect(withinPayload([sized('a.png', 3)], 139_999_997)).toEqual({ fits: [], tooLarge: expect.objectContaining({ name: 'a.png' }) });
+    const exe = sized('tool.exe', 900_000_000);
+    expect(withinPayload([exe])).toEqual({ fits: [exe] });
+  });
 });
 
 describe('a step’s attachments in the Node panel', () => {
@@ -130,6 +142,20 @@ describe('a step’s attachments in the Node panel', () => {
     await flush();
     expect(send).not.toHaveBeenCalled();
     expect(getState().toast).toBe("assets.md couldn't be read.");
+  });
+
+  it('refuses files too large to attach in one go before reading any, with a plain toast', async () => {
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    const el = await mount(NodePanel);
+    const images = Array.from({ length: 11 }, (_, i) => {
+      const f = sized(`p${i}.png`, MAX_IMAGE_BYTES);
+      Object.defineProperty(f, 'arrayBuffer', { value: () => Promise.reject(new Error('must not be read')) });
+      return f;
+    });
+    await act(async () => drop(el.querySelector('.attachments')!, images));
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+    expect(getState().toast).toBe('These files are too large to attach in one go. Attach fewer or smaller files at a time.');
   });
 
   it('has none for a command step', async () => {
