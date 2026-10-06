@@ -1,6 +1,8 @@
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
+import { attachmentListProblem, ONLY_AGENT_STEPS_ATTACH } from './attachments';
+import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
 import { variableNameProblem } from './variables';
-import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun } from './types';
+import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment } from './types';
 
 /** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
 const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
@@ -74,6 +76,12 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!title) return fail('a node needs a title');
       if ((op.node.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       if (op.node.access === 'read' && op.node.kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const modelProblem = stepModelProblem(op.node.model, op.node.effort);
+      if (modelProblem) return fail(modelProblem);
+      if ((op.node.model || op.node.effort) && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
+      const attachProblem = op.node.attachments ? attachmentListProblem(op.node.attachments) : null;
+      if (attachProblem) return fail(attachProblem);
+      if (op.node.attachments?.length && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       const workspace = op.node.workspace?.trim() || undefined;
       const workspaceProblem = workspace === undefined ? null : workspaceNameProblem(workspace);
       if (workspaceProblem) return fail(workspaceProblem);
@@ -87,6 +95,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         timeoutSec: op.node.timeoutSec,
         access: op.node.access === 'read' ? 'read' : undefined,
         workspace,
+        model: op.node.model && { provider: op.node.model.provider, id: op.node.model.id },
+        effort: op.node.effort,
+        attachments: op.node.attachments?.length ? [...op.node.attachments] : undefined,
         position: op.node.position,
         createdBy: by,
         updatedBy: by,
@@ -97,7 +108,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
     case 'updateNode': {
       const node = graph.nodes.find((n) => n.id === op.id);
       if (!node) return fail(`node ${op.id} does not exist`);
-      const { access, workspace, timeoutSec, ...patch } = definedOnly<NodePatch>(op.patch);
+      const { access, workspace, timeoutSec, model, effort, attachments, ...patch } = definedOnly<NodePatch>(op.patch);
       if (patch.title !== undefined) {
         patch.title = patch.title.trim();
         if (!patch.title) return fail('a node needs a title');
@@ -105,6 +116,12 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if ((patch.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const kind = patch.kind ?? node.kind;
       if (access === 'read' && kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const modelProblem = stepModelProblem(model ?? undefined, effort ?? undefined);
+      if (modelProblem) return fail(modelProblem);
+      if ((model || effort) && kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
+      const attachProblem = attachments ? attachmentListProblem(attachments) : null;
+      if (attachProblem) return fail(attachProblem);
+      if (attachments?.length && kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       let nextWorkspace = node.workspace;
       if (workspace !== undefined) {
         const trimmed = workspace.trim();
@@ -116,13 +133,21 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       const nextAccess = kind === 'command' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
       // 0 clears the timeout; a missing one keeps it.
       const nextTimeout = timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
-      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, ...base } = node;
+      // Only agent steps have a model or effort, so becoming a command step drops both (spec §2.1); null clears one.
+      const nextModel = kind === 'command' || model === null ? undefined : (model ?? node.model);
+      const nextEffort = kind === 'command' || effort === null ? undefined : (effort ?? node.effort);
+      // So do its attachments; [] clears them (spec §6b.3).
+      const nextAttachments = kind === 'command' ? undefined : (attachments ?? node.attachments);
+      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, ...base } = node;
       const updated: GraphNode = {
         ...base,
         ...patch,
         ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),
+        ...(nextModel && { model: { provider: nextModel.provider, id: nextModel.id } }),
+        ...(nextEffort && { effort: nextEffort }),
+        ...(nextAttachments?.length && { attachments: [...nextAttachments] }),
         updatedBy: by,
         updatedAt: now,
       };
@@ -184,9 +209,20 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!graph.variables.some((v) => v.name === op.name)) return fail(`variable ${op.name} does not exist`);
       return done({ variables: graph.variables.filter((v) => v.name !== op.name) });
     }
+    case 'setGraphAttachments': {
+      const problem = attachmentListProblem(op.names);
+      if (problem) return fail(problem);
+      const { attachments: _attachments, ...rest } = graph;
+      return { ok: true, graph: { ...rest, ...(op.names.length > 0 && { attachments: [...op.names] }), updatedAt: now } };
+    }
     case 'moveNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
-      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? { ...n, position: op.position } : n)) });
+      const place = (n: GraphNode): GraphNode => {
+        if (op.position) return { ...n, position: op.position };
+        const { position: _position, ...rest } = n;
+        return rest;
+      };
+      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? place(n) : n)) });
     }
     case 'acceptChange':
     case 'revertChange':
@@ -246,7 +282,8 @@ export function contentSignature(g: Graph): string {
   return JSON.stringify({
     goal: g.goal,
     instructions: g.instructions,
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '']),
+    attachments: g.attachments ?? [],
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? []]),
     edges: g.edges.map((e) => e.id).sort(),
   });
 }
@@ -262,7 +299,7 @@ export function validateRunnable(graph: Graph): string[] {
   return problems;
 }
 
-export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun };
+export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun; attachments?: RunAttachment[] };
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
@@ -271,10 +308,11 @@ function sameSet(a: string[], b: string[]): boolean {
 /**
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
  * `fromNodeId`, did not succeed last time, changed kind or rendered prompt/command (the template,
- * for runs recorded before rendering), for an agent step changed its own description, changed access or workspace, has a workspace, or gained/lost an upstream edge — and so does everything
- * downstream of it. Everything else is reused.
+ * for runs recorded before rendering), for an agent step changed its own description, model or effort, changed access or workspace, has a workspace, or gained/lost an upstream edge — and so does everything
+ * downstream of it. An agent step also runs again when its attachments (its own, then the graph's) changed: another list,
+ * or, given `attachments` (the files now) and a source that recorded them, another file under a name. Everything else is reused.
  */
-export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun): Set<string> {
+export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[]): Set<string> {
   const seeds = new Set<string>(fromNodeId ? [fromNodeId] : []);
   for (const n of graph.nodes) {
     const prev = source.snapshot.nodes.find((p) => p.id === n.id);
@@ -290,7 +328,14 @@ export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: st
     // What a step may do and where it runs are part of its definition (spec §3.1, §3.1a).
     const sameAccess = n.kind !== 'agent' || (prev?.access ?? 'write') === (n.access ?? 'write');
     const samePlace = (prev?.workspace ?? '') === (n.workspace ?? '');
-    const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace;
+    // The model and effort a step runs with are part of its definition: comparing models is one of their uses (spec §1).
+    const sameModel = n.kind !== 'agent' || ((prev?.model ? stepModelText(prev.model) : '') === (n.model ? stepModelText(n.model) : '') && (prev?.effort ?? '') === (n.effort ?? ''));
+    // An agent step gets its own attachments, then the graph's (spec §6b.5): another list is another input.
+    const files = (step: GraphNode | undefined, g: Graph) => JSON.stringify([...(step?.attachments ?? []), ...(g.attachments ?? [])]);
+    const hashOf = (list: readonly RunAttachment[] | undefined, name: string) => list?.find((a) => a.name === name)?.sha256 ?? '';
+    const sameContent = !attachments || !source.attachments || [...(n.attachments ?? []), ...(graph.attachments ?? [])].every((name) => hashOf(attachments, name) === hashOf(source.attachments, name));
+    const sameFiles = n.kind !== 'agent' || (files(prev, source.snapshot) === files(n, graph) && sameContent);
+    const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     // A step with a workspace is never reused: its files lived in that run's own worktree (spec §4.3a).
     if (!succeeded || !sameDefinition || !sameInputs || n.workspace) seeds.add(n.id);

@@ -63,8 +63,17 @@ describe('VariablesDialog', () => {
     await act(async () => typeInto(inputs('Description')[0], 'Where to build'));
     await act(async () => button('Save').click());
     expect(vi.mocked(send).mock.calls).toEqual([
-      [{ type: 'op', graphId: 'g', op: { type: 'renameVariable', name: 'schema', newName: 'target_schema' } }],
-      [{ type: 'op', graphId: 'g', op: { type: 'setVariableDescription', name: 'target_schema', description: 'Where to build' } }],
+      [
+        {
+          type: 'ops',
+          graphId: 'g',
+          ops: [
+            { type: 'renameVariable', name: 'schema', newName: 'target_schema' },
+            { type: 'setVariableDescription', name: 'target_schema', description: 'Where to build' },
+          ],
+          label: 'edited the variables',
+        },
+      ],
     ]);
   });
 
@@ -76,8 +85,7 @@ describe('VariablesDialog', () => {
     await act(async () => (container.querySelector('button[aria-label="Delete schema"]') as HTMLButtonElement).click());
     await act(async () => button('Save').click());
     expect(vi.mocked(send).mock.calls).toEqual([
-      [{ type: 'op', graphId: 'g', op: { type: 'deleteVariable', name: 'schema' } }],
-      [{ type: 'op', graphId: 'g', op: { type: 'addVariable', name: 'model' } }],
+      [{ type: 'ops', graphId: 'g', ops: [{ type: 'deleteVariable', name: 'schema' }, { type: 'addVariable', name: 'model' }], label: 'edited the variables' }],
       [{ type: 'setVariableValue', graphId: 'g', name: 'model', value: 'orders_v2' }],
     ]);
   });
@@ -125,8 +133,7 @@ describe('VariablesDialog', () => {
       await act(async () => typeInto(inputs('Value')[0], 'x'));
       await act(async () => button('Save').click());
       expect(vi.mocked(send).mock.calls).toEqual([
-        [{ type: 'op', graphId: 'g', op: { type: 'deleteVariable', name: 'schema' } }],
-        [{ type: 'op', graphId: 'g', op: { type: 'addVariable', name: 'schema' } }],
+        [{ type: 'ops', graphId: 'g', ops: [{ type: 'deleteVariable', name: 'schema' }, { type: 'addVariable', name: 'schema' }], label: 'edited the variables' }],
         [{ type: 'setVariableValue', graphId: 'g', name: 'schema', value: 'x' }],
       ]);
     });

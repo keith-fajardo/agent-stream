@@ -43,6 +43,14 @@ export function toChatModelError(e: unknown, modelId: string): ChatModelError {
   return new ChatModelError(code, copilotErrorMessage(code, detail, modelId));
 }
 
+/** An image's decoded bytes, kept on its part: a step sends the same message on every request of its loop. */
+const decodedImages = new WeakMap<object, Buffer>();
+function imageBytes(part: { data: string }): Buffer {
+  let bytes = decodedImages.get(part);
+  if (!bytes) decodedImages.set(part, (bytes = Buffer.from(part.data, 'base64')));
+  return bytes;
+}
+
 const asObject = (input: unknown): object => (typeof input === 'object' && input !== null ? input : {});
 
 /** One of our messages as a Language Model message (spec §5.1). Tool errors travel as plain text (ruling R26). */
@@ -52,8 +60,13 @@ export function toLanguageModelMessage(m: ChatMessage): vscode.LanguageModelChat
       m.content.map((p) => (p.type === 'text' ? new vscode.LanguageModelTextPart(p.text) : new vscode.LanguageModelToolCallPart(p.callId, p.name, asObject(p.input)))),
     );
   }
-  const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart)[] = m.content.map((c) =>
-    c.type === 'text' ? new vscode.LanguageModelTextPart(c.text) : new vscode.LanguageModelToolResultPart(c.callId, [new vscode.LanguageModelTextPart(c.text)]),
+  const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart | vscode.LanguageModelDataPart)[] = m.content.map((c) =>
+    c.type === 'text'
+      ? new vscode.LanguageModelTextPart(c.text)
+      : c.type === 'image'
+        ? // An attached image (step model spec §6b.5), only sent to a model that takes images.
+          new vscode.LanguageModelDataPart(imageBytes(c), c.mediaType)
+        : new vscode.LanguageModelToolResultPart(c.callId, [new vscode.LanguageModelTextPart(c.text)]),
   );
   // Auto refuses a request whose last message has no text ("needs a prompt"); a wire-level nudge, never in the history.
   if (m.content.some((c) => c.type === 'toolResult') && !m.content.some((c) => c.type === 'text')) parts.push(new vscode.LanguageModelTextPart(TOOL_RESULTS_FOLLOW_UP));

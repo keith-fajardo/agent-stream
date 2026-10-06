@@ -17,6 +17,12 @@ export type GraphNode = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  /** Agent steps: the step's own model, within its provider (spec §2.1). Missing means the run's model. */
+  model?: StepModel;
+  /** Agent steps: the step's own effort. Missing means the run's effort. */
+  effort?: EffortLevel;
+  /** Agent steps: files the step's agent gets every time it runs, by name, in order (step model spec §6b.3). */
+  attachments?: string[];
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -34,6 +40,8 @@ export type Graph = {
   /** Longer guidance every agent step and the planner receive after the goal. */
   instructions: string;
   variables: VariableDef[];
+  /** Files every agent step gets, after the step's own, by name, in order (step model spec §6b.3). */
+  attachments?: string[];
   nodes: GraphNode[];
   edges: Edge[];
   /** Highest node number ever issued, so ids are never reused. */
@@ -53,6 +61,9 @@ export type NewNodeInput = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  model?: StepModel;
+  effort?: EffortLevel;
+  attachments?: string[];
   position?: Position;
 };
 
@@ -68,6 +79,12 @@ export type NodePatch = {
   access?: NodeAccess;
   /** A variant workspace: steps with the same name share one worktree per run (spec §3.1a). Missing means this checkout; '' in a patch clears it. */
   workspace?: string;
+  /** null clears the step's model (back to the run's). */
+  model?: StepModel | null;
+  /** null clears the step's effort (back to the run's). */
+  effort?: EffortLevel | null;
+  /** The step's whole attachment list; [] clears it. */
+  attachments?: string[];
 };
 
 export type Op =
@@ -82,7 +99,10 @@ export type Op =
   | { type: 'renameVariable'; name: string; newName: string }
   | { type: 'setVariableDescription'; name: string; description: string }
   | { type: 'deleteVariable'; name: string }
-  | { type: 'moveNode'; id: string; position: Position }
+  /** The graph's whole attachment list; [] clears it (spec §6b.3). */
+  | { type: 'setGraphAttachments'; names: string[] }
+  /** `position: null` puts the step back on the automatic layout (only undo does that; clients always send a position). */
+  | { type: 'moveNode'; id: string; position: Position | null }
   /** Review of agent changes (agent changes spec §3.4): applied by the graph store, which keeps the baseline. */
   | { type: 'acceptChange'; target: ChangeTarget }
   | { type: 'revertChange'; target: ChangeTarget };
@@ -90,8 +110,11 @@ export type Op =
 /** Which agent made an edit: the planner (in a work session) or an agent step during a run. */
 export type ChangeSource = { kind: 'planner'; sessionId?: string } | { kind: 'step'; runId: string; nodeId: string };
 
-/** `via: 'file'`: the edit came from the graph's Markdown file (Markdown graph files spec §6.3). A history label only. */
-export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; via?: 'file' };
+/**
+ * `via: 'file'`: the edit came from the graph's Markdown file (Markdown graph files spec §6.3); `via: 'undo'`: Edit › Undo
+ * made it (step model spec §6a.2). A history label only.
+ */
+export type OpRecord = { at: string; by: Actor; op: Op; source?: ChangeSource; via?: 'file' | 'undo' };
 
 /** One problem in a graph's Markdown file: its 1-based line and a message that says how to fix it. */
 export type GraphFileError = { line: number; message: string };
@@ -100,7 +123,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
@@ -145,8 +168,13 @@ export type NodeRunState = {
 /** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
 export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
 
-/** `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no value, or it has a problem). */
-export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean };
+/**
+ * `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no
+ * value, or it has a problem).
+ * `modelLine`: `Model: … · Effort: …` for an agent step whose own model or effort makes it differ from the run's;
+ * `modelNote`: why it doesn't run its own (step model spec §3.3). Both are shown, neither blocks the run.
+ */
+export type PreviewStep = { id: string; title: string; kind: NodeKind; description?: string; text?: string; reused: boolean; modelLine?: string; modelNote?: string };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
 export type RunPreview = {
@@ -223,7 +251,17 @@ export type RunMeta = {
   /** The model and effort the run's agent steps used, captured from the settings when it started (only when set). */
   model?: string;
   effort?: EffortLevel;
+  /** Each agent step's model and effort, resolved when the run started (step model spec §3.1); absent in runs from before. */
+  stepModels?: Record<string, StepModelUse>;
+  /** Every attachment the run's steps use, with its SHA-256 when it started; a missing file has none (spec §6b.5). */
+  attachments?: RunAttachment[];
 };
+
+/** An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. */
+export type RunAttachment = { name: string; sha256?: string };
+
+/** What one agent step of a run uses: absent fields are the provider's own default. `note` says why it isn't the step's own choice. */
+export type StepModelUse = { model?: string; effort?: EffortLevel; note?: string };
 
 /** One approved change a step agent made to a run in progress: `byNodeId` asked, `nodeId` is the step added or changed. */
 export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summary: string };
@@ -234,7 +272,8 @@ export type RunSummary = { id: string; graphId: string; status: RunStatus; start
 export type Decision = { decision: 'approve' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
 export type NodeEventBody =
-  | { type: 'start'; kind: NodeKind; cwd: string; command?: string; prompt?: string }
+  /** `model`/`effort`: what an agent step actually ran with, as the provider sent it (absent: the provider's default). */
+  | { type: 'start'; kind: NodeKind; cwd: string; command?: string; prompt?: string; model?: string; effort?: EffortLevel }
   | { type: 'text'; text: string }
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError: boolean }
@@ -264,7 +303,8 @@ export type ApprovalRequest = {
 export type GraphChangeRequest = { summary: string; detail: string };
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'error' | 'note';
-export type ChatEntry = { at: string; role: ChatRole; text: string };
+/** `attachments`: the names of the files a user message carried, shown as chips (step model spec §6b.5). */
+export type ChatEntry = { at: string; role: ChatRole; text: string; attachments?: string[] };
 
 export type ProviderId = 'claude' | 'copilot' | 'codex';
 export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot', 'codex'];
@@ -278,6 +318,12 @@ export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', '
  * runs when none is chosen (Codex marks one; Claude Code has a `default` row instead).
  */
 export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string; isDefault?: boolean };
+/** Where an attachment goes: the whole graph, or one agent step (step model spec §6b.1). */
+export type AttachTarget = { kind: 'graph' } | { kind: 'step'; nodeId: string };
+/** A file a tab sends: its own name, and its bytes as base64. */
+export type AttachmentUpload = { name: string; data: string };
+/** A step's own model: the provider's model id exactly as its model list reports it, tagged with the provider (spec §2.1). */
+export type StepModel = { provider: ProviderId; id: string };
 /** A model and effort choice; an absent field means Default. */
 export type ModelSelection = { model?: string; effort?: EffortLevel };
 
@@ -352,12 +398,26 @@ export type ServerMessage =
   | { type: 'runBlocked'; graphId: string; message: string; holder: LeaseHolder; otherWindow: boolean; checkout: CheckoutInfo; canSetUpTickets: boolean }
   /** The Markdown run report asked for with exportRunReport, and the file name to suggest when saving it. */
   | { type: 'runReport'; runId: string; markdown: string; suggestedName: string }
+  /** What Edit › Undo would undo in this tab (absent: nothing): after the graph opens, and after each edit or undo here. */
+  | { type: 'undoState'; graphId: string; label?: string }
+  /** The answer to undo, for the toast: `Undid moved 2 steps.`, `Nothing to undo.`, or why it can't. */
+  | { type: 'undone'; graphId: string; message: string }
+  /** Files were attached under these names; `notice`: the one-time notice for a graph's first attachment (spec §6b.2). */
+  | { type: 'attached'; graphId: string; target: AttachTarget; names: string[]; notice?: string }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
   | { type: 'openGraph'; graphId: string }
   | { type: 'createGraph'; name: string }
   | { type: 'op'; graphId: string; op: Op }
+  /** Several edits that are one user action (a drag of several steps, deleting a selection, Tidy): applied all or none, one undo step named `label`. */
+  | { type: 'ops'; graphId: string; ops: Op[]; label: string }
+  /** Edit › Undo (⌘Z): reverses this tab's newest graph edit, if the graph is still as that edit left it. */
+  | { type: 'undo'; graphId: string }
+  /** Copies files into the graph's attachments folder and adds them to the target's list (spec §6b.4). */
+  | { type: 'attach'; graphId: string; target: AttachTarget; files: AttachmentUpload[] }
+  /** Removes one name from the target's list; its file goes when nothing in the graph uses it any more (spec §6b.2). */
+  | { type: 'detach'; graphId: string; target: AttachTarget; name: string }
   /** Asks for the graph's Markdown file as it is on disk; the engine answers with graphMarkdown and keeps sending it as the text changes. */
   | { type: 'getGraphMarkdown'; graphId: string }
   /**
@@ -367,7 +427,8 @@ export type ClientMessage =
   | { type: 'saveGraphMarkdown'; graphId: string; text: string; base: string; force?: boolean }
   /** Subscribes this client to one planner conversation; the engine answers with chatOpened. */
   | { type: 'openChat'; graphId: string; sessionId: string }
-  | { type: 'chat'; graphId: string; sessionId: string; text: string }
+  /** `attachments`: files sent to the planner with this message only (spec §6b.1), kept in the session, never committed. */
+  | { type: 'chat'; graphId: string; sessionId: string; text: string; attachments?: AttachmentUpload[] }
   | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
   | { type: 'splitStep'; graphId: string; sessionId: string; nodeId: string }
   /** Clears the conversation: its chat and the provider session. */
@@ -406,7 +467,11 @@ export type WebviewHostMessage =
   /** Export Run Report: the extension saves the selected run's report to a file and opens it. */
   | { type: 'exportRunReport'; runId: string }
   | { type: 'setUpParallelTickets' }
-  | { type: 'openExternal'; url: string };
+  | { type: 'openExternal'; url: string }
+  /** Add…: the extension shows VS Code's file picker and attaches the files picked (spec §6b.4). */
+  | { type: 'pickAttachments'; target: AttachTarget }
+  /** Open: the extension opens the graph's attachment in VS Code (images in its image viewer). */
+  | { type: 'openAttachment'; name: string };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 

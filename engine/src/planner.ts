@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { ChatEntry, ChatRole, ModelSelection, Op, OpRecord } from '@agent-stream/shared';
+import { inlineTextFiles, turnFiles, type ChatAttachment } from './chatAttachments';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
 import { graphTools, type CheckoutSource } from './plannerTools';
@@ -28,6 +29,8 @@ How to work:
 - Run steps in parallel (no edges between them) only when none of that applies: each starts from its own state and doesn't touch what the others read or change. When unsure, run them in sequence and say why in one chat line.
 - Test plans are often stateful sequences, for example create → update → delete; migrate → verify; deploy → smoke test; table absent → first run → new row → changed row.
 - Mark steps that only read, query or compare as read-only (access: read). That only lets them run alongside file-changing steps in the same workspace; edges still decide their order.
+- Each agent step can have its own model and effort (add_node/update_node: model "<provider>/<id>", effort). Leave them on Default unless the user asks, or a step is clearly simple (checks, summaries — a small model or low effort) or clearly hard. Use only models list_models returns for the current provider.
+- To compare models, add one step per model/effort with the same prompt; let them run in parallel (read-only, or each in its own workspace when they write), then a read-only compare step that reports quality, time and tokens from their outputs.
 - If the project doesn't contain what the user names (for example no such model yet), still build the full graph of steps that would run: add a first step that locates or creates it, and say in one chat line what is missing. Something missing never turns the plan into steps that only write documents.
 - The goal and the instructions (set_instructions) are given to every agent step. Put shared guidance there (targets, conventions, what never to touch) instead of repeating it in each step.
 - Use the read-only tools (Read, Glob, Grep) to ground the plan in the actual project.
@@ -78,6 +81,8 @@ export function describeOp(op: Op): string {
       return `changed the description of variable ${op.name}`;
     case 'deleteVariable':
       return `deleted variable ${op.name}`;
+    case 'setGraphAttachments':
+      return op.names.length ? `set the graph's attachments to ${op.names.join(', ')}` : "removed the graph's attachments";
     case 'moveNode':
       return `moved ${op.id}`;
     case 'acceptChange':
@@ -147,8 +152,8 @@ export class Planner extends EventEmitter {
     return [...this.busy.keys()].some((k) => k.slice(0, k.indexOf('|')) === sessionId);
   }
 
-  private add(sessionId: string, graphId: string, role: ChatRole, text: string): void {
-    const entry: ChatEntry = { at: this.clock(), role, text };
+  private add(sessionId: string, graphId: string, role: ChatRole, text: string, attachments?: string[]): void {
+    const entry: ChatEntry = { at: this.clock(), role, text, ...(attachments?.length && { attachments }) };
     this.d.sessions.chatLog(sessionId).append(graphId, entry);
     this.emit('entry', sessionId, graphId, entry);
   }
@@ -167,8 +172,12 @@ export class Planner extends EventEmitter {
   }
 
   /** Never rejects: failures become chat errors, or are logged when even that is impossible. */
-  /** `options.display` is what the chat shows for the user's turn when it differs from `text`, the full instruction. */
-  async send(sessionId: string, graphId: string, text: string, options: { display?: string } = {}): Promise<void> {
+  /**
+   * `options.display` is what the chat shows for the user's turn when it differs from `text`, the full instruction.
+   * `options.attachments`: files sent with this message only (step model spec §6b.5): text files inlined, images and PDFs
+   * handed to the provider.
+   */
+  async send(sessionId: string, graphId: string, text: string, options: { display?: string; attachments?: ChatAttachment[] } = {}): Promise<void> {
     const k = key(sessionId, graphId);
     if (this.busy.has(k)) {
       try {
@@ -186,7 +195,9 @@ export class Planner extends EventEmitter {
     let resume: string | undefined;
     try {
       this.emit('busy', sessionId, graphId, true);
-      this.add(sessionId, graphId, 'user', options.display ?? text);
+      const files = options.attachments ?? [];
+      const sent = turnFiles(files);
+      this.add(sessionId, graphId, 'user', options.display ?? text, files.map((f) => f.name));
       // Re-checked per turn: the project's settings can change while VS Code runs.
       const provider = this.d.provider();
       const problem = provider.folderProblem?.(this.d.projectDir);
@@ -213,10 +224,12 @@ export class Planner extends EventEmitter {
         source: { kind: 'planner', sessionId },
         requestRun: (fromNodeId) => this.d.requestRun(graphId, fromNodeId),
         checkout: this.d.checkout,
+        models: async () => ({ provider: provider.id, models: (await provider.listModels?.()) ?? [] }),
       });
       const r = await provider.planTurn({
         // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.
-        prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + text,
+        prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + inlineTextFiles(text, files),
+        ...(sent.length > 0 && { files: sent }),
         systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
         tools,
@@ -226,7 +239,8 @@ export class Planner extends EventEmitter {
         gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
         transcript: { load: (id) => transcripts.load(graphId, provider.id, id), save: (id, messages) => transcripts.save(graphId, provider.id, id, messages) },
         signal: abortController.signal,
-        onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),
+        onEvent: (e) =>
+          e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : e.type === 'note' ? this.add(sessionId, graphId, 'note', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input)),
       });
       if (stopped()) {
         if (!r.ok && r.resumeFailed) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });

@@ -63,7 +63,8 @@ export type ThreadResponse = { thread: { id: string } };
 
 // turn/start, turn/interrupt
 export type TextElement = { byteRange: { start: number; end: number }; placeholder: string | null };
-export type UserInput = { type: 'text'; text: string; text_elements: TextElement[] };
+/** Text, or an image Codex reads from a path on this machine (`localImage`, codex-cli 0.160 generate-ts). */
+export type UserInput = { type: 'text'; text: string; text_elements: TextElement[] } | { type: 'localImage'; path: string };
 export type TurnStartParams = { threadId: string; input: UserInput[]; effort?: ReasoningEffort | null };
 export type TurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';
 export type TurnError = { message: string; additionalDetails: string | null };

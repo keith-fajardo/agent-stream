@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
@@ -36,7 +36,8 @@ import {
 } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
-import { isGraphId, type ProjectPaths } from './paths';
+import { AttachmentStore } from './attachmentStore';
+import { graphAttachmentsDir, isGraphId, type ProjectPaths } from './paths';
 import { renameReferences } from './templates';
 
 export function slugify(name: string): string {
@@ -74,10 +75,27 @@ function touches(op: Op, change: AgentChange): boolean {
   return op.type === 'deleteNode' && (op.id === change.from || op.id === change.to);
 }
 
+/** `items` sorted as `order` lists them (by `key`); what `order` doesn't list keeps its relative place, after the rest. */
+function sortedLike<T>(items: readonly T[], order: readonly T[], key: (item: T) => string): T[] {
+  const rank = new Map(order.map((item, i) => [key(item), i]));
+  const at = (item: T) => rank.get(key(item)) ?? order.length;
+  return items.map((item, i) => ({ item, i })).sort((x, y) => at(x.item) - at(y.item) || x.i - y.i).map((x) => x.item);
+}
+
+/** `graph` with its steps, edges and variables in the order `order` has them (an undone delete returns to its old place). */
+function inOrderOf(graph: Graph, order: Graph): Graph {
+  return {
+    ...graph,
+    nodes: sortedLike(graph.nodes, order.nodes, (n) => n.id),
+    edges: sortedLike(graph.edges, order.edges, (e) => `${e.from}\u0000${e.to}`),
+    variables: sortedLike(graph.variables, order.variables, (v) => v.name),
+  };
+}
+
 /** `node` with `source`'s content fields (absent ones removed), keeping its id, position and authorship. */
 function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
-  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, ...rest } = node;
-  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace };
+  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, attachments: _f, ...rest } = node;
+  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort, attachments: source.attachments };
   return { ...rest, title: source.title, kind: source.kind, ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)) };
 }
 
@@ -127,9 +145,22 @@ export class GraphStore extends EventEmitter {
     return join(this.paths.graphsDir, `${id}${BASELINE_SUFFIX}`);
   }
 
-  /** Whether any of the id's files is on disk: a graph file, or what a deleted one left (its side file, baseline, history). */
+  /**
+   * Whether any of the id's files is on disk: a graph file, or what a deleted one left (its side file, baseline, history,
+   * or an attachments folder with anything in it, which a new graph would otherwise inherit).
+   */
   private taken(id: string): boolean {
-    return [this.file(id), this.legacyFile(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id)].some((f) => existsSync(f));
+    return [this.file(id), this.legacyFile(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id)].some((f) => existsSync(f)) || this.attachmentsLeft(id);
+  }
+
+  /** Something is where the id's attachments folder goes: a folder that isn't empty, or a link or file (never followed). */
+  private attachmentsLeft(id: string): boolean {
+    const dir = graphAttachmentsDir(this.paths, id);
+    try {
+      return !lstatSync(dir).isDirectory() || readdirSync(dir).length > 0;
+    } catch {
+      return false;
+    }
   }
 
   private uniqueId(name: string): string {
@@ -296,7 +327,7 @@ export class GraphStore extends EventEmitter {
   }
 
   /** While the Markdown file has errors, edits that would rewrite it are refused, so a half-finished hand edit is never lost. */
-  private brokenFile(id: string): string | null {
+  brokenFile(id: string): string | null {
     const errors = this.fileErrors(id);
     return errors.length ? `The file ${id}.md has errors (${formatFileErrors(errors)}). Fix it first: until then this graph can't be changed here.` : null;
   }
@@ -377,15 +408,20 @@ export class GraphStore extends EventEmitter {
     const names = new Set(this.list().map((g) => g.name));
     let name = `${r.graph.name} copy`;
     for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
-    const graph = this.save({ ...r.graph, id: this.uniqueId(name), name, updatedAt: this.clock() });
+    const copy = this.uniqueId(name);
+    // Its attachments come along (step model spec §6b.2), before its file names them.
+    const copied = new AttachmentStore(this.paths).copyFolder(id, copy);
+    if (!copied.ok) return copied;
+    const graph = this.save({ ...r.graph, id: copy, name, updatedAt: this.clock() });
     return { ok: true, graph };
   }
 
-  /** Removes the graph, its side file, its agent-change baseline, its edit history and its chat. Run logs stay on disk. */
+  /** Removes the graph, its side file, its agent-change baseline, its edit history, its chat and its attachments. Run logs stay on disk. */
   delete(id: string): { ok: true } | { ok: false; error: string } {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     if (!existsSync(this.file(id))) return { ok: false, error: `graph "${id}" not found` };
     for (const f of [this.file(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
+    new AttachmentStore(this.paths).removeFolder(id);
     this.forget(id);
     return { ok: true };
   }
@@ -436,6 +472,46 @@ export class GraphStore extends EventEmitter {
     }
     this.emit('changed', saved);
     this.emit('op', graphId, r.op);
+    return { ok: true, graph: saved };
+  }
+
+  /**
+   * Several edits that are one user action (a drag of several steps, deleting a selection, Tidy) or one undo (step model
+   * spec §6a.2): checked on a copy first, so they apply all or none, then applied with the baseline rules of single edits,
+   * saved once and recorded one by one (`via: 'undo'` for an undo; `order` is the graph whose order of steps, edges and
+   * variables the result keeps, so an undone delete comes back where it was). Moves alone are allowed while the file has errors.
+   */
+  applyBatch(graphId: string, ops: readonly Op[], by: Actor, o: { via?: 'undo'; order?: Graph } = {}): GraphResult {
+    if (ops.some((op) => op.type === 'acceptChange' || op.type === 'revertChange')) return { ok: false, error: 'Agent changes are accepted or reverted one review at a time.' };
+    const current = this.load(graphId);
+    if (!current.ok) return current;
+    const broken = ops.every((op) => op.type === 'moveNode') ? null : this.brokenFile(graphId);
+    if (broken) return { ok: false, error: broken };
+    if (!ops.length) return current;
+    const at = this.clock();
+    let draft = current.graph;
+    for (const op of ops) {
+      const resolved: Op = op.type === 'addNode' && !op.node.id ? { ...op, node: { ...op.node, id: nextNodeId(draft) } } : op;
+      const r = applyOp(draft, resolved, by, at, { rewriteReferences: renameReferences });
+      if (!r.ok) return r;
+      draft = r.graph;
+    }
+    let graph = current.graph;
+    const applied: Op[] = [];
+    for (const op of ops) {
+      const r = this.applyOne(graph, op, by, at);
+      // The same edits just succeeded on a copy; only I/O (writeBaseline) can fail here. Then this throws before the graph is
+      // saved, and the baseline may already be ahead of it (as in apply()).
+      if (!r.ok) throw new Error(r.error);
+      graph = r.graph;
+      applied.push(r.op);
+    }
+    const saved = this.save(o.order ? inOrderOf(graph, o.order) : graph);
+    const edits = applied.filter((op) => op.type !== 'moveNode');
+    if (edits.length) this.dropBaselineIfSame(saved);
+    for (const op of edits) this.record(graphId, { at, by, op, ...(o.via && { via: o.via }) });
+    this.emit('changed', saved);
+    for (const op of applied) this.emit('op', graphId, op, o.via);
     return { ok: true, graph: saved };
   }
 

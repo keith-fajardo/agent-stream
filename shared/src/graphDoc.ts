@@ -1,6 +1,6 @@
 import { edgeId, nodeIdProblem, seqOf } from './graph';
 import type { FlowEdge } from './graphFlow';
-import type { Graph, GraphFileError, GraphNode, NodeKind } from './types';
+import type { EffortLevel, Graph, GraphFileError, GraphNode, NodeKind, StepModel } from './types';
 
 /** The longest timeout a step can have: Node's longest timer, in whole seconds. */
 export const MAX_TIMEOUT_SEC = 2_147_483;
@@ -16,6 +16,10 @@ export type DocStep = {
   access?: 'read';
   workspace?: string;
   timeoutSec?: number;
+  /** Agent steps only. */
+  model?: StepModel;
+  effort?: EffortLevel;
+  attachments?: string[];
   description?: string;
   prompt?: string;
   command?: string;
@@ -23,8 +27,10 @@ export type DocStep = {
   line: number;
 };
 export type DocVariable = { name: string; description: string; line: number };
+/** The graph's "## Attachments" list, with the section's line for messages (step model spec §6b.3). */
+export type DocAttachments = { names: string[]; line: number };
 /** A graph's meaning as its Markdown file states it (Markdown graph files spec §3.1). Positions and bookkeeping are in the side file. */
-export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; steps: DocStep[]; edges: FlowEdge[] };
+export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; attachments?: DocAttachments; steps: DocStep[]; edges: FlowEdge[] };
 export type ParseGraphResult = { ok: true; doc: GraphDoc } | { ok: false; errors: GraphFileError[] };
 
 /** CRLF and lone CR as LF. */
@@ -47,8 +53,8 @@ export function formatFileErrors(errors: readonly GraphFileError[], max = 1): st
 /**
  * The graph as its files hold it (spec §4): what loading its Markdown and side file gives back. Names, titles, variable
  * descriptions and step descriptions on one line; goal and instructions trimmed; LF line endings; only the text of the
- * step's kind (a prompt or a command), absent when empty; `access` only for a read-only agent step; whole-second
- * timeouts; `nodeSeq` at least the highest n<number> id.
+ * step's kind (a prompt or a command), absent when empty; `access` only for a read-only agent step; a model and an
+ * effort only on an agent step; whole-second timeouts; `nodeSeq` at least the highest n<number> id.
  */
 export function canonicalGraph(graph: Graph): Graph {
   const nodes = graph.nodes.map(canonicalNode);
@@ -58,6 +64,7 @@ export function canonicalGraph(graph: Graph): Graph {
     goal: normText(graph.goal).trim(),
     instructions: normText(graph.instructions).trim(),
     variables: graph.variables.map((v) => ({ name: v.name, description: oneLine(v.description) })),
+    ...(graph.attachments?.length ? { attachments: [...graph.attachments] } : { attachments: undefined }),
     nodes,
     edges: graph.edges.map((e) => ({ id: edgeId(e.from, e.to), from: e.from, to: e.to })),
     nodeSeq: Math.max(graph.nodeSeq, ...nodes.map((n) => seqOf(n.id))),
@@ -65,7 +72,7 @@ export function canonicalGraph(graph: Graph): Graph {
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, ...rest } = node;
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, ...rest } = node;
   const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
   const summary = oneLine(description ?? '');
   return {
@@ -76,6 +83,9 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(timeoutSec !== undefined && { timeoutSec: timeoutValue(timeoutSec) }),
     ...(node.kind === 'agent' && access === 'read' && { access: 'read' as const }),
     ...(workspace && { workspace }),
+    ...(node.kind === 'agent' && model && { model: { provider: model.provider, id: model.id } }),
+    ...(node.kind === 'agent' && effort && { effort }),
+    ...(node.kind === 'agent' && attachments?.length && { attachments: [...attachments] }),
   };
 }
 

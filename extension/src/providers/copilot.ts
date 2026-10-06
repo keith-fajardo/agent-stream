@@ -1,15 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import {
+  attachedPrompt,
   builtinTools,
+  CLAUDE_IMAGE_MAX_BYTES,
+  inlineBudget,
+  OVER_BUDGET_IN_CHAT,
   lastAssistantText,
+  MAX_READ_BYTES,
+  PDF_MAY_NOT_READ,
+  readIfThere,
   runAgentLoop,
   STEP_GRAPH_TOOL_PREFIX,
+  TEXT_OVER_2_MB,
   toLoopTools,
   type AgentProvider,
   type ChatMessage,
+  type ImageData,
+  notIncluded,
   type NodeOutcome,
+  promptWithNotes,
   type RunShell,
+  type TurnFile,
 } from '@agent-stream/engine';
 import { isWriteCapable, type ModelChoice, type NodeUsage, type ProviderStatus } from '@agent-stream/shared';
 import { COPILOT_PERMISSION, ExtensionBlockedModelError, vscodeChatModel } from './copilotModel';
@@ -28,6 +40,15 @@ export const copilotCapMessage = (n: number, setting: 'maxRequestsPerStep' | 'ma
     ? 'Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.'
     : 'Raise the setting to let steps run longer.');
 export const requestLine = (n: number, cap: number) => `Copilot requests: ${n} of ${cap}`;
+/**
+ * Copilot sends an image up to 5 MB (Claude's limit, since the picked model may be a Claude model) within the request's
+ * inline budget. The agent loop's Read can't show an image, so one that isn't sent is said to be unseen.
+ */
+const MAX_IMAGE_BYTES = CLAUDE_IMAGE_MAX_BYTES;
+export const COPILOT_IMAGE_NOT_SENT = {
+  tooBig: "image over 5 MB: it couldn't be shown to the model",
+  overBudget: "image not sent (too many large images): it couldn't be shown to the model",
+};
 
 /** The slice of vscode.lm the provider uses. */
 export type LmApi = { selectChatModels(selector: { vendor: string }): Thenable<readonly vscode.LanguageModelChat[]> };
@@ -43,8 +64,10 @@ export type CopilotDeps = {
   limits: () => CopilotLimits;
 };
 
-/** Not in @types/vscode 1.106, but present at runtime (spec §2, ruling R17). */
-type ToolCalling = { capabilities?: { supportsToolCalling?: boolean } };
+/** Not in @types/vscode 1.106, but present at runtime (spec §2, ruling R17): whether a model calls tools, and takes images. */
+type ToolCalling = { capabilities?: { supportsToolCalling?: boolean; supportsImageToText?: boolean } };
+/** Whether VS Code says this model takes images (step model spec §6b.5); a model that doesn't say, doesn't. */
+export const takesImages = (m: vscode.LanguageModelChat): boolean => (m as ToolCalling).capabilities?.supportsImageToText === true;
 
 /** The models Agent Stream can run (spec §5.2): tool calling, no internal copilot-* ids, one per id, Auto first. */
 export function usableModels(models: readonly vscode.LanguageModelChat[]): vscode.LanguageModelChat[] {
@@ -67,6 +90,14 @@ const choiceOf = (m: vscode.LanguageModelChat): ModelChoice => ({ value: m.id, l
 /** Copilot reports no tokens or cost: only the request count (ruling R16). */
 const requestUsage = (requests: number): NodeUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: requests });
 const userText = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
+/** A user message with images after its text. */
+const userWithImages = (text: string, images: readonly ImageData[]): ChatMessage => ({
+  role: 'user',
+  content: [{ type: 'text', text }, ...images.map((i) => ({ type: 'image' as const, mediaType: i.mediaType, data: i.data }))],
+});
+/** A conversation as it is saved: each image a short text line instead of its bytes. */
+const withoutImages = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.map((m) => (m.role === 'user' && m.content.some((c) => c.type === 'image') ? { ...m, content: m.content.map((c) => (c.type === 'image' ? { type: 'text' as const, text: '[An image was attached here.]' } : c)) } : m));
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -179,15 +210,26 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
     stepRequestCap: () => d.limits().maxRequestsPerStep,
 
     async runStep(ctx, gate): Promise<NodeOutcome> {
-      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
       const picked = await pick(ctx.model);
+      // Attached images go to a model that takes them; for any other the list says so (step model spec §6b.5).
+      // Each image's line says what happened to it: sent, or (for a model that takes none) not shown; one that vanished is left out.
+      const { text: prompt, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, {
+        send: 'model' in picked && takesImages(picked.model),
+        maxBytes: MAX_IMAGE_BYTES,
+        notSent: COPILOT_IMAGE_NOT_SENT,
+        pdf: PDF_MAY_NOT_READ,
+        // The agent loop's Read takes up to 2 MB; Grep searches a named text attachment whole.
+        bigText: { maxBytes: MAX_READ_BYTES, note: TEXT_OVER_2_MB },
+      });
+      // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
+      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt, ...('model' in picked && { model: picked.model.id }) });
       if ('error' in picked) return { ok: false, output: '', error: picked.error };
       if (picked.note) ctx.emit({ type: 'text', text: picked.note });
       const cap = d.limits().maxRequestsPerStep;
       const r = await runAgentLoop({
         model: chatModel(picked.model),
         system: stepPreamble(ctx.cwd),
-        messages: [userText(ctx.prompt)],
+        messages: [images.length ? userWithImages(prompt, images) : userText(prompt)],
         tools: [
           ...builtinTools({ cwd: ctx.cwd, runShell: d.runShell, readOnly: !isWriteCapable(ctx.node) }),
           ...toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX),
@@ -215,12 +257,30 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       }
       const picked = await pick(turn.model);
       if ('error' in picked) return { ok: false, error: picked.error };
+      // A chat message's images go to a model that takes them, up to 5 MB each and within the request's inline budget (in
+      // message order); PDFs can't be sent here (step model spec §6b.5).
+      const takes = takesImages(picked.model);
+      const budget = inlineBudget();
+      const images: TurnFile[] = [];
+      const notes: string[] = [];
+      for (const f of turn.files ?? []) {
+        const size = Buffer.byteLength(f.data, 'base64');
+        if (f.kind === 'pdf') notes.push(notIncluded(f.name, "GitHub Copilot can't read PDFs in the chat"));
+        else if (!takes) notes.push(notIncluded(f.name, `${picked.model.name} doesn't take images`));
+        else if (size > MAX_IMAGE_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (images up to 5 MB are sent)'));
+        else if (!budget.take(size, true)) notes.push(notIncluded(f.name, OVER_BUDGET_IN_CHAT));
+        else images.push(f);
+      }
+      // Said in the chat and in the message itself, so the model knows.
+      for (const note of notes) turn.onEvent({ type: 'note', text: note });
+      const prompt = promptWithNotes(turn.prompt, notes);
+      const message = images.length ? userWithImages(prompt, images.map((f) => ({ name: f.name, mediaType: f.mediaType as ImageData['mediaType'], data: f.data }))) : userText(prompt);
       const cap = d.limits().maxRequestsPerTurn;
       const graphToolNames = new Set(turn.tools.map((t) => t.name));
       const r = await runAgentLoop({
         model: chatModel(picked.model),
         system: turn.systemAppend,
-        messages: [...history, userText(turn.prompt)],
+        messages: [...history, message],
         tools: [...builtinTools({ cwd: turn.cwd, runShell: d.runShell, readOnly: true }), ...toLoopTools(turn.tools, '')],
         gate: turn.gate,
         maxRequests: cap,
@@ -236,7 +296,8 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       // saved as returned, compacted when it compacted. A failed save is logged, never the turn's failure: the turn ran.
       const id = turn.resume ?? randomUUID();
       try {
-        turn.transcript.save(id, r.messages);
+        // Images are kept out of the saved conversation: the files stay in the session, the messages name them.
+        turn.transcript.save(id, withoutImages(r.messages));
       } catch (e) {
         console.error(`Agent Stream: couldn't save the Copilot conversation ${id}: ${reason(e)}`);
       }

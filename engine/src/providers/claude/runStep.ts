@@ -1,10 +1,11 @@
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { EffortLevel, ModelChoice, NodeEventBody, NodeUsage } from '@agent-stream/shared';
 import type { NodeContext, NodeOutcome } from '../../executors';
+import { attachedPrompt, CLAUDE_IMAGE_MAX_BYTES, PDF_READ_TOOL, readIfThere } from '../../attachedFiles';
 import { READ_ONLY_TOOLS, STEP_GRAPH_TOOL_PREFIX, type ToolGate } from '../toolGate';
 import { authSourceError, isSubscriptionAuthSource, projectSettingsProblem, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import { modelOptions } from './models';
-import { blocksOf, graphServer, toolResultText, type QueryFn } from './sdk';
+import { blocksOf, graphServer, toolResultText, userMessage, type QueryFn, type UserBlock } from './sdk';
 import { toSdkGate } from './sdkGate';
 
 /** The in-process MCP server that serves a step's graph tools: they are `mcp__run_graph__<name>` (STEP_GRAPH_TOOL_PREFIX). */
@@ -93,7 +94,12 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
     // Re-checked per node: the project's settings can change while VS Code runs.
     const settingsProblem = projectSettingsProblem(ctx.cwd);
     if (settingsProblem) return { ok: false, output: '', error: settingsProblem };
-    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt });
+    const chosen = sdkModelOptions(deps, ctx);
+    // Its attachments (spec §6b.5): images go in the step's first message; PDFs and text files are read with the read tools.
+    // The API refuses an image block over 5 MB, so a larger image is listed with its path for the Read tool instead.
+    const { text, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, { send: true, maxBytes: CLAUDE_IMAGE_MAX_BYTES, pdf: PDF_READ_TOOL });
+    // The model and effort the step actually runs with: an effort the model doesn't offer is already dropped.
+    ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: text, ...(chosen.model && { model: chosen.model }), ...(chosen.effort && { effort: chosen.effort as EffortLevel }) });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     ctx.signal.addEventListener('abort', onAbort, { once: true });
@@ -110,7 +116,7 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
       hooks: gate.hooks,
       canUseTool: gate.canUseTool,
       abortController,
-      ...sdkModelOptions(deps, ctx),
+      ...chosen,
     };
     if (ctx.graphTools?.length) {
       // The step's own graph tools: each asks the user with the exact change (the gate lets them through).
@@ -119,7 +125,9 @@ export function claudeRunStep(deps: ClaudeRunDeps) {
     }
     try {
       let sawInit = false;
-      for await (const message of deps.queryFn({ prompt: ctx.prompt, options })) {
+      const blocks: UserBlock[] = [{ type: 'text', text }, ...images.map((i): UserBlock => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } }))];
+      const prompt = images.length ? userMessage(blocks) : text;
+      for await (const message of deps.queryFn({ prompt, options })) {
         if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') sawInit = true;
         // Fail closed: a result we cannot tie to a checked auth source is not trusted.
         if (message.type === 'result' && !sawInit) return { ok: false, output: '', error: UNVERIFIED_AUTH };

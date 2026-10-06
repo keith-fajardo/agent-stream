@@ -1,10 +1,13 @@
 import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
+import { attachmentListProblem, MAX_ATTACHMENTS } from './attachments';
 import { fenceCloses, fenceOpening, type Fence } from './fence';
 import { unescapeFreeTextLine } from './freeText';
 import { nodeIdProblem } from './graph';
-import { MAX_TIMEOUT_SEC, STEP_SEPARATOR, type DocStep, type DocVariable, type ParseGraphResult } from './graphDoc';
+import { MAX_TIMEOUT_SEC, STEP_SEPARATOR, type DocAttachments, type DocStep, type DocVariable, type ParseGraphResult } from './graphDoc';
 import { parseFlow, type FlowEdge } from './graphFlow';
-import type { GraphFileError, NodeKind } from './types';
+import type { EffortLevel, GraphFileError, NodeKind, StepModel } from './types';
+import { isEffortLevel } from './format';
+import { parseStepModel } from './stepModels';
 import { variableNameProblem } from './variables';
 
 type TextItem = { kind: 'text'; line: number; text: string };
@@ -13,13 +16,17 @@ type Item = TextItem | CodeItem;
 type Section = { level: 1 | 2; title: string; line: number; items: Item[] };
 
 const HEADING_RE = /^(#{1,2})(?=[ \t]|$)[ \t]*(.*?)[ \t]*$/;
-const RESERVED = { goal: 'Goal', instructions: 'Instructions', variables: 'Variables', flow: 'Flow' } as const;
+const RESERVED = { goal: 'Goal', instructions: 'Instructions', variables: 'Variables', attachments: 'Attachments', flow: 'Flow' } as const;
 type Reserved = (typeof RESERVED)[keyof typeof RESERVED];
 const STEP_HEADING_RE = new RegExp(`^([A-Za-z0-9_-]+)${STEP_SEPARATOR.trimEnd()}(?: (.*))?$`);
 const FIELD_RE = /^[-*][ \t]+([A-Za-z]+)[ \t]*:[ \t]*(.*?)[ \t]*$/;
 const VARIABLE_RE = /^[-*][ \t]+`([^`]*)`(?:[ \t]*:[ \t]*(.*?))?[ \t]*$/;
 const QUOTE_RE = /^>[ \t]?(.*)$/;
-const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout'];
+const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'attach'];
+/** A field a step may repeat: one line per attachment, in order (spec §6b.3). */
+const LIST_FIELDS = new Set(['attach']);
+const ATTACHMENT_RE = /^[-*][ \t]+`([^`]*)`[ \t]*$/;
+const ATTACHMENTS_FORM = 'each line under "## Attachments" is one file, written as - `name`.';
 const AGENT_INFOS = new Set(['prompt', 'text', 'md']);
 const COMMAND_INFOS = new Set(['sh', 'bash', 'shell']);
 const START = 'the file must start with the graph\'s name, as "# Name".';
@@ -96,6 +103,42 @@ function readVariables(section: Section, errors: GraphFileError[]): DocVariable[
   return out;
 }
 
+/**
+ * Names in one list (a step's attach lines, or "## Attachments"): each a safe name in composed (NFC) form, none twice in any
+ * letter case, at most 20. `where` names the list in messages.
+ */
+function attachmentNames(entries: { value: string; line: number }[], where: string, errors: GraphFileError[]): string[] {
+  const names: string[] = [];
+  const seen = new Map<string, number>();
+  for (const e of entries) {
+    const problem = attachmentListProblem([e.value]);
+    if (problem) {
+      errors.push({ line: e.line, message: `${problem} Rename the file in the graph's attachments folder and here.` });
+      continue;
+    }
+    const earlier = seen.get(e.value.toLowerCase());
+    if (earlier !== undefined) {
+      errors.push({ line: e.line, message: `${e.value} is attached twice in ${where} (also on line ${earlier}). Keep one.` });
+      continue;
+    }
+    seen.set(e.value.toLowerCase(), e.line);
+    names.push(e.value);
+  }
+  if (names.length > MAX_ATTACHMENTS) errors.push({ line: entries[MAX_ATTACHMENTS].line, message: `${where} has ${names.length} attachments; the most is ${MAX_ATTACHMENTS}. Remove ${names.length - MAX_ATTACHMENTS}.` });
+  return names;
+}
+
+function readAttachments(section: Section, errors: GraphFileError[]): DocAttachments {
+  const entries: { value: string; line: number }[] = [];
+  for (const item of section.items) {
+    if (isBlank(item)) continue;
+    const m = item.kind === 'text' ? ATTACHMENT_RE.exec(item.text.trim()) : null;
+    if (!m) errors.push({ line: item.line, message: ATTACHMENTS_FORM });
+    else entries.push({ value: m[1], line: item.line });
+  }
+  return { names: attachmentNames(entries, 'the graph', errors), line: section.line };
+}
+
 function readFlow(section: Section, stepIds: ReadonlySet<string>, errors: GraphFileError[]): FlowEdge[] {
   const blocks: CodeItem[] = [];
   for (const item of section.items) {
@@ -129,6 +172,7 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
   }
   if (!title) fail(section.line, id ? `step ${id} needs a title after "${STEP_SEPARATOR.trim()}".` : 'this step needs a title after "##".');
   const fields = new Map<string, { value: string; line: number }>();
+  const lists = new Map<string, { value: string; line: number }[]>();
   const quote: string[] = [];
   let code: CodeItem | undefined;
   let phase: 'fields' | 'description' | 'code' = 'fields';
@@ -144,7 +188,8 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     if (field) {
       const key = field[1].toLowerCase();
       if (phase !== 'fields') fail(item.line, `fields go at the top of step ${label}, before the description and the code block.`);
-      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace and timeout.`);
+      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort and attach.`);
+      else if (LIST_FIELDS.has(key)) lists.set(key, [...(lists.get(key) ?? []), { value: field[2], line: item.line }]);
       else if (fields.has(key)) fail(item.line, `the field ${key} appears twice in step ${label}. Keep one.`);
       else fields.set(key, { value: field[2], line: item.line });
       continue;
@@ -199,6 +244,29 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     if (sec >= 1 && sec <= MAX_TIMEOUT_SEC) timeoutSec = sec;
     else fail(t.line, `timeout is "${t.value}"; use a whole number of seconds from 1 to ${MAX_TIMEOUT_SEC}.`);
   }
+  // A step's own model and effort (step model spec §2.2). Whether the model exists is checked when a run starts, not here.
+  let model: StepModel | undefined;
+  let effort: EffortLevel | undefined;
+  for (const key of ['model', 'effort'] as const) {
+    const f = fields.get(key);
+    if (!f) continue;
+    if (finalKind === 'command') {
+      fail(f.line, `step ${label} is a command step, so it can't have a model or effort. Remove this line, or make it an agent step.`);
+      continue;
+    }
+    if (key === 'model') {
+      const r = parseStepModel(f.value);
+      if (r.ok) model = r.model;
+      else fail(f.line, r.error);
+    } else if (isEffortLevel(f.value)) effort = f.value;
+    else fail(f.line, `effort is "${f.value}"; use low, medium, high, xhigh, max or ultra.`);
+  }
+  // Its attachments (spec §6b.3). Whether the files are there is checked when a run starts, not here.
+  const attachLines = lists.get('attach') ?? [];
+  let attachments: string[] = [];
+  if (attachLines.length && finalKind === 'command') {
+    for (const a of attachLines) fail(a.line, `step ${label} is a command step, so it can't have attachments. Remove this line, or make it an agent step.`);
+  } else attachments = attachmentNames(attachLines, `step ${label}`, errors);
   if (errors.length > before || !code || !finalKind) return null;
   const description = quote
     .map((q) => q.trim())
@@ -212,6 +280,9 @@ function readStep(section: Section, errors: GraphFileError[]): DocStep | null {
     ...(access && { access }),
     ...(workspace && { workspace }),
     ...(timeoutSec !== undefined && { timeoutSec }),
+    ...(model && { model }),
+    ...(effort && { effort }),
+    ...(attachments.length > 0 && { attachments }),
     ...(description && { description }),
     ...(text && (finalKind === 'agent' ? { prompt: text } : { command: text })),
     line: section.line,
@@ -241,6 +312,7 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
   let goal = '';
   let instructions = '';
   let variables: DocVariable[] = [];
+  let attachments: DocAttachments | undefined;
   let flow: Section | undefined;
   const reservedAt = new Map<Reserved, number>();
   const stepSections: Section[] = [];
@@ -260,6 +332,7 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
     if (reserved === 'Goal') goal = freeText(s.items);
     else if (reserved === 'Instructions') instructions = freeText(s.items);
     else if (reserved === 'Variables') variables = readVariables(s, errors);
+    else if (reserved === 'Attachments') attachments = readAttachments(s, errors);
     else flow = s;
   }
 
@@ -274,7 +347,7 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
   const steps = stepSections.map((s) => readStep(s, errors)).filter((s): s is DocStep => s !== null);
   const edges = flow ? readFlow(flow, new Set(idLines.keys()), errors) : [];
   if (errors.length) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
-  return { ok: true, doc: { name: h1!.title, goal, instructions, variables, steps, edges } };
+  return { ok: true, doc: { name: h1!.title, goal, instructions, variables, ...(attachments?.names.length && { attachments }), steps, edges } };
 }
 
 /** The file's lines: a leading BOM dropped, CRLF and CR read as LF. */

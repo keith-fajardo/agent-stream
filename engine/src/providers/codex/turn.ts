@@ -13,6 +13,7 @@ import type {
   TurnCompletedNotification,
   TurnStartParams,
   TurnStartResponse,
+  UserInput,
 } from './protocol';
 
 /** How long Stop waits for the turn id, then for turn/completed, before closing anyway (spec §4.6). */
@@ -45,6 +46,8 @@ export type RunTurnOptions = {
   conn: CodexConnection;
   threadId: string;
   text: string;
+  /** Images to send with the text, as files Codex reads (step model spec §6b.5). */
+  images?: string[];
   effort?: EffortLevel;
   /** Stop. */
   signal: AbortSignal;
@@ -112,7 +115,8 @@ export async function runCodexTurn(o: RunTurnOptions): Promise<TurnOutcome> {
     started.reject(error);
   });
 
-  const params: TurnStartParams = { threadId: o.threadId, input: [{ type: 'text', text: o.text, text_elements: [] }], ...(o.effort && { effort: o.effort }) };
+  const input: UserInput[] = [{ type: 'text', text: o.text, text_elements: [] }, ...(o.images ?? []).map((path): UserInput => ({ type: 'localImage', path }))];
+  const params: TurnStartParams = { threadId: o.threadId, input, ...(o.effort && { effort: o.effort }) };
   o.conn.request<TurnStartResponse>('turn/start', params).then(
     (r) => started.resolve(r.turn.id),
     (e: unknown) => started.reject(e),

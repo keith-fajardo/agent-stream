@@ -1,3 +1,4 @@
+import { MARKDOWN_SAVED } from './toasts';
 import type {
   AgentChange,
   ApprovalRequest,
@@ -13,6 +14,7 @@ import type {
   ModelChoice,
   ModelSelection,
   NodeEvent,
+  ProviderId,
   ProviderStatus,
   RunMeta,
   RunPreview,
@@ -78,8 +80,10 @@ export type State = {
   chatBusy: boolean;
   /** The planner conversation the chat view shows; the extension picks it. */
   chatTarget?: ChatTarget;
-  /** The current provider's models, for the chat's Model menu. */
+  /** The current provider's models, for the chat's and the Node panel's Model menus. */
   models: ModelChoice[];
+  /** The provider `models` belongs to. */
+  modelsProvider?: ProviderId;
   /** The levels the chat's Default offers: the settings' model's, else Claude Code's default row's. */
   defaultEfforts: EffortLevel[];
   /** The shown conversation's own model and effort choice, as the engine last confirmed it (absent fields: Default). */
@@ -98,6 +102,10 @@ export type State = {
   /** Each tab keeps its own (webview state); never saved in the graph or the session. */
   canvasMode: CanvasMode;
   markdown: MarkdownEditorState;
+  /** What Edit › Undo would undo in this tab, as the engine names it; undefined: nothing (step model spec §6a.2). */
+  undoLabel?: string;
+  /** How many edits the engine has refused: the canvas forgets its unconfirmed moves on each. */
+  rejections: number;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
@@ -106,7 +114,7 @@ function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
 
 const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };
 
-export const initialState: State = { connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -245,7 +253,7 @@ function reduceServer(state: State, msg: HostMessage): State {
         ...state,
         ...reviewing(state, msg.changes),
         // Another graph's review (a picked change, a pending Accept all) doesn't carry over.
-        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined, markdown: initialMarkdown }),
+        ...(current !== msg.graph.id && { selectedChange: undefined, changeConfirm: undefined, blocked: undefined, markdown: initialMarkdown, undoLabel: undefined }),
         graph: msg.graph,
         graphGone: false,
         fileErrors: msg.fileErrors ?? [],
@@ -279,12 +287,12 @@ function reduceServer(state: State, msg: HostMessage): State {
       const m = { ...state.markdown, saving: undefined };
       if (msg.conflict) return { ...state, markdown: { ...m, conflict: true } };
       if (msg.error !== undefined) return { ...state, markdown: m, toast: msg.error };
-      // Written (with or without errors): the editor shows the file as it is now.
+      // Written (with or without errors): the editor shows the file as it is now. Saved without errors: a toast says so (spec §6a.1).
       const markdown = { ...m, disk: msg.text ?? m.disk, draft: undefined, base: undefined, conflict: false };
-      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode };
+      return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode, ...(msg.ok && { toast: MARKDOWN_SAVED }) };
     }
     case 'opRejected':
-      return msg.graphId === current ? { ...state, toast: msg.error } : state;
+      return msg.graphId === current ? { ...state, toast: msg.error, rejections: state.rejections + 1 } : state;
     case 'runs':
       return msg.graphId === current ? { ...state, runs: msg.runs } : state;
     case 'run': {
@@ -314,7 +322,7 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'plannerModel':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, plannerModel: selection(msg) } : state;
     case 'models':
-      return { ...state, models: msg.models, defaultEfforts: msg.defaultEfforts ?? [] };
+      return { ...state, models: msg.models, modelsProvider: msg.provider, defaultEfforts: msg.defaultEfforts ?? [] };
     case 'chatEntry':
       return forTarget(state, msg.graphId, msg.sessionId) ? { ...state, chat: [...state.chat, msg.entry] } : state;
     case 'chatBusy':
@@ -342,6 +350,13 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'runReport':
       // The extension saves the report itself; a tab has nothing to show.
       return state;
+    case 'undoState':
+      return msg.graphId === current ? { ...state, undoLabel: msg.label } : state;
+    case 'undone':
+      return msg.graphId === current ? { ...state, toast: msg.message } : state;
+    case 'attached':
+      // The graph's first attachment: the one-time notice (spec §6b.2).
+      return msg.graphId === current && msg.notice ? { ...state, toast: msg.notice } : state;
     case 'error':
       // A save the engine or the extension refused before it could answer (a message too large, a throw) is over too.
       return { ...state, toast: msg.message, ...(state.markdown.saving && { markdown: { ...state.markdown, saving: undefined } }) };

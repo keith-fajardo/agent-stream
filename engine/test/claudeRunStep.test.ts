@@ -2,11 +2,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { HookInput, McpSdkServerConfigWithInstance, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookInput, McpSdkServerConfigWithInstance, Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { emptyGraph, type ApprovalRequest, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
+import type { StepAttachment } from '../src/attachedFiles';
 import type { NodeContext } from '../src/executors';
 import type { GraphTool } from '../src/providers/types';
 import { createClaudeProvider } from '../src/providers/claude';
@@ -26,7 +27,7 @@ const failure = (errors: string[]) =>
   msg({ type: 'result', subtype: 'error_during_execution', is_error: true, errors, num_turns: 1, total_cost_usd: 0, usage, session_id: 's1' });
 
 function fake(script: (options: Options) => AsyncGenerator<SDKMessage>) {
-  const calls: { prompt: string; options?: Options }[] = [];
+  const calls: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }[] = [];
   const fn: QueryFn = (params) => {
     calls.push(params);
     return script(params.options ?? {});
@@ -297,5 +298,123 @@ describe('Claude provider: steps', () => {
     writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x' }));
     expect(createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }) }).folderProblem?.(dir)).toMatch(/apiKeyHelper/);
     expect(createClaudeProvider({ findClaude: () => ({ ok: true, path: '/c' }) }).folderProblem?.(mkdtempSync(join(tmpdir(), 'cs-')))).toBeUndefined();
+  });
+});
+
+describe('Claude provider: the model and effort a step runs with', () => {
+  it('logs them in the start event as they are sent, an effort Claude lacks left out', async () => {
+    const script = () =>
+      fake(async function* () {
+        yield init();
+        yield success('ok');
+      });
+    const kept = script();
+    const a = ctx();
+    await runStep({ queryFn: kept.fn }, { ...a.c, model: 'opus', effort: 'high' });
+    expect(a.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: '/proj', prompt: 'FULL PROMPT', model: 'opus', effort: 'high' });
+    expect(kept.calls[0].options).toMatchObject({ model: 'opus', effort: 'high' });
+    const dropped = script();
+    const b = ctx();
+    await runStep({ queryFn: dropped.fn }, { ...b.c, model: 'opus', effort: 'ultra' });
+    expect(b.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: '/proj', prompt: 'FULL PROMPT', model: 'opus' });
+    expect(dropped.calls[0].options).not.toHaveProperty('effort');
+  });
+});
+
+describe('Claude provider: attachments (step model spec §6b.5)', () => {
+  it('puts images in the step’s first message, and names PDFs and text files for the read tools', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-'));
+    writeFileSync(join(dir, 'mockup.png'), 'PNG');
+    const at = (name: string, kind: StepAttachment['kind']): StepAttachment => ({ name, kind, missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: [at('mockup.png', 'image'), at('spec.pdf', 'pdf'), at('notes.md', 'text')] });
+    const text = 'FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: read it with the Read tool)\n- .agent-stream/attachments/g/notes.md\n';
+    const prompt = calls[0].prompt;
+    if (typeof prompt === 'string') throw new Error('expected a message with an image');
+    const messages: SDKUserMessage[] = [];
+    for await (const m of prompt) messages.push(m);
+    expect(messages).toEqual([
+      {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: { role: 'user', content: [{ type: 'text', text }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('PNG').toString('base64') } }] },
+      },
+    ]);
+    expect(a.events[0]).toMatchObject({ type: 'start', prompt: text });
+  });
+
+  it('without images, the prompt stays plain text with the list', async () => {
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: [{ name: 'notes.md', kind: 'text', missing: false, path: '/nowhere/notes.md', shown: 'notes.md' }] });
+    expect(calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- notes.md\n');
+  });
+
+  it('an image over 5 MB is not sent: it is listed with its path and a note to read it with the Read tool', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-big-'));
+    writeFileSync(join(dir, 'big.png'), Buffer.alloc(5 * 1024 * 1024 + 1, 1));
+    writeFileSync(join(dir, 'small.png'), 'PNG');
+    const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
+    const big = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: big.fn }, { ...a.c, attachments: [at('big.png')] });
+    expect(big.calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/big.png (image over 5 MB: read it with the Read tool)\n');
+
+    const both = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const b = ctx();
+    await runStep({ queryFn: both.fn }, { ...b.c, attachments: [at('big.png'), at('small.png')] });
+    const prompt = both.calls[0].prompt;
+    if (typeof prompt === 'string') throw new Error('expected a message with an image');
+    const messages: SDKUserMessage[] = [];
+    for await (const m of prompt) messages.push(m);
+    const content = messages[0].message.content as { type: string }[];
+    expect(content.map((c) => c.type)).toEqual(['text', 'image']);
+    expect(JSON.stringify(content[0])).toContain('big.png (image over 5 MB: read it with the Read tool)');
+    expect(JSON.stringify(content[0])).toContain('small.png (image, attached to this message)');
+  });
+
+  it('sends images in order until the request’s 20 MB inline budget is spent; the rest are read with the Read tool', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-budget-'));
+    const names = ['own1.png', 'own2.png', 'own3.png', 'graph1.png', 'graph2.png'];
+    for (const n of names) writeFileSync(join(dir, n), Buffer.alloc(Math.floor(4.5 * 1024 * 1024), 1));
+    const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: names.map(at) });
+    const prompt = calls[0].prompt;
+    if (typeof prompt === 'string') throw new Error('expected a message with images');
+    const messages: SDKUserMessage[] = [];
+    for await (const m of prompt) messages.push(m);
+    const content = messages[0].message.content as { type: string; text?: string }[];
+    expect(content.map((c) => c.type)).toEqual(['text', 'image', 'image', 'image', 'image']);
+    expect(content[0].text).toContain('graph1.png (image, attached to this message)');
+    expect(content[0].text).toContain('- .agent-stream/attachments/g/graph2.png (image not sent inline (too many large images): read it with the Read tool)');
+  });
+
+  it('an image that vanished after the run started is left out of the list, not described as attached', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-gone-'));
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: [{ name: 'gone.png', kind: 'image', missing: false, path: join(dir, 'gone.png'), shown: 'gone.png' }] });
+    expect(calls[0].prompt).toBe('FULL PROMPT');
   });
 });

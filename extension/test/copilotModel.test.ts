@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as vscode from 'vscode';
 import { ChatModelError, type ChatMessage, type ChatPart } from '@agent-stream/engine';
-import { COPILOT_PERMISSION, isExtensionBlockedModel, JUSTIFICATION, TOOL_RESULTS_FOLLOW_UP, vscodeChatModel } from '../src/providers/copilotModel';
+import { COPILOT_PERMISSION, isExtensionBlockedModel, JUSTIFICATION, TOOL_RESULTS_FOLLOW_UP, toLanguageModelMessage, vscodeChatModel } from '../src/providers/copilotModel';
 import { fakeLmModel } from './helpers';
 
 const live = () => new AbortController().signal;
@@ -138,5 +138,16 @@ describe('vscodeChatModel', () => {
     await collect(vscodeChatModel(fake.model).send([], [{ name: 'T', description: 'd', inputSchema }], live()));
     expect(fake.requests[0].options?.tools).toEqual([{ name: 'T', description: 'd', inputSchema: { type: 'object', properties: { a: { type: 'string' } } } }]);
     expect(inputSchema.$schema).toBeDefined();
+  });
+});
+
+describe('images in messages', () => {
+  it('decodes an image once, however many requests carry it', () => {
+    const message: ChatMessage = { role: 'user', content: [{ type: 'text', text: 'Look.' }, { type: 'image', mediaType: 'image/png', data: Buffer.from('PNG').toString('base64') }] };
+    const parts = (m: vscode.LanguageModelChatMessage) => m.content as unknown as { data?: Uint8Array }[];
+    const first = parts(toLanguageModelMessage(message))[1];
+    const second = parts(toLanguageModelMessage(message))[1];
+    expect(Buffer.from(first.data!).toString()).toBe('PNG');
+    expect(second.data).toBe(first.data);
   });
 });

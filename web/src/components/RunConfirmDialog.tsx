@@ -22,6 +22,8 @@ export function RunConfirmDialog() {
   const preview = useStore((s) => s.preview);
   const variableValues = useStore((s) => s.variableValues);
   const blocked = useStore((s) => s.blocked);
+  // A new model list changes which steps run their own model, so the preview's per-step notes are asked for again.
+  const models = useStore((s) => s.models);
 
   useEffect(() => {
     if (confirm && graph) {
@@ -29,7 +31,7 @@ export function RunConfirmDialog() {
       dispatch({ kind: 'previewRequested', requestId });
       send({ type: 'previewRun', graphId: graph.id, fromNodeId: confirm.fromNodeId, sourceRunId: confirm.sourceRunId, requestId });
     }
-  }, [confirm, graph, variableValues]);
+  }, [confirm, graph, variableValues, models]);
 
   if (blocked && graph) {
     // Another run is changing files in this checkout (spec §7): separate tickets, or wait for it.
@@ -136,13 +138,18 @@ export function RunConfirmDialog() {
             {agents.length > 0 && (
               <div className="agent-prompts">
                 {agents.map((s) => (
-                  <details key={s.id}>
-                    <summary>
-                      {s.id} · {s.title}
-                    </summary>
-                    <StepBrief text={s.description} />
-                    <StepText text={s.text} />
-                  </details>
+                  <div key={s.id}>
+                    <details>
+                      <summary>
+                        {s.id} · {s.title}
+                      </summary>
+                      <StepBrief text={s.description} />
+                      <StepText text={s.text} />
+                    </details>
+                    {/* The step's own model and effort, under its prompt; a note never blocks the run. */}
+                    {s.modelLine && <p className="step-model-line">{s.modelLine}</p>}
+                    {s.modelNote && <p className="approval-warning">⚠ {s.modelNote}</p>}
+                  </div>
                 ))}
               </div>
             )}

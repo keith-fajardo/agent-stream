@@ -35,12 +35,18 @@ describe('MenuBar', () => {
     await act(async () => title('File').click());
     expect(openItems()).toContain('New graph…');
     await act(async () => title('Edit').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-    expect(openItems()).toEqual(['Add step', 'Delete selected step', 'Tidy layout', 'Refine selected step', 'Split selected step', 'Refine steps you changed (0)', 'Review agent changes…', 'Accept all agent changes', 'Revert all agent changes']);
+    expect(openItems()).toEqual(['Undo', 'Add step', 'Delete selected step', 'Tidy layout', 'Refine selected step', 'Split selected step', 'Refine steps you changed (0)', 'Review agent changes…', 'Accept all agent changes', 'Revert all agent changes']);
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(openItems()).toEqual([]);
     await act(async () => title('Run').click());
     await act(async () => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     expect(openItems()).toEqual([]);
+  });
+
+  it('names the save and undo keys as ARIA does: Control+S off macOS', async () => {
+    await act(async () => title('File').click());
+    const save = [...container.querySelectorAll('.menu-items button')].find((b) => b.textContent?.startsWith('Save'));
+    expect(save?.getAttribute('aria-keyshortcuts')).toBe('Control+S');
   });
 
   it('does not open a menu on hover when none is open', async () => {

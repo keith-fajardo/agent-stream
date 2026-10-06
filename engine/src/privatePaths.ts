@@ -3,6 +3,8 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 
 const VALUES_REASON = "Variable values are private to this machine; Agent Stream doesn't let Claude read the variable values file.";
 const RUN_REASON = "Run records contain variable values; Agent Stream doesn't let Claude read .agent-stream/runs/*/run.json or events.jsonl.";
+/** Why `.agent-stream/runs` and `.agent-stream/sessions` are closed to the agent loop's tools, and the sessions folder to Claude's too (step model spec §6b.5: a chat attachment goes with its message only). */
+export const PRIVATE_FOLDER = 'That folder holds Agent Stream run records and sessions, which are private.';
 
 /** True when `path` is `folder` or inside it (`folder` may be a root such as / or C:\). */
 function within(path: string, folder: string): boolean {
@@ -31,6 +33,7 @@ export function privatePathDenial(projectDir: string, toolName: string, input: u
   if (files.includes(full)) return VALUES_REASON;
   // A searched folder with a glob can override ripgrep's ignore rules, so searches may not aim at the file's folder or above it.
   if ((toolName === 'Grep' || toolName === 'Glob') && files.some((f) => within(full, dirname(f)) || within(f, full))) return VALUES_REASON;
+  if (within(full, norm(join(root, '.agent-stream', 'sessions')))) return PRIVATE_FOLDER;
   const runsDir = norm(join(root, '.agent-stream', 'runs'));
   // A searched directory can override ripgrep's ignore rules, so Grep may not aim at the runs tree (output.md files are fine).
   if (toolName === 'Grep' && (full === runsDir || full.startsWith(runsDir + sep)) && basename(full) !== 'output.md') return RUN_REASON;

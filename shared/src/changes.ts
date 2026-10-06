@@ -1,10 +1,18 @@
+import { stepModelText } from './stepModels';
 import type { AgentChange, ChangedField, Graph, GraphNode } from './types';
 
-const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec', 'access', 'workspace'];
-const norm = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments'];
+
+/** A step field as text, for comparing and for the Changes tab: '' when absent, a model as `claude/opus`, attachments one per line. */
+export function changedFieldText(node: GraphNode | undefined, field: ChangedField): string {
+  if (field === 'model') return node?.model ? stepModelText(node.model) : '';
+  if (field === 'attachments') return (node?.attachments ?? []).join('\n');
+  const v = node?.[field];
+  return v === undefined || v === null ? '' : String(v);
+}
 
 export function changedFields(before: GraphNode, after: GraphNode): ChangedField[] {
-  return FIELDS.filter((f) => norm(before[f]) !== norm(after[f]));
+  return FIELDS.filter((f) => changedFieldText(before, f) !== changedFieldText(after, f));
 }
 
 /** What agents changed since the user's accepted baseline (agent changes spec §3.3). Positions and authorship are not content. */

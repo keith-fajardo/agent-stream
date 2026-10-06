@@ -1,7 +1,9 @@
 /** A provider-neutral chat model (spec §4.1): the agent loop talks to every model through this. */
 export type ChatPart = { type: 'text'; text: string } | { type: 'toolCall'; callId: string; name: string; input: unknown };
+/** An image a user message carries (an attachment, step model spec §6b.5): its media type and its bytes as base64. */
+export type ImagePart = { type: 'image'; mediaType: string; data: string };
 export type ChatMessage =
-  | { role: 'user'; content: Array<{ type: 'text'; text: string } | { type: 'toolResult'; callId: string; text: string; isError?: boolean }> }
+  | { role: 'user'; content: Array<{ type: 'text'; text: string } | { type: 'toolResult'; callId: string; text: string; isError?: boolean } | ImagePart> }
   | { role: 'assistant'; content: ChatPart[] };
 /** `inputSchema` is a JSON Schema object. */
 export type ToolSpec = { name: string; description: string; inputSchema: object };

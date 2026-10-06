@@ -1,7 +1,8 @@
 import { MarkerType, type Edge as FlowEdge } from '@xyflow/react';
-import type { AgentChange, ApprovalRequest, Graph, Position, RunMeta } from '@agent-stream/shared';
+import type { AgentChange, ApprovalRequest, Graph, ModelChoice, Position, ProviderId, RunMeta } from '@agent-stream/shared';
 import type { StepData, StepFlowNode } from './components/StepNode';
 import { layoutPositions } from './layout';
+import { modelChip } from './stepModelMenus';
 
 export type FlowNodesInput = {
   graph: Graph;
@@ -15,11 +16,14 @@ export type FlowNodesInput = {
   /** The user's accepted version and what agents changed since: drawn as marks and ghosts. */
   baseline?: Graph;
   changes?: AgentChange[];
+  /** The current provider and its models ([] while unknown): a step's model chip names and checks its model by them. */
+  provider?: ProviderId;
+  models?: readonly ModelChoice[];
 };
 
 /** Merge the server graph into the local React Flow nodes without clobbering in-flight drags, unconfirmed moves or local selection. */
 export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
-  const { graph, run, approvals, selectedId, selectionChanged, current, dragging, pendingMoves, baseline, changes = [] } = input;
+  const { graph, run, approvals, selectedId, selectionChanged, current, dragging, pendingMoves, baseline, changes = [], provider, models = [] } = input;
   const auto = layoutPositions(graph, true);
   const previous = new Map(current.map((n) => [n.id, n]));
   const nodeChange = new Map(changes.flatMap((c) => (c.kind === 'node' ? [[c.id, c] as const] : [])));
@@ -43,11 +47,17 @@ export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
         state: run?.nodes[n.id],
         waiting: approvals.some((a) => a.nodeId === n.id && a.runId === run?.id),
         ...changeData(nodeChange.get(n.id)),
+        ...modelChipData(n, provider, models),
       },
     };
   });
   return [...real, ...ghostNodes(graph, baseline, changes, previous)];
 }
+
+const modelChipData = (n: Graph['nodes'][number], provider: ProviderId | undefined, models: readonly ModelChoice[]): Pick<StepData, 'modelChip'> => {
+  const chip = modelChip(n, provider, models);
+  return chip ? { modelChip: chip } : {};
+};
 
 const changeData = (c?: AgentChange): Pick<StepData, 'change' | 'changeBy' | 'changeFields'> =>
   c?.kind === 'node' && c.change !== 'removed' ? { change: c.change, ...(c.by && { changeBy: c.by }), ...(c.fields && { changeFields: c.fields }) } : {};

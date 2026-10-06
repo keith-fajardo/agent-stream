@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import { isGraphId, type App, type Client } from '@agent-stream/engine';
-import { parseWebviewMessage, type HostCommand, type HostMessage } from '@agent-stream/shared';
+import { attachmentFileProblem, MAX_ATTACHMENTS, parseWebviewMessage, safeAttachmentName, type AttachTarget, type AttachmentUpload, type HostCommand, type HostMessage } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 import { folderUri } from './folders';
 import { openExternalUrl } from './ui';
@@ -117,12 +118,45 @@ export type MessageHandlerDeps = {
   setUpParallelTickets(folder: Folder): void;
   /** Run › Export Run Report… or the Report button: save the run's report and open it. */
   exportRunReport(folder: Folder, graphId: string, runId: string): void;
+  /** Add…: VS Code's file picker (step model spec §6b.4); undefined when cancelled. */
+  pickFiles?(): Promise<PickedFile[] | undefined>;
+  /** Open: shows a file in VS Code (images in its image viewer). */
+  openPath?(path: string): void;
 };
+
+/** A file picked to attach: read only once its size is known to fit. */
+export type PickedFile = { name: string; size: number; read(): Promise<Uint8Array> };
+
+/** VS Code's file picker for Add… (step model spec §6b.4). */
+export async function pickFilesToAttach(): Promise<PickedFile[] | undefined> {
+  const uris = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Attach' });
+  if (!uris?.length) return undefined;
+  return Promise.all(
+    uris.map(async (uri) => ({ name: basename(uri.fsPath), size: (await vscode.workspace.fs.stat(uri)).size, read: () => Promise.resolve(vscode.workspace.fs.readFile(uri)) })),
+  );
+}
 
 /** Routes what a tab posts: engine messages to its folder's engine, the tab's own messages to the extension. */
 export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unknown): void; dispose(): void } {
   let detach: (() => void) | undefined;
   const fail = (message: string) => d.client.send({ type: 'error', message });
+  /** Reads the picked files (each checked first, so a huge one is never read) and attaches them through the engine. */
+  async function attachPicked(target: AttachTarget): Promise<void> {
+    const picked = await d.pickFiles?.();
+    if (!picked?.length) return;
+    const g = d.app.graphStore.get(d.panel.graphId);
+    const have = target.kind === 'graph' ? g.attachments : g.nodes.find((n) => n.id === target.nodeId)?.attachments;
+    if ((have?.length ?? 0) + picked.length > MAX_ATTACHMENTS) {
+      return d.client.send({ type: 'opRejected', graphId: d.panel.graphId, error: `${target.kind === 'graph' ? 'The graph' : `Step ${target.nodeId}`} can have at most ${MAX_ATTACHMENTS} attachments.` });
+    }
+    const files: AttachmentUpload[] = [];
+    for (const f of picked) {
+      const problem = attachmentFileProblem(safeAttachmentName(f.name), f.size);
+      if (problem) return d.client.send({ type: 'opRejected', graphId: d.panel.graphId, error: problem });
+      files.push({ name: f.name, data: Buffer.from(await f.read()).toString('base64') });
+    }
+    await d.app.handle(d.client, { type: 'attach', graphId: d.panel.graphId, target, files });
+  }
   return {
     handle(raw) {
       const parsed = parseWebviewMessage(raw);
@@ -164,6 +198,17 @@ export function createMessageHandler(d: MessageHandlerDeps): { handle(raw: unkno
           return;
         case 'refineSteps':
           d.app.handle(d.client, { type: 'refineSteps', graphId: d.panel.graphId, sessionId: d.activeSession(d.panel.folder), nodeIds: msg.nodeIds }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
+          return;
+        case 'pickAttachments':
+          attachPicked(msg.target).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
+          return;
+        case 'openAttachment':
+          // Only a safe name inside the graph's own attachments folder, through the engine's checks (links refused).
+          {
+            const open = d.app.attachments.openPath(d.panel.graphId, msg.name);
+            if (!open.ok) return fail(open.error);
+            d.openPath?.(open.path);
+          }
           return;
       }
     },
@@ -237,6 +282,8 @@ export class GraphEditorProvider implements vscode.CustomReadonlyEditorProvider 
       activeSession: (f) => this.d.activeSession(f),
       setUpParallelTickets: (f) => this.d.setUpParallelTickets(f),
       exportRunReport: (f, graphId, runId) => this.d.exportRunReport(f, graphId, runId),
+      pickFiles: pickFilesToAttach,
+      openPath: (path) => void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path)),
       setMinimap: (value) => {
         this.d.setMinimap(value);
         for (const other of this.d.panels.all()) if (other !== panel) other.send({ type: 'prefs', minimap: value });

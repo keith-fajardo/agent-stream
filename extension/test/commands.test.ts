@@ -143,6 +143,28 @@ describe('graph commands', () => {
     expect(s.ui.info).toHaveBeenCalledWith('Exported parity.md. Variable values were left out.');
   });
 
+  it('says attachment files are left out when the exported graph names any (graph list or a step)', async () => {
+    const s = setup();
+    const app = s.manager.get(s.folders[0]);
+    const g = app.createGraph('Parity');
+    const step = app.graphStore.apply(g.id, { type: 'addNode', node: { kind: 'agent', title: 'Step', prompt: 'p' } }, 'user');
+    if (!step.ok) throw new Error(step.error);
+    const stepId = step.graph.nodes[0].id;
+    const toast = 'Exported parity.md. Variable values were left out. Attachment files aren\'t included: send them with it (from .agent-stream/attachments/parity/).';
+    const exportOnce = async () => {
+      s.ui.saveFile.mockResolvedValueOnce({ write: async () => {} });
+      await s.commands.exportGraph({ folder: s.folders[0], graphId: g.id });
+      return s.ui.info.mock.lastCall?.[0];
+    };
+    app.graphStore.apply(g.id, { type: 'updateNode', id: stepId, patch: { attachments: ['spec.md'] } }, 'user');
+    expect(await exportOnce()).toBe(toast);
+    app.graphStore.apply(g.id, { type: 'updateNode', id: stepId, patch: { attachments: [] } }, 'user');
+    app.graphStore.apply(g.id, { type: 'setGraphAttachments', names: ['mockup.png'] }, 'user');
+    expect(await exportOnce()).toBe(toast);
+    app.graphStore.apply(g.id, { type: 'setGraphAttachments', names: [] }, 'user');
+    expect(await exportOnce()).toBe('Exported parity.md. Variable values were left out.');
+  });
+
   describe('Export Run Report', () => {
     /** A finished run of a new graph, recorded straight into the run store. */
     function withRun(s: ReturnType<typeof setup>, id = '20261003-100000-abcd') {

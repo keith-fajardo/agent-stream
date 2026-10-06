@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { emptyGraph, type EffortLevel, type GraphNode, type ModelChoice, type NodeEventBody } from '@agent-stream/shared';
 import { ApprovalBroker } from '../src/approvals';
+import type { StepAttachment } from '../src/attachedFiles';
 import type { NodeContext } from '../src/executors';
 import { createStepGate, STEP_GRAPH_TOOL_PREFIX } from '../src/providers/toolGate';
 import type { GraphTool } from '../src/providers/types';
@@ -31,7 +32,7 @@ const values = resolve('/', 'h', '.agent-stream', 'values', 'abc.json');
 const zsh = (script: string) => `/bin/zsh -lc '${script}'`;
 const addStep = (): GraphTool => ({ name: 'add_step', description: 'Add a step', schema: { title: z.string() }, run: vi.fn(async () => ({ text: 'Added n5.' })) });
 
-type StepOptions = { access?: 'read'; cwd?: string; model?: string; effort?: EffortLevel; graphTools?: GraphTool[]; signal?: AbortSignal; known?: ModelChoice[]; codexPath?: string | undefined };
+type StepOptions = { access?: 'read'; cwd?: string; model?: string; effort?: EffortLevel; graphTools?: GraphTool[]; signal?: AbortSignal; known?: ModelChoice[]; codexPath?: string | undefined; attachments?: StepAttachment[] };
 
 /** A step on the fake app-server, with the gate the App builds for it (runs recorded in the folder's own .agent-stream). */
 function setup(handlers: Record<string, FakeHandler>, o: StepOptions = {}) {
@@ -52,6 +53,7 @@ function setup(handlers: Record<string, FakeHandler>, o: StepOptions = {}) {
     graphTools,
     ...(o.model && { model: o.model }),
     ...(o.effort && { effort: o.effort }),
+    ...(o.attachments && { attachments: o.attachments }),
   };
   const gate = createStepGate({
     broker,
@@ -347,5 +349,31 @@ describe('stepItemEvents', () => {
     expect(stepItemEvents('completed', agentMessage('  '), none)).toEqual([]);
     expect(stepItemEvents('completed', reasoning([]), none)).toEqual([]);
     expect(stepItemEvents('completed', { type: 'userMessage', id: 'u1' }, none)).toEqual([]);
+  });
+});
+
+describe('codexRunStep: the model and effort a step runs with', () => {
+  it('logs them in the start event as they are sent, an effort the model lacks left out', async () => {
+    const known: ModelChoice[] = [{ value: 'gpt-a', label: 'A', efforts: ['high'] }];
+    const kept = step((t) => t.end(), { model: 'gpt-a', effort: 'high', known });
+    await kept.run();
+    expect(kept.events[0]).toEqual({ type: 'start', kind: 'agent', cwd, prompt: 'FULL PROMPT', model: 'gpt-a', effort: 'high' });
+    const dropped = step((t) => t.end(), { model: 'gpt-a', effort: 'ultra', known });
+    await dropped.run();
+    expect(dropped.events[0]).toEqual({ type: 'start', kind: 'agent', cwd, prompt: 'FULL PROMPT', model: 'gpt-a' });
+  });
+});
+
+describe('codexRunStep: attachments (step model spec §6b.5)', () => {
+  it('sends images with turn/start for Codex to read, and lists every file with a note for PDFs', async () => {
+    const at = (name: string, kind: StepAttachment['kind'], missing = false): StepAttachment => ({ name, kind, missing, path: resolve(cwd, '.agent-stream', 'attachments', 'g', name), shown: `.agent-stream/attachments/g/${name}` });
+    const s = step((t) => t.end(), { attachments: [at('mockup.png', 'image'), at('spec.pdf', 'pdf'), at('gone.png', 'image', true)] });
+    await s.run();
+    const text = 'FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n';
+    expect(s.fake.last().paramsOf('turn/start').input).toEqual([
+      { type: 'text', text, text_elements: [] },
+      { type: 'localImage', path: resolve(cwd, '.agent-stream', 'attachments', 'g', 'mockup.png') },
+    ]);
+    expect(s.events[0]).toMatchObject({ type: 'start', prompt: text });
   });
 });

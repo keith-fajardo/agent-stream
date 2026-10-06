@@ -1,12 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string; sessionsDir: string };
+/** `attachmentsDir`: each graph's attachments, in a folder per graph id; not ignored by Git (step model spec §6b.2). */
+export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string; sessionsDir: string; attachmentsDir: string };
 
 export function projectPaths(root: string): ProjectPaths {
   const dataDir = join(root, '.agent-stream');
-  return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs'), sessionsDir: join(dataDir, 'sessions') };
+  return { root, dataDir, graphsDir: join(dataDir, 'graphs'), runsDir: join(dataDir, 'runs'), sessionsDir: join(dataDir, 'sessions'), attachmentsDir: join(dataDir, 'attachments') };
 }
+
+/** Where a graph's attachments are: `.agent-stream/attachments/<graph id>/`. */
+export const graphAttachmentsDir = (paths: ProjectPaths, graphId: string): string => join(paths.attachmentsDir, graphId);
 
 /** Run records and personal work sessions stay out of git. */
 const GITIGNORE_LINES = ['runs/', 'sessions/'];

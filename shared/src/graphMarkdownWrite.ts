@@ -1,6 +1,7 @@
 import { fenceFor } from './fence';
 import { escapeFreeText } from './freeText';
 import { normText, oneLine, STEP_SEPARATOR, timeoutValue } from './graphDoc';
+import { stepModelText } from './stepModels';
 import type { Graph, GraphNode } from './types';
 
 /** A Mermaid node label: quoted, `"` as #quot;, on one line (spec §4.1). */
@@ -27,6 +28,9 @@ function stepLines(node: GraphNode): string[] {
   if (node.kind === 'agent' && node.access === 'read') fields.push('- access: read');
   if (node.workspace) fields.push(`- workspace: ${node.workspace}`);
   if (node.timeoutSec !== undefined) fields.push(`- timeout: ${timeoutValue(node.timeoutSec)}`);
+  if (node.kind === 'agent' && node.model) fields.push(`- model: ${stepModelText(node.model)}`);
+  if (node.kind === 'agent' && node.effort) fields.push(`- effort: ${node.effort}`);
+  if (node.kind === 'agent') for (const name of node.attachments ?? []) fields.push(`- attach: ${name}`);
   const description = oneLine(node.description ?? '');
   const text = normText((node.kind === 'agent' ? node.prompt : node.command) ?? '');
   return [
@@ -41,7 +45,7 @@ function stepLines(node: GraphNode): string[] {
 
 /**
  * The graph's Markdown file (Markdown graph files spec §2, §4.1). Pure and deterministic: name, Goal, Instructions,
- * Variables, Flow, then the steps in canvas order; empty Goal, Instructions and Variables left out; LF line endings and
+ * Variables, Attachments, Flow, then the steps in canvas order; empty Goal, Instructions, Variables and Attachments left out; LF line endings and
  * one trailing newline. Positions and bookkeeping go to the side file instead.
  */
 export function serializeGraphMarkdown(graph: Graph): string {
@@ -60,6 +64,7 @@ export function serializeGraphMarkdown(graph: Graph): string {
       }),
     );
   }
+  if (graph.attachments?.length) section('Attachments', graph.attachments.map((name) => `- \`${name}\``));
   section('Flow', block('mermaid', flowLines(graph).join('\n')));
   for (const node of graph.nodes) out.push('', ...stepLines(node));
   return `${out.join('\n')}\n`;

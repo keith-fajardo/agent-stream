@@ -1,4 +1,5 @@
 import { toLoopTools } from '../../agentLoop/graphLoopTools';
+import { notIncluded, promptWithNotes } from '../../chatAttachments';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { createServerRequestHandler } from './approvals';
 import { CodexRpcError, errorMessage, openCodexForThreads, type CodexConnection } from './connection';
@@ -65,10 +66,17 @@ export function codexPlanTurn(deps: CodexRunDeps) {
         const start: ThreadStartParams = { ...settings, ephemeral: false, dynamicTools: dynamicToolSpecs(tools) };
         threadId = (await conn.request<ThreadResponse>('thread/start', start, turn.signal)).thread.id;
       }
+      // A chat message's images go with turn/start; Codex reads no PDFs here (step model spec §6b.5).
+      const files = turn.files ?? [];
+      const notes = files.filter((f) => f.kind === 'pdf').map((f) => notIncluded(f.name, "OpenAI Codex can't read PDFs in the chat"));
+      // Said in the chat and in the message itself, so the model knows.
+      for (const note of notes) turn.onEvent({ type: 'note', text: note });
+      const images = files.filter((f) => f.kind === 'image').map((f) => f.path);
       const outcome = await runCodexTurn({
         conn,
         threadId,
-        text: turn.prompt,
+        text: promptWithNotes(turn.prompt, notes),
+        ...(images.length > 0 && { images }),
         effort: codexEffort(turn, deps.knownModels(), deps.warnOnce),
         signal: turn.signal,
         onItem: (phase, item) => {

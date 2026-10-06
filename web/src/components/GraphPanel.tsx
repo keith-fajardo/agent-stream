@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import type { Graph } from '@agent-stream/shared';
-import { send } from '../bridge';
+import { useEffect, useRef, useState } from 'react';
+import type { Graph, Op } from '@agent-stream/shared';
+import { registerGraphDraft, sendEdit } from '../actions';
 import { useStore } from '../store';
+import { AttachmentList } from './AttachmentList';
 
 type Draft = { goal: string; instructions: string };
 const draftOf = (g: Graph): Draft => ({ goal: g.goal, instructions: g.instructions });
@@ -33,10 +34,17 @@ function GraphEditor({ graph }: { graph: Graph }) {
     setDraft(current);
   };
   const save = () => {
-    if (draft.goal !== base.goal) send({ type: 'op', graphId: graph.id, op: { type: 'setGoal', goal: draft.goal } });
-    if (draft.instructions !== base.instructions) send({ type: 'op', graphId: graph.id, op: { type: 'setInstructions', instructions: draft.instructions } });
+    const ops: Op[] = [];
+    if (draft.goal !== base.goal) ops.push({ type: 'setGoal', goal: draft.goal });
+    if (draft.instructions !== base.instructions) ops.push({ type: 'setInstructions', instructions: draft.instructions });
+    // One Save, one undo step (step model spec §6a.2).
+    sendEdit(graph.id, ops, 'edited the goal and instructions');
     setBase(draft);
   };
+  // ⌘S saves this draft exactly as the Save button does (ruling R10a).
+  const draftRef = useRef({ dirty, save });
+  draftRef.current = { dirty, save };
+  useEffect(() => registerGraphDraft({ dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), []);
 
   return (
     <div className="node-panel">
@@ -64,6 +72,7 @@ function GraphEditor({ graph }: { graph: Graph }) {
         />
       </div>
       <p className="muted">Every agent step and the planner receive the goal and these instructions. Both can use variables, e.g. {'{{ target_schema }}'}.</p>
+      <AttachmentList graphId={graph.id} target={{ kind: 'graph' }} names={graph.attachments ?? []} hint="Drop or paste files here. Every agent step gets them, after its own." />
       <div className="actions">
         <button className="primary" disabled={!dirty} onClick={save}>
           Save

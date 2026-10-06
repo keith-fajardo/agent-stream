@@ -1,8 +1,8 @@
 import { createSdkMcpServer, query, tool, type ModelInfo, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { GraphTool } from '../types';
 
-/** The slice of the SDK's `query` we use; tests substitute a fake. */
-export type QueryFn = (params: { prompt: string; options?: Options }) => AsyncIterable<SDKMessage>;
+/** The slice of the SDK's `query` we use; tests substitute a fake. A prompt with images is a stream of one user message. */
+export type QueryFn = (params: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }) => AsyncIterable<SDKMessage>;
 
 export const realQuery: QueryFn = query;
 
@@ -11,6 +11,17 @@ export type ModelQuery = { supportedModels(): Promise<ModelInfo[]>; close(): voi
 export type ModelQueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => ModelQuery;
 
 export const realModelQuery: ModelQueryFn = query;
+
+/** A block of a user message: text, an image, or a PDF (a document), in the Messages API's base64 form. */
+export type UserBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
+
+/** A prompt with images or PDFs (step model spec §6b.5): one user message, as streaming input that then ends. */
+export async function* userMessage(blocks: UserBlock[]): AsyncGenerator<SDKUserMessage> {
+  yield { type: 'user', message: { role: 'user', content: blocks }, parent_tool_use_id: null };
+}
 
 /** A loose view of message content blocks, so we don't depend on every SDK block type. */
 export type LooseBlock = {

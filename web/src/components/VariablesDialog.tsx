@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { variableNameProblem, type Op, type VariableDef } from '@agent-stream/shared';
+import { sendEdit } from '../actions';
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
 
@@ -57,7 +58,10 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const close = () => dispatch({ kind: 'closeVariables' });
   const save = () => {
-    const op = (o: Op) => send({ type: 'op', graphId: p.graphId, op: o });
+    // The dialog's Save is one action, so one undo step (step model spec §6a.2); values are sent after the edits they follow.
+    const ops: Op[] = [];
+    const values: { name: string; value: string }[] = [];
+    const op = (o: Op) => ops.push(o);
     const current = new Set(p.variables.map((v) => v.name));
     // A variable the planner renamed or deleted meanwhile no longer exists under its opened name: skip it.
     const stillThere = (r: Row) => r.original !== undefined && current.has(r.original);
@@ -67,12 +71,14 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
         if (!stillThere(r)) continue;
         if (r.name !== r.original) op({ type: 'renameVariable', name: r.original, newName: r.name });
         if (r.description.trim() !== r.originalDescription) op({ type: 'setVariableDescription', name: r.name, description: r.description.trim() });
-        if (r.value !== r.originalValue) send({ type: 'setVariableValue', graphId: p.graphId, name: r.name, value: r.value });
+        if (r.value !== r.originalValue) values.push({ name: r.name, value: r.value });
       } else {
         op(r.description.trim() ? { type: 'addVariable', name: r.name, description: r.description.trim() } : { type: 'addVariable', name: r.name });
-        if (r.value !== '') send({ type: 'setVariableValue', graphId: p.graphId, name: r.name, value: r.value });
+        if (r.value !== '') values.push({ name: r.name, value: r.value });
       }
     }
+    sendEdit(p.graphId, ops, 'edited the variables');
+    for (const v of values) send({ type: 'setVariableValue', graphId: p.graphId, name: v.name, value: v.value });
     close();
   };
   const lastNew = [...live].reverse().find((r) => !r.original);

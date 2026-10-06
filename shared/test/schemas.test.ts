@@ -223,3 +223,12 @@ describe('Open as Markdown', () => {
     expect(parseWebviewMessage({ type: 'host', command: 'openGraphMarkdown' })).toEqual({ ok: true, kind: 'host', msg: { type: 'host', command: 'openGraphMarkdown' } });
   });
 });
+
+describe('attach message payload cap (F7)', () => {
+  it('refuses a payload beyond the combined limit', () => {
+    const data = 'a'.repeat(14_000_000);
+    const ok = (n: number) => parseWebviewMessage({ type: 'attach', graphId: 'g', target: { kind: 'graph' }, files: Array.from({ length: n }, () => ({ name: 'a.png', data })) }).ok;
+    expect(ok(2)).toBe(true);
+    expect(ok(11)).toBe(false);
+  });
+});

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type ToolGate } from '@agent-stream/engine';
-import { emptyGraph, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
+import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type StepAttachment, type ToolGate, type TurnFile } from '@agent-stream/engine';
+import { emptyGraph, type EffortLevel, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { COPILOT_CONSENT_LATER, COPILOT_RESUME_FAILED, COPILOT_UNAVAILABLE, createCopilotProvider, type CopilotLimits, type LmAccess, type LmApi } from '../src/providers/copilot';
 import { COPILOT_PERMISSION } from '../src/providers/copilotModel';
 import { fakeLmModel } from './helpers';
@@ -25,7 +25,7 @@ function provider(o: { lm?: LmApi; access?: LmAccess; limits?: Partial<CopilotLi
   return createCopilotProvider({ lm: o.lm, access: o.access, runShell: noShell, limits: () => ({ maxRequestsPerStep: 25, maxRequestsPerTurn: 10, ...o.limits }) });
 }
 
-function step(o: { model?: string; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal } = {}) {
+function step(o: { model?: string; effort?: EffortLevel; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal; attachments?: StepAttachment[] } = {}) {
   const events: NodeEventBody[] = [];
   const cwd = mkdtempSync(join(tmpdir(), 'copilot-step-'));
   const node: GraphNode = { id: 'n1', title: 'Step', kind: 'agent', prompt: 'p', ...(o.access && { access: o.access }), createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
@@ -38,7 +38,9 @@ function step(o: { model?: string; access?: 'read'; graphTools?: GraphTool[]; si
     signal: o.signal ?? new AbortController().signal,
     emit: (e) => events.push(e),
     ...(o.model && { model: o.model }),
+    ...(o.effort && { effort: o.effort }),
     ...(o.graphTools && { graphTools: o.graphTools }),
+    ...(o.attachments && { attachments: o.attachments }),
   };
   return { ctx, events, cwd };
 }
@@ -185,7 +187,7 @@ describe('Copilot runStep', () => {
     const m = fakeLmModel({ id: 'auto', name: 'Auto', replies: [[call('c1', 'Read', { file_path: 'a.txt' })], [text('The file says '), text('hello.')]] });
     const out = await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
     expect(s.events).toEqual([
-      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.' },
+      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'auto' },
       { type: 'tool_call', toolUseId: 'c1', name: 'Read', input: { file_path: 'a.txt' } },
       { type: 'tool_result', toolUseId: 'c1', content: '     1\thello', isError: false },
       { type: 'text', text: 'The file says hello.' },
@@ -353,5 +355,184 @@ describe('Copilot planTurn', () => {
     const m = fakeLmModel({ id: 'auto', replies: [[call('c1', 'add_node', {})]] });
     const r = await provider({ lm: models(m.model), limits: { maxRequestsPerTurn: 1 } }).planTurn(turn().t);
     expect(r).toEqual({ ok: true, sessionId: expect.any(String), error: 'Stopped after 1 Copilot requests (agentStream.copilot.maxRequestsPerTurn). Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.' });
+  });
+});
+
+describe('Copilot effort (step model spec §6)', () => {
+  it('has no effort option for extensions: a step’s effort is never sent, and its start names the model it ran on', async () => {
+    const s = step({ model: 'gpt-4o-mini', effort: 'high' });
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    const mini = fakeLmModel({ id: 'gpt-4o-mini', name: 'GPT-4o mini' });
+    await provider({ lm: models(auto.model, mini.model) }).runStep(s.ctx, allowAll);
+    expect(s.events[0]).toEqual({ type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'gpt-4o-mini' });
+    const options = mini.requests[0].options!;
+    expect(options).not.toHaveProperty('modelOptions');
+    expect(JSON.stringify(options)).not.toContain('high');
+  });
+
+  it('names Auto in the start event of a step whose model is gone', async () => {
+    const s = step({ model: 'gpt-9' });
+    const auto = fakeLmModel({ id: 'auto', name: 'Auto' });
+    await provider({ lm: models(auto.model) }).runStep(s.ctx, allowAll);
+    expect(s.events.slice(0, 2)).toEqual([
+      { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'auto' },
+      { type: 'text', text: 'The Copilot model gpt-9 is no longer available; using Auto.' },
+    ]);
+  });
+});
+
+describe('Copilot: attachments (step model spec §6b.5)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'copilot-attach-'));
+  writeFileSync(join(dir, 'mockup.png'), 'PNG');
+  const files: StepAttachment[] = [
+    { name: 'mockup.png', kind: 'image', missing: false, path: join(dir, 'mockup.png'), shown: '.agent-stream/attachments/g/mockup.png' },
+    { name: 'spec.pdf', kind: 'pdf', missing: false, path: join(dir, 'spec.pdf'), shown: '.agent-stream/attachments/g/spec.pdf' },
+  ];
+  const withImages = (id: string, images: boolean) => {
+    const m = fakeLmModel({ id, name: id });
+    (m.model as unknown as { capabilities: Record<string, boolean> }).capabilities.supportsImageToText = images;
+    return m;
+  };
+
+  it('sends images as data parts to a model that takes them', async () => {
+    const s = step({ attachments: files });
+    const m = withImages('auto', true);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([
+      text('Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n'),
+      new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png'),
+    ]);
+  });
+
+  it('for a model that doesn’t take images, says so in the list and sends none', async () => {
+    const s = step({ attachments: files });
+    const m = withImages('auto', false);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([text("Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (This image couldn't be shown to the model.)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n")]);
+  });
+
+  it('labels each image by what was read: one that vanished is left out, the others stay attached', async () => {
+    const s = step({ attachments: [...files, { name: 'gone.png', kind: 'image', missing: false, path: join(dir, 'gone.png'), shown: '.agent-stream/attachments/g/gone.png' }] });
+    const m = withImages('auto', true);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([
+      text('Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n'),
+      new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png'),
+    ]);
+  });
+});
+
+describe('Copilot: the 5 MB image rule and the inline budget per request (ruling on I-2)', () => {
+  const MB = 1024 * 1024;
+  const dir = mkdtempSync(join(tmpdir(), 'copilot-budget-'));
+  const image = (name: string, size: number): StepAttachment => {
+    writeFileSync(join(dir, name), Buffer.alloc(size, 1));
+    return { name, kind: 'image', missing: false, path: join(dir, name), shown: name };
+  };
+  const takingImages = () => {
+    const m = fakeLmModel({ id: 'auto', name: 'Auto' });
+    (m.model as unknown as { capabilities: Record<string, boolean> }).capabilities.supportsImageToText = true;
+    return m;
+  };
+
+  it('a step sends no image over 5 MB and at most 20 images, filling 20 MB in order; the list says why for the rest', async () => {
+    const s = step({ attachments: [image('huge.png', 5 * MB + 1), ...Array.from({ length: 21 }, (_, i) => image(`i${i}.png`, 10))] });
+    const m = takingImages();
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const content = m.requests[0].messages[1].content;
+    expect(content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(20);
+    const listText = (content[0] as vscode.LanguageModelTextPart).value;
+    expect(listText).toContain("- huge.png (image over 5 MB: it couldn't be shown to the model)");
+    expect(listText).toContain('- i19.png (image, attached to this message)');
+    expect(listText).toContain("- i20.png (image not sent (too many large images): it couldn't be shown to the model)");
+
+    const bytes = step({ attachments: ['b1', 'b2', 'b3', 'b4', 'b5'].map((n) => image(`${n}.png`, Math.floor(4.5 * MB))) });
+    const m2 = takingImages();
+    await provider({ lm: models(m2.model) }).runStep(bytes.ctx, allowAll);
+    expect(m2.requests[0].messages[1].content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(4);
+  });
+
+  it('a text file over 2 MB is listed with a note to search it with Grep (Read takes up to 2 MB)', async () => {
+    const textFile = (name: string, size: number): StepAttachment => {
+      writeFileSync(join(dir, name), Buffer.alloc(size, 0x61));
+      return { name, kind: 'text', missing: false, path: join(dir, name), shown: name };
+    };
+    const s = step({ attachments: [textFile('big.csv', 2 * MB + 1), textFile('edge.csv', 2 * MB)] });
+    const m = takingImages();
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    expect(m.requests[0].messages[1].content).toEqual([text('Do it.\n\nAttached files:\n- big.csv (larger than 2 MB: search it with Grep)\n- edge.csv\n')]);
+  });
+
+  it('a chat message leaves out an image over 5 MB and any image past the budget, with a line for each', async () => {
+    const png = (name: string, size: number): TurnFile => ({ name, kind: 'image', path: name, mediaType: 'image/png', data: Buffer.alloc(size).toString('base64') });
+    const m = takingImages();
+    const events: PlannerEvent[] = [];
+    const cwd = mkdtempSync(join(tmpdir(), 'copilot-chat-budget-'));
+    await provider({ lm: models(m.model) }).planTurn({
+      prompt: 'Look.',
+      systemAppend: '',
+      cwd,
+      tools: [],
+      files: [png('huge.png', 5 * MB + 1), ...Array.from({ length: 21 }, (_, i) => png(`i${i}.png`, 10))],
+      gate: createPlannerGate({ projectDir: cwd, privateFiles: [], graphToolNames: new Set() }),
+      signal: new AbortController().signal,
+      onEvent: (e) => events.push(e),
+      transcript: { load: () => undefined, save: () => {} },
+    });
+    const content = m.requests[0].messages.at(-1)!.content;
+    expect(content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(20);
+    expect(content[0]).toEqual(
+      text("Look.\n\nNote: huge.png couldn't be included: it is too large to send (images up to 5 MB are sent).\nNote: i20.png couldn't be included: the message's files were too large to send together.\n"),
+    );
+    expect(events).toContainEqual({ type: 'note', text: "i20.png couldn't be included: the message's files were too large to send together." });
+  });
+});
+
+describe('Copilot planner: chat attachments (step model spec §6b.5)', () => {
+  const image: TurnFile = { name: 'shot.png', kind: 'image', path: 'shot.png', mediaType: 'image/png', data: Buffer.from('PNG').toString('base64') };
+  const pdf: TurnFile = { name: 'spec.pdf', kind: 'pdf', path: 'spec.pdf', mediaType: 'application/pdf', data: 'JVBE' };
+  function chatTurn(files: TurnFile[]) {
+    const events: PlannerEvent[] = [];
+    const saved = new Map<string, ChatMessage[]>();
+    const cwd = mkdtempSync(join(tmpdir(), 'copilot-chat-'));
+    const t: PlannerTurn = {
+      prompt: 'What is this?',
+      systemAppend: 'You are the planner.',
+      cwd,
+      tools: [],
+      files,
+      gate: createPlannerGate({ projectDir: cwd, privateFiles: [], graphToolNames: new Set() }),
+      signal: new AbortController().signal,
+      onEvent: (e) => events.push(e),
+      transcript: { load: (id) => saved.get(id), save: (id, messages) => void saved.set(id, structuredClone(messages)) },
+    };
+    return { t, events, saved };
+  }
+  const model = (images: boolean) => {
+    const m = fakeLmModel({ id: 'auto', name: 'Auto' });
+    (m.model as unknown as { capabilities: Record<string, boolean> }).capabilities.supportsImageToText = images;
+    return m;
+  };
+
+  it('sends images to a model that takes them, says a PDF couldn’t be included, and saves no image bytes', async () => {
+    const m = model(true);
+    const c = chatTurn([image, pdf]);
+    await provider({ lm: models(m.model) }).planTurn(c.t);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text("What is this?\n\nNote: spec.pdf couldn't be included: GitHub Copilot can't read PDFs in the chat.\n"), new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png')]);
+    expect(c.events).toContainEqual({ type: 'note', text: "spec.pdf couldn't be included: GitHub Copilot can't read PDFs in the chat." });
+    const savedConversation = JSON.stringify([...c.saved.values()]);
+    expect(savedConversation).not.toContain(image.data);
+    expect(savedConversation).toContain('[An image was attached here.]');
+  });
+
+  it('says an image couldn’t be included for a model that doesn’t take images', async () => {
+    const m = model(false);
+    const c = chatTurn([image]);
+    await provider({ lm: models(m.model) }).planTurn(c.t);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text("What is this?\n\nNote: shot.png couldn't be included: Auto doesn't take images.\n")]);
+    expect(c.events).toContainEqual({ type: 'note', text: "shot.png couldn't be included: Auto doesn't take images." });
   });
 });

@@ -7,7 +7,10 @@ import type { ToolGate } from './toolGate';
 export type ToolReply = { text: string; isError?: boolean };
 /** A graph-editing tool the planner may call, defined once for every provider. */
 export type GraphTool = { name: string; description: string; schema: ZodRawShape; run(input: unknown): Promise<ToolReply> };
-export type PlannerEvent = { type: 'text'; text: string } | { type: 'tool'; name: string; input: unknown };
+/** `note`: something the user should know about the turn (a chat attachment the provider couldn't take), shown as a note. */
+export type PlannerEvent = { type: 'text'; text: string } | { type: 'tool'; name: string; input: unknown } | { type: 'note'; text: string };
+/** A chat message's image or PDF (step model spec §6b.5): the file, its media type and its bytes as base64. Text files are inlined in the prompt. */
+export type TurnFile = { name: string; kind: 'image' | 'pdf'; path: string; mediaType: string; data: string };
 /** A planner conversation's messages, offered to providers that have no server-side session (spec §6). Claude ignores it. */
 export interface TranscriptStore {
   load(id: string): ChatMessage[] | undefined;
@@ -24,6 +27,8 @@ export type PlannerTurn = {
   /** The model and effort for this turn; absent: the provider's own default. */
   model?: string;
   effort?: EffortLevel;
+  /** Images and PDFs attached to this message only. */
+  files?: TurnFile[];
   gate: ToolGate;
   /** This conversation's stored messages, per session, graph and provider. */
   transcript: TranscriptStore;

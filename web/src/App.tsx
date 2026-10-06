@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { CanvasArea } from './components/CanvasArea';
 import { ChangeConfirmDialog } from './components/ChangeConfirmDialog';
 import { GraphFileNotice } from './components/GraphFileNotice';
@@ -7,10 +8,15 @@ import { RunConfirmDialog } from './components/RunConfirmDialog';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { VariablesDialog } from './components/VariablesDialog';
+import { onShortcutKey } from './shortcuts';
 import { useStore } from './store';
 
 export function App() {
   const status = useStore((s) => s.status);
+  useEffect(() => {
+    document.addEventListener('keydown', onShortcutKey);
+    return () => document.removeEventListener('keydown', onShortcutKey);
+  }, []);
   return (
     <div className="app">
       <TopBar />

@@ -16,3 +16,6 @@ export * from './graphMarkdownParse';
 export * from './graphMeta';
 export * from './graphMarkdownWrite';
 export * from './diffToOps';
+export * from './stepModels';
+export * from './undo';
+export * from './attachments';

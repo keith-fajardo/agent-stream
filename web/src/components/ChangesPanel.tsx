@@ -1,11 +1,11 @@
-import { changedFields, relativeTime, type AgentChange, type ChangedField, type Graph, type GraphNode } from '@agent-stream/shared';
+import { changedFields, changedFieldText, relativeTime, type AgentChange, type ChangedField, type Graph, type GraphNode } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { changeKey, sourceLabel } from '../changeLabels';
 import { lineDiff } from '../lineDiff';
 import { dispatch, useStore } from '../store';
 
 const ICONS: Record<AgentChange['change'], string> = { added: '＋', changed: '✎', removed: '✕' };
-const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace' };
+const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace', model: 'Model', effort: 'Effort', attachments: 'Attachments' };
 
 const target = (c: AgentChange) => ({ kind: c.kind, id: c.id });
 const name = (c: AgentChange) => (c.kind === 'edge' ? `${c.from} → ${c.to}` : c.title);
@@ -18,7 +18,7 @@ function meta(c: AgentChange): string {
   return [what, c.by || c.change === 'changed' ? sourceLabel(c.by) : undefined, c.at ? relativeTime(c.at) : undefined].filter(Boolean).join(' · ');
 }
 
-const text = (n: GraphNode | undefined, field: ChangedField) => (n?.[field] === undefined ? '' : String(n[field]));
+const text = (n: GraphNode | undefined, field: ChangedField) => changedFieldText(n, field);
 
 /** The fields worth showing for a step: what changed, or for an added or removed step what it contains. */
 function shownFields(c: AgentChange, before?: GraphNode, after?: GraphNode): ChangedField[] {

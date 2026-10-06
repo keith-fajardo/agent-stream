@@ -27,7 +27,7 @@ const INFOS: ModelInfo[] = [
 function setup(o: { infos?: () => Promise<ModelInfo[]>; signIn?: boolean } = {}) {
   const calls: { prompt: string; options: Options }[] = [];
   const queryFn: QueryFn = ({ prompt, options }) => {
-    calls.push({ prompt, options: options! });
+    calls.push({ prompt: prompt as string, options: options! });
     return (async function* () {
       yield init();
       yield done();

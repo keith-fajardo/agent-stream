@@ -111,7 +111,7 @@ describe('Planner', () => {
     expect(t).toMatchObject({ prompt: 'Plan a parity test', systemAppend: PLANNER_APPEND, cwd: s.paths.root });
     expect(t.resume).toBeUndefined();
     expect(t.tools.map((x) => x.name)).toEqual([
-      'get_graph', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets',
+      'get_graph', 'list_models', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets',
     ]);
     expect(s.chat().map((e) => [e.role, e.text])).toEqual([
       ['user', 'Plan a parity test'],

@@ -9,7 +9,7 @@ export const CODEX_ARGS: readonly string[] = ['app-server', '-c', 'forced_login_
 /** Variables that would sign Codex in with an API key or send its requests elsewhere (spec §4.2), and VS Code's process flag (R25). */
 const REMOVED_VARS = new Set(['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'ELECTRON_RUN_AS_NODE', 'RIPGREP_CONFIG_PATH', 'GREP_OPTIONS']);
 /** The engine's version, sent as clientInfo.version (R21). */
-export const CLIENT_VERSION = '0.4.0';
+export const CLIENT_VERSION = '0.5.0';
 export const INIT_TIMEOUT_MS = 30_000;
 const STDERR_TAIL_CHARS = 2000;
 const CLOSED = 'The Codex connection was closed.';
