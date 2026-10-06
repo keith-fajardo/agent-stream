@@ -8,6 +8,17 @@ import type { Folder } from '../src/engines';
 import { createMessageHandler, GraphPanel, type PickedFile } from '../src/graphEditor';
 import { engineTestDeps } from './helpers';
 
+/** Whether this machine lets a test make a symlink (a Windows runner may not have the privilege). */
+const canLink = (() => {
+  const d = mkdtempSync(join(tmpdir(), 'linkprobe-'));
+  try {
+    symlinkSync(d, join(d, 'l'));
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 function setup(picked: PickedFile[] | undefined) {
   const path = mkdtempSync(join(tmpdir(), 'cs-attach-'));
   const folder: Folder = { key: `file://${path}`, name: 'a', path };
@@ -82,7 +93,7 @@ describe('Add… and Open in a graph tab (step model spec §6b.4)', () => {
     expect(s.received).toEqual([]);
   });
 
-  it('F3: Open refuses a symlinked attachments folder', () => {
+  it.skipIf(!canLink)('F3: Open refuses a symlinked attachments folder', () => {
     const s = setup([]);
     const out = mkdtempSync(join(tmpdir(), 'cs-out-'));
     mkdirSync(join(s.path, '.agent-stream', 'attachments'), { recursive: true });

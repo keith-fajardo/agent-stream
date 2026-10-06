@@ -9,6 +9,17 @@ import { GraphStore } from '../src/graphStore';
 import { UndoStacks } from '../src/undoStacks';
 import { appTestDeps, fixedClock, signedIn, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
+/** Whether this machine lets a test make a symlink (a Windows runner may not have the privilege). */
+const canLink = (() => {
+  const d = mkdtempSync(join(tmpdir(), 'linkprobe-'));
+  try {
+    symlinkSync(d, join(d, 'l'));
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 const bytes = (t: string) => new TextEncoder().encode(t);
 const b64 = (t: string) => Buffer.from(t).toString('base64');
 const outside = () => mkdtempSync(join(tmpdir(), 'cs-outside-'));
@@ -72,7 +83,7 @@ describe('F2: the store refuses unsafe names and ids', () => {
 });
 
 describe('F3: symlinks', () => {
-  it('refuses to write or delete through a symlinked attachments folder or graph folder', () => {
+  it.skipIf(!canLink)('refuses to write or delete through a symlinked attachments folder or graph folder', () => {
     const paths = tmpProject();
     const out = outside();
     writeFileSync(join(out, 'a.md'), 'precious');
@@ -95,7 +106,7 @@ describe('F3: symlinks', () => {
     expect(s2.names('g')).toEqual([]);
     expect(s2.problem('g')).toContain('is a link to somewhere else');
   });
-  it('a symlinked file counts as missing and unreadable', () => {
+  it.skipIf(!canLink)('a symlinked file counts as missing and unreadable', () => {
     const paths = tmpProject();
     const store = new AttachmentStore(paths);
     store.add('g', [{ name: 'ok.md', bytes: bytes('x') }]);
@@ -107,7 +118,7 @@ describe('F3: symlinks', () => {
     expect(store.hash('g', 'link.txt')).toBeUndefined();
     expect(store.names('g')).toEqual(['ok.md']);
   });
-  it('duplicate refuses a symlinked source folder and replaces a stale destination folder; delete removes only a link', () => {
+  it.skipIf(!canLink)('duplicate refuses a symlinked source folder; delete removes only a link', () => {
     const paths = tmpProject();
     const graphs = new GraphStore(paths, fixedClock());
     const { id } = graphs.create('Shots');
@@ -120,6 +131,10 @@ describe('F3: symlinks', () => {
     expect(graphs.list().map((g) => g.name)).toEqual(['Shots']);
     expect(graphs.delete(id)).toEqual({ ok: true });
     expect(readFileSync(join(out, 'x.md'), 'utf8')).toBe('precious');
+  });
+  it('duplicate replaces a stale destination folder', () => {
+    const paths = tmpProject();
+    const graphs = new GraphStore(paths, fixedClock());
     // a stale folder where the copy will go is cleared, not merged into
     const files = new AttachmentStore(paths);
     const g2 = graphs.create('Two').id;

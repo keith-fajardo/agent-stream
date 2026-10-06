@@ -14,6 +14,17 @@ import type { PlannerTurn, TurnFile } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { appTestDeps, fixedClock, outsideGit, signedIn, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
+/** Whether this machine lets a test make a symlink (a Windows runner may not have the privilege). */
+const canLink = (() => {
+  const d = mkdtempSync(join(tmpdir(), 'linkprobe-'));
+  try {
+    symlinkSync(d, join(d, 'l'));
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 const b64 = (text: string) => Buffer.from(text).toString('base64');
 
 describe('saving chat attachments (step model spec §6b.2)', () => {
@@ -47,7 +58,7 @@ describe('saving chat attachments (step model spec §6b.2)', () => {
     expect(saveChatAttachments(paths, 'default', [{ name: 'a.pdf', data: big(5) }])).toEqual({ ok: false, error: 'a.pdf is larger than 5 MB.' });
   });
 
-  it('writes nothing through a link: a linked attachments folder, session folder or sessions folder is refused', () => {
+  it.skipIf(!canLink)('writes nothing through a link: a linked attachments folder, session folder or sessions folder is refused', () => {
     for (const linked of ['attachments', 'session', 'sessions'] as const) {
       const paths = tmpProject();
       const elsewhere = mkdtempSync(join(tmpdir(), 'chat-elsewhere-'));
@@ -65,7 +76,7 @@ describe('saving chat attachments (step model spec §6b.2)', () => {
     }
   });
 
-  it('never writes over or through a link that is already in the folder', () => {
+  it.skipIf(!canLink)('never writes over or through a link that is already in the folder', () => {
     const paths = tmpProject();
     const elsewhere = mkdtempSync(join(tmpdir(), 'chat-elsewhere-'));
     writeFileSync(join(elsewhere, 'target.md'), 'secret');
