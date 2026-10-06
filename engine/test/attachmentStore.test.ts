@@ -61,3 +61,14 @@ describe('AttachmentStore (step model spec §6b.2)', () => {
     expect(files.names(copy.graph.id)).toEqual(['a.png']);
   });
 });
+
+describe('AttachmentStore.copyFolder: a stale destination', () => {
+  it('is cleared even when the source graph has no attachments folder', () => {
+    const store = new AttachmentStore(tmpProject());
+    store.add('copy', [{ name: 'stale.pdf', bytes: bytes('old') }]);
+    expect(store.names('copy')).toEqual(['stale.pdf']);
+    expect(store.copyFolder('source', 'copy')).toEqual({ ok: true });
+    expect(store.names('copy')).toEqual([]);
+    expect(existsSync(store.dir('copy'))).toBe(false);
+  });
+});

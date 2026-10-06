@@ -48,6 +48,7 @@ import {
   withStepModelLines,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
+import { runAttachments } from './attachedFiles';
 import { AttachmentStore, type AttachmentFile } from './attachmentStore';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
@@ -476,7 +477,8 @@ export function createApp(d: AppDeps) {
       if (!source || source.graphId !== graph.id) return { ok: false, error: `run ${sourceRunId} not found` };
     }
     const checkout = await inspect();
-    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem, checkout }) };
+    const files = runAttachments(graph, (name) => attachments.hash(graph.id, name));
+    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, fromNodeId, commandShellProblem, checkout, attachments: files }) };
   }
 
   /** The pending agent changes and the baseline they are against, for graphOpened and graph. */
@@ -877,6 +879,8 @@ export function createApp(d: AppDeps) {
             provider: provider.id,
             ...defaults,
             stepModels,
+            // What each attachment holds as the run starts: recorded in the run, and what reuse compares (spec §6b.5).
+            attachments: runAttachments(r.graph, (name) => attachments.hash(r.graph.id, name)),
             runId,
             checkout,
             sequential: msg.sequential,

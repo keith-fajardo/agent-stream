@@ -20,6 +20,7 @@ import {
   type NodeRunState,
   type NodeStatus,
   type EffortLevel,
+  type RunAttachment,
   type ProviderId,
   type RenderedRun,
   type RunMeta,
@@ -29,7 +30,10 @@ import {
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import type { Executors, NodeExecutor, NodeOutcome } from './executors';
+import { missingAttachmentLine, stepAttachments } from './attachedFiles';
+import { AttachmentStore } from './attachmentStore';
 import { realOrResolved } from './git';
+import { projectPaths } from './paths';
 import { buildNodePrompt } from './prompt';
 import type { RunStore } from './runStore';
 import type { WriteLeases } from './writeLease';
@@ -71,6 +75,8 @@ export type StartRunInput = {
   effort?: EffortLevel;
   /** Each agent step's own model and effort, resolved at start (step model spec §3.1); a step without an entry gets `model` and `effort`. */
   stepModels?: Record<string, StepModelUse>;
+  /** The attachments the steps use, with their SHA-256 now (spec §6b.5): recorded in the run, and what reuse compares. */
+  attachments?: RunAttachment[];
   /** The run's id, when the caller needs it before the run starts (variant worktree paths contain it). */
   runId?: string;
   /** Start even though another run holds the checkout's lease: write-capable checkout steps wait for it (spec §4.3). */
@@ -125,9 +131,11 @@ export class Runner extends EventEmitter {
   private runs = new Map<string, ActiveRun>();
   private clock: Clock;
   private makeRunId: () => string;
+  private attachmentStore: AttachmentStore;
 
   constructor(private deps: RunnerDeps) {
     super();
+    this.attachmentStore = new AttachmentStore(projectPaths(deps.projectDir));
     this.clock = deps.clock ?? systemClock;
     this.makeRunId = deps.newRunId ?? (() => newRunId());
   }
@@ -163,7 +171,7 @@ export class Runner extends EventEmitter {
       source = this.deps.runStore.get(input.sourceRunId);
       if (!source) return { ok: false, error: `run ${input.sourceRunId} not found` };
     }
-    const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered) : new Set<string>();
+    const reuse = source ? reusableNodeIds(graph, source, input.fromNodeId, input.rendered, input.attachments) : new Set<string>();
 
     const runId = input.runId ?? this.makeRunId();
     const leaseRoot = input.checkout?.root ?? this.deps.projectDir;
@@ -201,6 +209,7 @@ export class Runner extends EventEmitter {
       ...(input.model && { model: input.model }),
       ...(input.effort && { effort: input.effort }),
       ...(input.stepModels && Object.keys(input.stepModels).length > 0 && { stepModels: structuredClone(input.stepModels) }),
+      ...(input.attachments && input.attachments.length > 0 && { attachments: structuredClone(input.attachments) }),
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
       ...(Object.keys(workspaces).length > 0 && { workspaces }),
@@ -441,12 +450,13 @@ export class Runner extends EventEmitter {
     // What the run resolved for this step when it started; a step added during the run gets the run's own (spec §3.1).
     const use: StepModelUse | undefined = node.kind === 'agent' ? (meta.stepModels?.[nodeId] ?? { model: meta.model, effort: meta.effort }) : undefined;
     let noted = false;
+    /** Lines for the step's log right after it starts: why it doesn't run its own model, which attachments are missing. */
+    let notes: string[] = use?.note ? [use.note] : [];
     const emit = (event: NodeEventBody) => {
       this.emitEvent(run, nodeId, event);
-      // Why the step doesn't run its own model or effort: a line in its log, right after it starts.
-      if (event.type === 'start' && use?.note && !noted) {
+      if (event.type === 'start' && !noted) {
         noted = true;
-        this.emitEvent(run, nodeId, { type: 'text', text: use.note });
+        for (const text of notes) this.emitEvent(run, nodeId, { type: 'text', text });
       }
     };
     Promise.resolve()
@@ -474,17 +484,21 @@ export class Runner extends EventEmitter {
         const graph = meta.rendered ? { ...meta.snapshot, goal: meta.rendered.goal, instructions: meta.rendered.instructions } : meta.snapshot;
         const execNode = executionNode(meta, nodeId);
         const prompt = node.kind === 'agent' ? buildNodePrompt(graph, execNode, upstreamResults, place) : '';
+        const cwd = place?.path ?? this.deps.projectDir;
+        const files = stepAttachments({ store: this.attachmentStore, graph: meta.snapshot, node, cwd, worktree: !!place });
+        notes = [...notes, ...files.filter((f) => f.missing).map((f) => missingAttachmentLine(meta.graphId, f.name))];
         return executor({
           runId: meta.id,
           graph,
           node: execNode,
           prompt,
           // Agents get the variant path as their working directory; commands run there (spec §4.3a).
-          cwd: place?.path ?? this.deps.projectDir,
+          cwd,
           signal: controller.signal,
           emit,
           ...(use?.model && { model: use.model }),
           ...(use?.effort && { effort: use.effort }),
+          ...(files.length > 0 && { attachments: files }),
         });
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))

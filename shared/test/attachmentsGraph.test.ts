@@ -92,3 +92,17 @@ describe('graph attachments in the data model (spec §6b.3)', () => {
     expect(reusableNodeIds(shared, { snapshot: g, nodes: allOk })).toEqual(new Set(['n3']));
   });
 });
+
+describe('re-run reuse by attachment content (spec §6b.5)', () => {
+  it('runs a step again when a file it gets changed under the same name', () => {
+    const g = run(empty, [agent(['a.md']), agent(), { type: 'setGraphAttachments', names: ['brief.pdf'] }]);
+    const allOk = Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }])) as Record<string, NodeRunState>;
+    const source = { snapshot: g, nodes: allOk, attachments: [{ name: 'a.md', sha256: '1' }, { name: 'brief.pdf', sha256: '2' }] };
+    expect(reusableNodeIds(g, source, undefined, undefined, [{ name: 'a.md', sha256: '1' }, { name: 'brief.pdf', sha256: '2' }])).toEqual(new Set(['n1', 'n2']));
+    expect(reusableNodeIds(g, source, undefined, undefined, [{ name: 'a.md', sha256: 'changed' }, { name: 'brief.pdf', sha256: '2' }])).toEqual(new Set(['n2']));
+    // A missing file is a change too; the graph's file reaches every agent step.
+    expect(reusableNodeIds(g, source, undefined, undefined, [{ name: 'a.md', sha256: '1' }, { name: 'brief.pdf' }])).toEqual(new Set());
+    // A run recorded before attachments, or no hashes given: names only.
+    expect(reusableNodeIds(g, { snapshot: g, nodes: allOk }, undefined, undefined, [{ name: 'a.md', sha256: 'x' }])).toEqual(new Set(['n1', 'n2']));
+  });
+});

@@ -174,6 +174,12 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   // The model and effort the step ran with, resolved when the run started (step model spec §3.3); runs from before have none.
   const use = n.kind === 'agent' ? run.stepModels?.[n.id] : undefined;
   if (use) block([inline(modelLine({ model: use.model, effort: use.effort, provider: run.provider })), ...(use.note?.trim() ? ['', `_Note:_ ${inline(use.note)}`] : [])]);
+  // Its attachments, its own then the graph's, by name and SHA-256 as the run started; never their contents (spec §6b.5).
+  const files = n.kind === 'agent' ? [...new Set([...(n.attachments ?? []), ...(run.snapshot.attachments ?? [])])] : [];
+  if (files.length) {
+    const hash = (name: string) => run.attachments?.find((a) => a.name === name)?.sha256;
+    block(['**Attachments**', '', ...files.map((name) => `- ${inlineStart(name)} · ${hash(name) ? `sha256 ${hash(name)}` : 'missing when the run started'}`)]);
+  }
   // After a label on the same line, so line-start markup in it (an agent can write descriptions) stays text.
   if (n.description?.trim()) block([`_Description:_ ${inline(n.description)}`]);
   // As it ran: the rendered text, which has the variable values filled in.

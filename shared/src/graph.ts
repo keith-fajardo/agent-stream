@@ -2,7 +2,7 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { attachmentListProblem, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
 import { variableNameProblem } from './variables';
-import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun } from './types';
+import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment } from './types';
 
 /** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
 const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
@@ -299,7 +299,7 @@ export function validateRunnable(graph: Graph): string[] {
   return problems;
 }
 
-export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun };
+export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun; attachments?: RunAttachment[] };
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
@@ -309,9 +309,10 @@ function sameSet(a: string[], b: string[]): boolean {
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
  * `fromNodeId`, did not succeed last time, changed kind or rendered prompt/command (the template,
  * for runs recorded before rendering), for an agent step changed its own description, model or effort, changed access or workspace, has a workspace, or gained/lost an upstream edge — and so does everything
- * downstream of it. Everything else is reused.
+ * downstream of it. An agent step also runs again when its attachments (its own, then the graph's) changed: another list,
+ * or, given `attachments` (the files now) and a source that recorded them, another file under a name. Everything else is reused.
  */
-export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun): Set<string> {
+export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[]): Set<string> {
   const seeds = new Set<string>(fromNodeId ? [fromNodeId] : []);
   for (const n of graph.nodes) {
     const prev = source.snapshot.nodes.find((p) => p.id === n.id);
@@ -331,7 +332,9 @@ export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: st
     const sameModel = n.kind !== 'agent' || ((prev?.model ? stepModelText(prev.model) : '') === (n.model ? stepModelText(n.model) : '') && (prev?.effort ?? '') === (n.effort ?? ''));
     // An agent step gets its own attachments, then the graph's (spec §6b.5): another list is another input.
     const files = (step: GraphNode | undefined, g: Graph) => JSON.stringify([...(step?.attachments ?? []), ...(g.attachments ?? [])]);
-    const sameFiles = n.kind !== 'agent' || files(prev, source.snapshot) === files(n, graph);
+    const hashOf = (list: readonly RunAttachment[] | undefined, name: string) => list?.find((a) => a.name === name)?.sha256 ?? '';
+    const sameContent = !attachments || !source.attachments || [...(n.attachments ?? []), ...(graph.attachments ?? [])].every((name) => hashOf(attachments, name) === hashOf(source.attachments, name));
+    const sameFiles = n.kind !== 'agent' || (files(prev, source.snapshot) === files(n, graph) && sameContent);
     const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     // A step with a workspace is never reused: its files lived in that run's own worktree (spec §4.3a).

@@ -1,4 +1,5 @@
 import type { EffortLevel, Graph, GraphNode, NodeEventBody, NodeUsage } from '@agent-stream/shared';
+import type { StepAttachment } from './attachedFiles';
 import type { GraphTool } from './providers/types';
 
 export type NodeOutcome = { ok: boolean; output: string; error?: string; exitCode?: number | null; usage?: NodeUsage };
@@ -17,6 +18,8 @@ export type NodeContext = {
   /** Agent steps: the model and effort the run resolved for this step when it started; absent: the provider's own default. */
   model?: string;
   effort?: EffortLevel;
+  /** Agent steps: the files the step gets, its own then the graph's (step model spec §6b.5); a missing one is marked. */
+  attachments?: StepAttachment[];
 };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeOutcome>;

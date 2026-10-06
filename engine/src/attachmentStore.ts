@@ -142,9 +142,10 @@ export class AttachmentStore {
   copyFolder(from: string, to: string): { ok: true } | { ok: false; error: string } {
     const unsafe = this.problem(from) ?? this.problem(to);
     if (unsafe) return { ok: false, error: unsafe };
-    if (!existsSync(this.dir(from))) return { ok: true };
     try {
+      // Always: a stale folder at the destination must never survive into a graph that has no attachments (they'd reach a provider).
       this.removeFolder(to);
+      if (!existsSync(this.dir(from))) return { ok: true };
       mkdirSync(this.dir(to), { recursive: true });
       for (const name of this.names(from)) {
         if (attachmentNameProblem(name)) continue;

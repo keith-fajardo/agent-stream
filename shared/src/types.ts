@@ -253,7 +253,12 @@ export type RunMeta = {
   effort?: EffortLevel;
   /** Each agent step's model and effort, resolved when the run started (step model spec §3.1); absent in runs from before. */
   stepModels?: Record<string, StepModelUse>;
+  /** Every attachment the run's steps use, with its SHA-256 when it started; a missing file has none (spec §6b.5). */
+  attachments?: RunAttachment[];
 };
+
+/** An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. */
+export type RunAttachment = { name: string; sha256?: string };
 
 /** What one agent step of a run uses: absent fields are the provider's own default. `note` says why it isn't the step's own choice. */
 export type StepModelUse = { model?: string; effort?: EffortLevel; note?: string };

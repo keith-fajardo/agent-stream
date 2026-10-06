@@ -10,6 +10,7 @@ import {
   type Graph,
   type PreviewStep,
   type RenderedRun,
+  type RunAttachment,
   type RunMeta,
   type RunPreview,
 } from '@agent-stream/shared';
@@ -52,6 +53,8 @@ export type PreviewInput = {
   commandShellProblem?: string | null;
   /** The checkout the run will use (ruling R8): refuses workspaces outside Git or before the first commit, notes uncommitted changes. */
   checkout?: CheckoutInfo;
+  /** The attachments the steps use, with their SHA-256 now (no hash: missing): warnings for missing files, and reuse by content (step model spec §6b.5). */
+  attachments?: RunAttachment[];
 };
 export type PreviewOutcome = { preview: RunPreview; rendered?: RenderedRun };
 
@@ -173,7 +176,18 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   }
 
   const rendered: RenderedRun | undefined = problems.length === 0 ? { goal: goal ?? '', instructions: instructions ?? '', nodes } : undefined;
-  const reused = input.source && rendered ? reusableNodeIds(graph, input.source, input.fromNodeId, rendered) : new Set<string>();
+  const reused = input.source && rendered ? reusableNodeIds(graph, input.source, input.fromNodeId, rendered, input.attachments) : new Set<string>();
+  // A missing attachment never blocks: the step runs without it (spec §6b.5). Only steps that will run are named.
+  const missing = new Set((input.attachments ?? []).filter((a) => !a.sha256).map((a) => a.name));
+  const folder = `.agent-stream/attachments/${graph.id}/`;
+  const runs = (id: string) => !reused.has(id);
+  for (const name of graph.attachments ?? []) {
+    if (missing.has(name) && graph.nodes.some((n) => n.kind === 'agent' && runs(n.id))) warnings.push(`The graph's attachment ${name} is missing from ${folder}, so agent steps run without it.`);
+  }
+  for (const n of graph.nodes) {
+    if (n.kind !== 'agent' || !runs(n.id)) continue;
+    for (const name of n.attachments ?? []) if (missing.has(name)) warnings.push(`${n.id}'s attachment ${name} is missing from ${folder}, so the step runs without it.`);
+  }
   const order = topoOrder(graph);
   const ids = order.length === graph.nodes.length ? order : graph.nodes.map((n) => n.id);
   const steps: PreviewStep[] = ids.map((id) => {
