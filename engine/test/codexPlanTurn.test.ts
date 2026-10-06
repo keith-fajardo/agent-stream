@@ -168,7 +168,7 @@ describe('codexPlanTurn: chat attachments (step model spec §6b.5)', () => {
     const p = plan((t) => t.end(), { files: [image, pdf] });
     await p.run();
     expect(p.fake.last().paramsOf('turn/start').input).toEqual([
-      { type: 'text', text: 'Add a test step', text_elements: [] },
+      { type: 'text', text: "Add a test step\n\nNote: spec.pdf couldn't be included: OpenAI Codex can't read PDFs in the chat.\n", text_elements: [] },
       { type: 'localImage', path: image.path },
     ]);
     expect(p.events).toContainEqual({ type: 'note', text: "spec.pdf couldn't be included: OpenAI Codex can't read PDFs in the chat." });

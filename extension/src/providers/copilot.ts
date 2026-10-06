@@ -12,7 +12,9 @@ import {
   type AgentProvider,
   type ChatMessage,
   type ImageData,
+  notIncluded,
   type NodeOutcome,
+  promptWithNotes,
   type RunShell,
   type TurnFile,
 } from '@agent-stream/engine';
@@ -237,11 +239,11 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       // A chat message's images go to a model that takes them; PDFs can't be sent here (step model spec §6b.5).
       const files: readonly TurnFile[] = turn.files ?? [];
       const images = takesImages(picked.model) ? files.filter((f) => f.kind === 'image') : [];
-      for (const f of files) {
-        if (f.kind === 'pdf') turn.onEvent({ type: 'note', text: `${f.name} couldn't be included: GitHub Copilot can't read PDFs in the chat.` });
-        else if (!images.includes(f)) turn.onEvent({ type: 'note', text: `${f.name} couldn't be included: ${picked.model.name} doesn't take images.` });
-      }
-      const message = images.length ? userWithImages(turn.prompt, images.map((f) => ({ name: f.name, mediaType: f.mediaType as ImageData['mediaType'], data: f.data }))) : userText(turn.prompt);
+      const notes = files.flatMap((f) => (f.kind === 'pdf' ? [notIncluded(f.name, "GitHub Copilot can't read PDFs in the chat")] : images.includes(f) ? [] : [notIncluded(f.name, `${picked.model.name} doesn't take images`)]));
+      // Said in the chat and in the message itself, so the model knows.
+      for (const note of notes) turn.onEvent({ type: 'note', text: note });
+      const prompt = promptWithNotes(turn.prompt, notes);
+      const message = images.length ? userWithImages(prompt, images.map((f) => ({ name: f.name, mediaType: f.mediaType as ImageData['mediaType'], data: f.data }))) : userText(prompt);
       const cap = d.limits().maxRequestsPerTurn;
       const graphToolNames = new Set(turn.tools.map((t) => t.name));
       const r = await runAgentLoop({

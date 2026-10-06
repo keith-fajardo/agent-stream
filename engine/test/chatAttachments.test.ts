@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ServerMessage } from '@agent-stream/shared';
 import { createApp } from '../src/app';
-import { inlineTextFiles, saveChatAttachments, type ChatAttachment } from '../src/chatAttachments';
+import { inlineTextFiles, notIncluded, promptWithNotes, saveChatAttachments, type ChatAttachment } from '../src/chatAttachments';
 import { GraphStore } from '../src/graphStore';
 import { graphTools } from '../src/plannerTools';
 import { privatePathDenial, PRIVATE_FOLDER } from '../src/privatePaths';
@@ -87,6 +87,23 @@ describe('saving chat attachments (step model spec §6b.2)', () => {
     expect(inlineTextFiles('Plain.', [])).toBe('Plain.');
   });
 
+  it('cuts at 100 KB of UTF-8 bytes, never inside a character', () => {
+    const file = (name: string, text: string): ChatAttachment => ({ name, kind: 'text', path: name, bytes: Buffer.from(text) });
+    // 100 KB = 102400 bytes = 34133 euro signs (3 bytes each) and one byte of the next: the cut must back off.
+    const euro = inlineTextFiles('E.', [file('e.txt', '€'.repeat(40000))]);
+    expect(euro).toContain('### e.txt (cut: only its first 100 KB is included)');
+    expect(euro).toContain(`\n${'€'.repeat(34133)}\n\`\`\`\n`);
+    expect(euro).not.toContain('\uFFFD');
+    // An emoji is 4 bytes (a surrogate pair): never half of one.
+    const emoji = inlineTextFiles('E.', [file('e.txt', 'a' + '😀'.repeat(30000))]);
+    expect(emoji).not.toContain('\uFFFD');
+    expect(emoji).toContain(`a${'😀'.repeat(25599)}\n\`\`\`\n`);
+    // Under the limit in characters but over it in bytes: still cut.
+    expect(inlineTextFiles('E.', [file('e.txt', '€'.repeat(34134))])).toContain('(cut:');
+    // Exactly at the limit: whole.
+    expect(inlineTextFiles('E.', [file('e.txt', 'x'.repeat(102400))])).not.toContain('(cut:');
+  });
+
   it('the read tools can’t open the sessions folder', () => {
     const root = tmpProject().root;
     expect(privatePathDenial(root, 'Read', { file_path: join(root, '.agent-stream', 'sessions', 'default', 'attachments', 'shot.png') })).toBe(PRIVATE_FOLDER);
@@ -129,6 +146,50 @@ describe('a chat message with attachments', () => {
     const msgs: ServerMessage[] = [];
     await app.handle({ send: (m) => void msgs.push(m) }, { type: 'chat', graphId, sessionId: 'default', text: 'x', attachments: [{ name: 'tool.exe', data: b64('MZ') }] });
     expect(msgs.at(-1)).toEqual({ type: 'error', message: expect.stringContaining("tool.exe can't be attached.") });
+    expect(planTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('a refused chat message leaves no files behind', () => {
+  const sessionFiles = (paths: ReturnType<typeof tmpProject>) => {
+    const dir = join(paths.sessionsDir, 'default', 'attachments');
+    return existsSync(dir) ? readdirSync(dir) : [];
+  };
+
+  it('while the planner is still working on that chat, a second message’s files aren’t saved', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const turns: PlannerTurn[] = [];
+    const provider = testProvider({ planTurn: async (t) => (turns.push(t), await gate, { ok: true }) });
+    const paths = tmpProject();
+    const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider, status: signedIn, maxParallel: 1, gitBash: testGitBash });
+    const graphId = app.graphStore.create('G').id;
+    const msgs: ServerMessage[] = [];
+    const c = { send: (m: ServerMessage) => void msgs.push(m) };
+    app.connect(c);
+    await app.handle(c, { type: 'openChat', graphId, sessionId: 'default' });
+    await app.handle(c, { type: 'chat', graphId, sessionId: 'default', text: 'First.' });
+    await vi.waitFor(() => expect(turns).toHaveLength(1), { timeout: 5000 });
+    await app.handle(c, { type: 'chat', graphId, sessionId: 'default', text: 'Second.', attachments: [{ name: 'late.md', data: b64('x') }] });
+    expect(sessionFiles(paths)).toEqual([]);
+    expect(msgs.some((m) => m.type === 'chatEntry' && m.entry.role === 'error')).toBe(true);
+    release();
+    await vi.waitFor(() => expect(app.planner.isBusy('default', graphId)).toBe(false), { timeout: 5000 });
+  });
+
+  it('when the provider refuses the folder, the files aren’t saved', async () => {
+    const planTurn = vi.fn(async () => ({ ok: true as const }));
+    const paths = tmpProject();
+    const provider = testProvider({ planTurn, folderProblem: () => 'This folder is not allowed.' });
+    const app = createApp({ ...appTestDeps(), projectDir: paths.root, valuesFile: tmpValuesFile(), provider, status: signedIn, maxParallel: 1, gitBash: testGitBash });
+    const graphId = app.graphStore.create('G').id;
+    const msgs: ServerMessage[] = [];
+    const c = { send: (m: ServerMessage) => void msgs.push(m) };
+    app.connect(c);
+    await app.handle(c, { type: 'openChat', graphId, sessionId: 'default' });
+    await app.handle(c, { type: 'chat', graphId, sessionId: 'default', text: 'x', attachments: [{ name: 'a.md', data: b64('x') }] });
+    await vi.waitFor(() => expect(msgs.some((m) => m.type === 'chatEntry' && m.entry.text === 'This folder is not allowed.')).toBe(true), { timeout: 5000 });
+    expect(sessionFiles(paths)).toEqual([]);
     expect(planTurn).not.toHaveBeenCalled();
   });
 });
@@ -211,14 +272,16 @@ describe('Claude planner: an image over 5 MB', () => {
     if (typeof prompt === 'string') throw new Error('expected a message with files');
     const sent: SDKUserMessage[] = [];
     for await (const m of prompt) sent.push(m);
+    // The model is told too: one line naming the file and why, never a path.
     expect(sent[0].message.content).toEqual([
-      { type: 'text', text: 'Look.' },
+      { type: 'text', text: "Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB).\n" },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: exact } },
     ]);
-    expect(events).toContainEqual({ type: 'note', text: "big.png couldn't be included: Claude takes images up to 5 MB." });
+    expect((sent[0].message.content as { type: string; text?: string }[])[0].text).not.toMatch(/[\\/]/);
+    expect(events).toContainEqual({ type: 'note', text: "big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB)." });
   });
 
-  it('with only an oversize image, sends the plain text prompt', async () => {
+  it('with only an oversize image, the plain text prompt still carries the line (and no path)', async () => {
     const prompts: unknown[] = [];
     const provider = createClaudeProvider({
       findClaude: () => ({ ok: true, path: '/bin/claude' }),
@@ -242,7 +305,15 @@ describe('Claude planner: an image over 5 MB', () => {
       signal: new AbortController().signal,
       onEvent: () => {},
     });
-    expect(prompts[0]).toBe('Look.');
+    expect(prompts[0]).toBe("Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB).\n");
+  });
+});
+
+describe('Codex and Copilot planner messages say what was dropped (spec §6b.5)', () => {
+  it('Codex: a PDF is named in the message text, with no path', async () => {
+    // Pinned in codexPlanTurn.test.ts too; here the wording helper itself.
+    expect(promptWithNotes('Hi.', [notIncluded('spec.pdf', "OpenAI Codex can't read PDFs in the chat")])).toBe("Hi.\n\nNote: spec.pdf couldn't be included: OpenAI Codex can't read PDFs in the chat.\n");
+    expect(promptWithNotes('Hi.', [])).toBe('Hi.');
   });
 });
 

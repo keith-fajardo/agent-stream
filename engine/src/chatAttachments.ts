@@ -67,14 +67,23 @@ export function saveChatAttachments(paths: ProjectPaths, sessionId: string, uplo
   }
 }
 
+/** The 100 KB limit (spec §6b.5), counted in UTF-8 bytes. */
+const MAX_INLINED_TEXT_BYTES = MAX_INLINED_TEXT_CHARS;
+
+/** The largest end at or before `limit` that doesn't cut a UTF-8 character in two (a continuation byte starts no character). */
+function wholeCharactersEnd(bytes: Buffer, limit: number): number {
+  let end = limit;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return end;
+}
+
 /** A chat message's text files, inlined after its text, each cut at 100 KB with a note (spec §6b.5). */
 export function inlineTextFiles(text: string, files: readonly ChatAttachment[]): string {
   const texts = files.filter((f) => f.kind === 'text');
   if (!texts.length) return text;
   const sections = texts.map((f) => {
-    const content = f.bytes.toString('utf8');
-    const cut = content.length > MAX_INLINED_TEXT_CHARS;
-    const shown = cut ? content.slice(0, MAX_INLINED_TEXT_CHARS) : content;
+    const cut = f.bytes.byteLength > MAX_INLINED_TEXT_BYTES;
+    const shown = (cut ? f.bytes.subarray(0, wholeCharactersEnd(f.bytes, MAX_INLINED_TEXT_BYTES)) : f.bytes).toString('utf8');
     const fence = fenceFor(shown);
     return [`### ${f.name}${cut ? ' (cut: only its first 100 KB is included)' : ''}`, '', fence, shown.replace(/\n$/, ''), fence].join('\n');
   });
@@ -92,3 +101,6 @@ export function turnFiles(files: readonly ChatAttachment[]): TurnFile[] {
 
 /** The note for a chat attachment a provider couldn't take (spec §6b.5). */
 export const notIncluded = (name: string, why: string) => `${name} couldn't be included: ${why}.`;
+
+/** The message with one line per file the provider couldn't take, so the model knows (names and reasons, never a path). */
+export const promptWithNotes = (prompt: string, notes: readonly string[]): string => (notes.length ? `${prompt}\n\n${notes.map((n) => `Note: ${n}`).join('\n')}\n` : prompt);

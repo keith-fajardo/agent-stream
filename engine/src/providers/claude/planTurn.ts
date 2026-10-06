@@ -1,6 +1,6 @@
 import type { HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
 import { CLAUDE_IMAGE_MAX_BYTES } from '../../attachedFiles';
-import { notIncluded } from '../../chatAttachments';
+import { notIncluded, promptWithNotes } from '../../chatAttachments';
 import { couldNotAsk } from '../toolGate';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { authSourceError, isSubscriptionAuthSource, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
@@ -55,12 +55,16 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
     // A chat message's images and PDFs go with it, as images and documents (step model spec §6b.5). The API refuses an image
     // block over 5 MB, so a larger image gets a note in the chat instead.
     const fileBlocks: UserBlock[] = [];
+    const notes: string[] = [];
     for (const f of turn.files ?? []) {
       if (f.kind === 'pdf') fileBlocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
-      else if (Buffer.byteLength(f.data, 'base64') > CLAUDE_IMAGE_MAX_BYTES) turn.onEvent({ type: 'note', text: notIncluded(f.name, 'Claude takes images up to 5 MB') });
+      else if (Buffer.byteLength(f.data, 'base64') > CLAUDE_IMAGE_MAX_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (Claude takes images up to 5 MB)'));
       else fileBlocks.push({ type: 'image', source: { type: 'base64', media_type: f.mediaType as 'image/png', data: f.data } });
     }
-    const prompt = fileBlocks.length ? userMessage([{ type: 'text', text: turn.prompt }, ...fileBlocks]) : turn.prompt;
+    // Said in the chat and in the message itself, so the model doesn't answer as if it had seen the file.
+    for (const note of notes) turn.onEvent({ type: 'note', text: note });
+    const text = promptWithNotes(turn.prompt, notes);
+    const prompt = fileBlocks.length ? userMessage([{ type: 'text', text }, ...fileBlocks]) : text;
     let sessionId: string | undefined;
     let sawInit = false;
     let error: string | undefined;

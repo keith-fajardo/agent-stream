@@ -196,6 +196,7 @@ export class Planner extends EventEmitter {
     try {
       this.emit('busy', sessionId, graphId, true);
       const files = options.attachments ?? [];
+      const sent = turnFiles(files);
       this.add(sessionId, graphId, 'user', options.display ?? text, files.map((f) => f.name));
       // Re-checked per turn: the project's settings can change while VS Code runs.
       const provider = this.d.provider();
@@ -228,7 +229,7 @@ export class Planner extends EventEmitter {
       const r = await provider.planTurn({
         // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.
         prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + inlineTextFiles(text, files),
-        ...(turnFiles(files).length > 0 && { files: turnFiles(files) }),
+        ...(sent.length > 0 && { files: sent }),
         systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
         tools,

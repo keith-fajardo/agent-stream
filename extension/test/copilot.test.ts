@@ -455,7 +455,7 @@ describe('Copilot planner: chat attachments (step model spec §6b.5)', () => {
     const m = model(true);
     const c = chatTurn([image, pdf]);
     await provider({ lm: models(m.model) }).planTurn(c.t);
-    expect(m.requests[0].messages.at(-1)?.content).toEqual([text('What is this?'), new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png')]);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text("What is this?\n\nNote: spec.pdf couldn't be included: GitHub Copilot can't read PDFs in the chat.\n"), new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png')]);
     expect(c.events).toContainEqual({ type: 'note', text: "spec.pdf couldn't be included: GitHub Copilot can't read PDFs in the chat." });
     const savedConversation = JSON.stringify([...c.saved.values()]);
     expect(savedConversation).not.toContain(image.data);
@@ -466,7 +466,7 @@ describe('Copilot planner: chat attachments (step model spec §6b.5)', () => {
     const m = model(false);
     const c = chatTurn([image]);
     await provider({ lm: models(m.model) }).planTurn(c.t);
-    expect(m.requests[0].messages.at(-1)?.content).toEqual([text('What is this?')]);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text("What is this?\n\nNote: shot.png couldn't be included: Auto doesn't take images.\n")]);
     expect(c.events).toContainEqual({ type: 'note', text: "shot.png couldn't be included: Auto doesn't take images." });
   });
 });

@@ -749,8 +749,9 @@ export function createApp(d: AppDeps) {
         const s = sessions.load(msg.sessionId);
         if (!s.ok) return error(s.error);
         // Files for this message only, kept in the session (git-ignored, never committed) (step model spec §6b.2).
+        // Not saved when the turn will be refused anyway (the planner is busy on this chat, or the provider refuses the folder): the files would be orphans.
         let files: ChatAttachment[] | undefined;
-        if (msg.attachments?.length) {
+        if (msg.attachments?.length && !planner.isBusy(msg.sessionId, msg.graphId) && !provider.folderProblem?.(d.projectDir)) {
           const saved = saveChatAttachments(paths, msg.sessionId, msg.attachments);
           if (!saved.ok) return error(saved.error);
           files = saved.files;

@@ -14,6 +14,7 @@ export { envLookup } from './runPreview';
 export type { NodeContext, NodeOutcome } from './executors';
 export { createRunShell, type RunShell, type RunShellResult } from './shell';
 export { ChatModelError, type ChatMessage, type ChatModel, type ChatModelErrorCode, type ChatPart, type ImagePart, type ToolSpec } from './agentLoop/chatModel';
+export { notIncluded, promptWithNotes } from './chatAttachments';
 export { attachedPrompt, ATTACHED_IMAGE, IMAGE_NOT_SHOWN, PDF_MAY_NOT_READ, readIfThere, readImages, withAttachedFiles, type ImageData, type StepAttachment } from './attachedFiles';
 export { builtinTools, type LoopTool, type ToolOutput } from './agentLoop/tools';
 export { toLoopTools } from './agentLoop/graphLoopTools';
