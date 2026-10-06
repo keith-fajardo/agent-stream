@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { ChatEntry, ChatRole, ModelSelection, Op, OpRecord } from '@agent-stream/shared';
+import { inlineTextFiles, turnFiles, type ChatAttachment } from './chatAttachments';
 import { systemClock, type Clock } from './clock';
 import type { GraphStore } from './graphStore';
 import { graphTools, type CheckoutSource } from './plannerTools';
@@ -151,8 +152,8 @@ export class Planner extends EventEmitter {
     return [...this.busy.keys()].some((k) => k.slice(0, k.indexOf('|')) === sessionId);
   }
 
-  private add(sessionId: string, graphId: string, role: ChatRole, text: string): void {
-    const entry: ChatEntry = { at: this.clock(), role, text };
+  private add(sessionId: string, graphId: string, role: ChatRole, text: string, attachments?: string[]): void {
+    const entry: ChatEntry = { at: this.clock(), role, text, ...(attachments?.length && { attachments }) };
     this.d.sessions.chatLog(sessionId).append(graphId, entry);
     this.emit('entry', sessionId, graphId, entry);
   }
@@ -171,8 +172,12 @@ export class Planner extends EventEmitter {
   }
 
   /** Never rejects: failures become chat errors, or are logged when even that is impossible. */
-  /** `options.display` is what the chat shows for the user's turn when it differs from `text`, the full instruction. */
-  async send(sessionId: string, graphId: string, text: string, options: { display?: string } = {}): Promise<void> {
+  /**
+   * `options.display` is what the chat shows for the user's turn when it differs from `text`, the full instruction.
+   * `options.attachments`: files sent with this message only (step model spec §6b.5): text files inlined, images and PDFs
+   * handed to the provider.
+   */
+  async send(sessionId: string, graphId: string, text: string, options: { display?: string; attachments?: ChatAttachment[] } = {}): Promise<void> {
     const k = key(sessionId, graphId);
     if (this.busy.has(k)) {
       try {
@@ -190,7 +195,8 @@ export class Planner extends EventEmitter {
     let resume: string | undefined;
     try {
       this.emit('busy', sessionId, graphId, true);
-      this.add(sessionId, graphId, 'user', options.display ?? text);
+      const files = options.attachments ?? [];
+      this.add(sessionId, graphId, 'user', options.display ?? text, files.map((f) => f.name));
       // Re-checked per turn: the project's settings can change while VS Code runs.
       const provider = this.d.provider();
       const problem = provider.folderProblem?.(this.d.projectDir);
@@ -221,7 +227,8 @@ export class Planner extends EventEmitter {
       });
       const r = await provider.planTurn({
         // Only a resumed conversation has a last turn to compare with; a fresh one starts from get_graph.
-        prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + text,
+        prompt: (resume ? userEditsPreamble(ops.slice(state.opCursor ?? 0)) : '') + inlineTextFiles(text, files),
+        ...(turnFiles(files).length > 0 && { files: turnFiles(files) }),
         systemAppend: PLANNER_APPEND,
         cwd: this.d.projectDir,
         tools,
@@ -231,7 +238,8 @@ export class Planner extends EventEmitter {
         gate: createPlannerGate({ projectDir: this.d.projectDir, privateFiles: this.d.privateFiles(), graphToolNames: new Set(tools.map((t) => t.name)) }),
         transcript: { load: (id) => transcripts.load(graphId, provider.id, id), save: (id, messages) => transcripts.save(graphId, provider.id, id, messages) },
         signal: abortController.signal,
-        onEvent: (e) => (e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input))),
+        onEvent: (e) =>
+          e.type === 'text' ? this.add(sessionId, graphId, 'assistant', e.text) : e.type === 'note' ? this.add(sessionId, graphId, 'note', e.text) : this.add(sessionId, graphId, 'tool', describeToolCall(e.name, e.input)),
       });
       if (stopped()) {
         if (!r.ok && r.resumeFailed) this.d.sessions.setPlannerState(sessionId, graphId, { sessionId: undefined });

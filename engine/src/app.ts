@@ -49,6 +49,7 @@ import {
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
 import { runAttachments } from './attachedFiles';
+import { saveChatAttachments, type ChatAttachment } from './chatAttachments';
 import { AttachmentStore, type AttachmentFile } from './attachmentStore';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
@@ -747,7 +748,14 @@ export function createApp(d: AppDeps) {
         if (!g.ok) return error(g.error);
         const s = sessions.load(msg.sessionId);
         if (!s.ok) return error(s.error);
-        planner.send(msg.sessionId, msg.graphId, msg.text).catch((e: unknown) => console.error('[agent-stream] planner error', e));
+        // Files for this message only, kept in the session (git-ignored, never committed) (step model spec §6b.2).
+        let files: ChatAttachment[] | undefined;
+        if (msg.attachments?.length) {
+          const saved = saveChatAttachments(paths, msg.sessionId, msg.attachments);
+          if (!saved.ok) return error(saved.error);
+          files = saved.files;
+        }
+        planner.send(msg.sessionId, msg.graphId, msg.text, files ? { attachments: files } : {}).catch((e: unknown) => console.error('[agent-stream] planner error', e));
         return;
       }
       case 'refineSteps': {

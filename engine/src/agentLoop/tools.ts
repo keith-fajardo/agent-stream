@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
 import { writeFileAtomic } from '../fsutil';
+import { PRIVATE_FOLDER } from '../privatePaths';
 import { truncateHead } from '../prompt';
 import type { RunShell } from '../shell';
 import type { ToolSpec } from './chatModel';
@@ -29,7 +30,6 @@ const MAX_GLOB_ENTRIES = 200_000;
 const GLOB_YIELD_EVERY = 2000;
 /** How long Grep may search before it is stopped: a model-supplied pattern can backtrack catastrophically. */
 export const GREP_TIMEOUT_MS = 20_000;
-const PRIVATE_FOLDER = 'That folder holds Agent Stream run records and sessions, which are private.';
 
 /** Head and tail kept, the middle cut with the existing truncateHead's note (spec §4.2). */
 export function clipResult(text: string, max: number = MAX_RESULT_CHARS): string {

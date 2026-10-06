@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { EffortLevel } from '@agent-stream/shared';
 import { createPlannerGate } from '../src/providers/toolGate';
-import type { GraphTool, PlannerEvent, PlannerTurn } from '../src/providers/types';
+import type { GraphTool, PlannerEvent, PlannerTurn, TurnFile } from '../src/providers/types';
 import { codexPlanTurn, CODEX_RESUME_FAILED } from '../src/providers/codex/planTurn';
 import type { CodexRunDeps } from '../src/providers/codex/runStep';
 import { agentMessage, approvalParams, fakeCodex, FakeRpcError, mcpConfig, readAction, toolCallItem, turnHandlers, waitFor, type FakeHandler, type Msg, type TurnScript } from './codexFake';
@@ -12,7 +12,7 @@ const cwd = resolve('/', 'work', 'proj');
 const values = resolve('/', 'h', '.agent-stream', 'values', 'abc.json');
 const zsh = (script: string) => `/bin/zsh -lc '${script}'`;
 
-type PlanOptions = { resume?: string; model?: string; effort?: EffortLevel; signal?: AbortSignal; codexPath?: string | undefined };
+type PlanOptions = { resume?: string; model?: string; effort?: EffortLevel; signal?: AbortSignal; codexPath?: string | undefined; files?: TurnFile[] };
 
 function setup(handlers: Record<string, FakeHandler>, o: PlanOptions = {}) {
   const fake = fakeCodex(handlers);
@@ -26,6 +26,7 @@ function setup(handlers: Record<string, FakeHandler>, o: PlanOptions = {}) {
     ...(o.resume && { resume: o.resume }),
     ...(o.model && { model: o.model }),
     ...(o.effort && { effort: o.effort }),
+    ...(o.files && { files: o.files }),
     gate: createPlannerGate({ projectDir: cwd, privateFiles: [values], graphToolNames: new Set(['add_step']) }),
     transcript: { load: () => undefined, save: () => {} },
     signal: o.signal ?? new AbortController().signal,
@@ -157,5 +158,19 @@ describe('codexPlanTurn', () => {
     const p = setup(turnHandlers({}), { codexPath: undefined });
     expect(await p.run()).toEqual({ ok: false, error: 'Codex is missing.' });
     expect(p.fake.procs).toHaveLength(0);
+  });
+});
+
+describe('codexPlanTurn: chat attachments (step model spec §6b.5)', () => {
+  it('sends a message’s images with turn/start, and says a PDF couldn’t be included', async () => {
+    const image: TurnFile = { name: 'shot.png', kind: 'image', path: resolve(cwd, '.agent-stream', 'sessions', 'default', 'attachments', 'shot.png'), mediaType: 'image/png', data: 'UE5H' };
+    const pdf: TurnFile = { name: 'spec.pdf', kind: 'pdf', path: resolve(cwd, 'spec.pdf'), mediaType: 'application/pdf', data: 'JVBE' };
+    const p = plan((t) => t.end(), { files: [image, pdf] });
+    await p.run();
+    expect(p.fake.last().paramsOf('turn/start').input).toEqual([
+      { type: 'text', text: 'Add a test step', text_elements: [] },
+      { type: 'localImage', path: image.path },
+    ]);
+    expect(p.events).toContainEqual({ type: 'note', text: "spec.pdf couldn't be included: OpenAI Codex can't read PDFs in the chat." });
   });
 });

@@ -1,9 +1,11 @@
 import type { HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
+import { CLAUDE_IMAGE_MAX_BYTES } from '../../attachedFiles';
+import { notIncluded } from '../../chatAttachments';
 import { couldNotAsk } from '../toolGate';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
 import { authSourceError, isSubscriptionAuthSource, sanitizedEnv, UNVERIFIED_AUTH } from './auth';
 import { sdkModelOptions, type ClaudeRunDeps } from './runStep';
-import { blocksOf, graphServer } from './sdk';
+import { blocksOf, graphServer, userMessage, type UserBlock } from './sdk';
 
 const GRAPH_PREFIX = 'mcp__graph__';
 
@@ -50,11 +52,20 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
       ...sdkModelOptions(deps, turn),
     };
     if (turn.resume) options.resume = turn.resume;
+    // A chat message's images and PDFs go with it, as images and documents (step model spec §6b.5). The API refuses an image
+    // block over 5 MB, so a larger image gets a note in the chat instead.
+    const fileBlocks: UserBlock[] = [];
+    for (const f of turn.files ?? []) {
+      if (f.kind === 'pdf') fileBlocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
+      else if (Buffer.byteLength(f.data, 'base64') > CLAUDE_IMAGE_MAX_BYTES) turn.onEvent({ type: 'note', text: notIncluded(f.name, 'Claude takes images up to 5 MB') });
+      else fileBlocks.push({ type: 'image', source: { type: 'base64', media_type: f.mediaType as 'image/png', data: f.data } });
+    }
+    const prompt = fileBlocks.length ? userMessage([{ type: 'text', text: turn.prompt }, ...fileBlocks]) : turn.prompt;
     let sessionId: string | undefined;
     let sawInit = false;
     let error: string | undefined;
     try {
-      for await (const message of deps.queryFn({ prompt: turn.prompt, options })) {
+      for await (const message of deps.queryFn({ prompt, options })) {
         const m = message as unknown as { type: string; subtype?: string; apiKeySource?: string; session_id?: string; parent_tool_use_id?: string | null; message?: unknown };
         if (m.session_id) sessionId = m.session_id;
         if (m.type === 'system' && m.subtype === 'init') {

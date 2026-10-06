@@ -60,12 +60,15 @@ export function summarizeGraph(graph: Graph) {
     goal: graph.goal,
     instructions: graph.instructions,
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, createdBy, updatedBy }) => ({
+    // Names only, as context: the planner never gets their contents, and can't add or remove them (step model spec §6b.1).
+    ...(graph.attachments?.length && { attachments: graph.attachments }),
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, createdBy, updatedBy }) => ({
       id, title, kind: k, description, prompt, command, timeoutSec,
       ...(a === 'read' && { access: 'read' as const }),
       ...(workspace && { workspace }),
       ...(model && { model: stepModelText(model) }),
       ...(e && { effort: e }),
+      ...(attachments?.length && { attachments }),
       createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),

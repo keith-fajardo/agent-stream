@@ -303,7 +303,8 @@ export type ApprovalRequest = {
 export type GraphChangeRequest = { summary: string; detail: string };
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'error' | 'note';
-export type ChatEntry = { at: string; role: ChatRole; text: string };
+/** `attachments`: the names of the files a user message carried, shown as chips (step model spec §6b.5). */
+export type ChatEntry = { at: string; role: ChatRole; text: string; attachments?: string[] };
 
 export type ProviderId = 'claude' | 'copilot' | 'codex';
 export const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'copilot', 'codex'];
@@ -426,7 +427,8 @@ export type ClientMessage =
   | { type: 'saveGraphMarkdown'; graphId: string; text: string; base: string; force?: boolean }
   /** Subscribes this client to one planner conversation; the engine answers with chatOpened. */
   | { type: 'openChat'; graphId: string; sessionId: string }
-  | { type: 'chat'; graphId: string; sessionId: string; text: string }
+  /** `attachments`: files sent to the planner with this message only (spec §6b.1), kept in the session, never committed. */
+  | { type: 'chat'; graphId: string; sessionId: string; text: string; attachments?: AttachmentUpload[] }
   | { type: 'refineSteps'; graphId: string; sessionId: string; nodeIds: string[] }
   | { type: 'splitStep'; graphId: string; sessionId: string; nodeId: string }
   /** Clears the conversation: its chat and the provider session. */

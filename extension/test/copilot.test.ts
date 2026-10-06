@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type StepAttachment, type ToolGate } from '@agent-stream/engine';
+import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type StepAttachment, type ToolGate, type TurnFile } from '@agent-stream/engine';
 import { emptyGraph, type EffortLevel, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { COPILOT_CONSENT_LATER, COPILOT_RESUME_FAILED, COPILOT_UNAVAILABLE, createCopilotProvider, type CopilotLimits, type LmAccess, type LmApi } from '../src/providers/copilot';
 import { COPILOT_PERMISSION } from '../src/providers/copilotModel';
@@ -422,5 +422,51 @@ describe('Copilot: attachments (step model spec §6b.5)', () => {
       text('Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n'),
       new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png'),
     ]);
+  });
+});
+
+describe('Copilot planner: chat attachments (step model spec §6b.5)', () => {
+  const image: TurnFile = { name: 'shot.png', kind: 'image', path: 'shot.png', mediaType: 'image/png', data: Buffer.from('PNG').toString('base64') };
+  const pdf: TurnFile = { name: 'spec.pdf', kind: 'pdf', path: 'spec.pdf', mediaType: 'application/pdf', data: 'JVBE' };
+  function chatTurn(files: TurnFile[]) {
+    const events: PlannerEvent[] = [];
+    const saved = new Map<string, ChatMessage[]>();
+    const cwd = mkdtempSync(join(tmpdir(), 'copilot-chat-'));
+    const t: PlannerTurn = {
+      prompt: 'What is this?',
+      systemAppend: 'You are the planner.',
+      cwd,
+      tools: [],
+      files,
+      gate: createPlannerGate({ projectDir: cwd, privateFiles: [], graphToolNames: new Set() }),
+      signal: new AbortController().signal,
+      onEvent: (e) => events.push(e),
+      transcript: { load: (id) => saved.get(id), save: (id, messages) => void saved.set(id, structuredClone(messages)) },
+    };
+    return { t, events, saved };
+  }
+  const model = (images: boolean) => {
+    const m = fakeLmModel({ id: 'auto', name: 'Auto' });
+    (m.model as unknown as { capabilities: Record<string, boolean> }).capabilities.supportsImageToText = images;
+    return m;
+  };
+
+  it('sends images to a model that takes them, says a PDF couldn’t be included, and saves no image bytes', async () => {
+    const m = model(true);
+    const c = chatTurn([image, pdf]);
+    await provider({ lm: models(m.model) }).planTurn(c.t);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text('What is this?'), new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png')]);
+    expect(c.events).toContainEqual({ type: 'note', text: "spec.pdf couldn't be included: GitHub Copilot can't read PDFs in the chat." });
+    const savedConversation = JSON.stringify([...c.saved.values()]);
+    expect(savedConversation).not.toContain(image.data);
+    expect(savedConversation).toContain('[An image was attached here.]');
+  });
+
+  it('says an image couldn’t be included for a model that doesn’t take images', async () => {
+    const m = model(false);
+    const c = chatTurn([image]);
+    await provider({ lm: models(m.model) }).planTurn(c.t);
+    expect(m.requests[0].messages.at(-1)?.content).toEqual([text('What is this?')]);
+    expect(c.events).toContainEqual({ type: 'note', text: "shot.png couldn't be included: Auto doesn't take images." });
   });
 });

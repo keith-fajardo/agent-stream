@@ -14,6 +14,7 @@ import {
   type ImageData,
   type NodeOutcome,
   type RunShell,
+  type TurnFile,
 } from '@agent-stream/engine';
 import { isWriteCapable, type ModelChoice, type NodeUsage, type ProviderStatus } from '@agent-stream/shared';
 import { COPILOT_PERMISSION, ExtensionBlockedModelError, vscodeChatModel } from './copilotModel';
@@ -78,6 +79,9 @@ const userWithImages = (text: string, images: readonly ImageData[]): ChatMessage
   role: 'user',
   content: [{ type: 'text', text }, ...images.map((i) => ({ type: 'image' as const, mediaType: i.mediaType, data: i.data }))],
 });
+/** A conversation as it is saved: each image a short text line instead of its bytes. */
+const withoutImages = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.map((m) => (m.role === 'user' && m.content.some((c) => c.type === 'image') ? { ...m, content: m.content.map((c) => (c.type === 'image' ? { type: 'text' as const, text: '[An image was attached here.]' } : c)) } : m));
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -230,12 +234,20 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       }
       const picked = await pick(turn.model);
       if ('error' in picked) return { ok: false, error: picked.error };
+      // A chat message's images go to a model that takes them; PDFs can't be sent here (step model spec §6b.5).
+      const files: readonly TurnFile[] = turn.files ?? [];
+      const images = takesImages(picked.model) ? files.filter((f) => f.kind === 'image') : [];
+      for (const f of files) {
+        if (f.kind === 'pdf') turn.onEvent({ type: 'note', text: `${f.name} couldn't be included: GitHub Copilot can't read PDFs in the chat.` });
+        else if (!images.includes(f)) turn.onEvent({ type: 'note', text: `${f.name} couldn't be included: ${picked.model.name} doesn't take images.` });
+      }
+      const message = images.length ? userWithImages(turn.prompt, images.map((f) => ({ name: f.name, mediaType: f.mediaType as ImageData['mediaType'], data: f.data }))) : userText(turn.prompt);
       const cap = d.limits().maxRequestsPerTurn;
       const graphToolNames = new Set(turn.tools.map((t) => t.name));
       const r = await runAgentLoop({
         model: chatModel(picked.model),
         system: turn.systemAppend,
-        messages: [...history, userText(turn.prompt)],
+        messages: [...history, message],
         tools: [...builtinTools({ cwd: turn.cwd, runShell: d.runShell, readOnly: true }), ...toLoopTools(turn.tools, '')],
         gate: turn.gate,
         maxRequests: cap,
@@ -251,7 +263,8 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       // saved as returned, compacted when it compacted. A failed save is logged, never the turn's failure: the turn ran.
       const id = turn.resume ?? randomUUID();
       try {
-        turn.transcript.save(id, r.messages);
+        // Images are kept out of the saved conversation: the files stay in the session, the messages name them.
+        turn.transcript.save(id, withoutImages(r.messages));
       } catch (e) {
         console.error(`Agent Stream: couldn't save the Copilot conversation ${id}: ${reason(e)}`);
       }

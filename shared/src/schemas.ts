@@ -158,7 +158,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('getGraphMarkdown'), graphId: z.string() }),
   z.object({ type: z.literal('saveGraphMarkdown'), graphId: z.string(), text: markdownText, base: markdownText, force: z.boolean().optional() }),
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
-  z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1) }),
+  z.object({ type: z.literal('chat'), graphId: z.string(), sessionId: z.string(), text: z.string().min(1), attachments: z.array(upload).min(1).max(MAX_ATTACHMENTS).optional() }).refine((m) => (m.attachments ?? []).reduce((n, f) => n + f.data.length, 0) <= MAX_ATTACH_PAYLOAD_CHARS, 'The files are too large to attach in one go.'),
   z.object({ type: z.literal('refineSteps'), graphId: z.string(), sessionId: z.string(), nodeIds: refineNodeIds }),
   z.object({ type: z.literal('splitStep'), graphId: z.string(), sessionId: z.string(), nodeId: z.string() }),
   z.object({ type: z.literal('newChat'), graphId: z.string(), sessionId: z.string() }),
