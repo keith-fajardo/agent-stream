@@ -12,8 +12,8 @@ export class ApprovalBroker extends EventEmitter {
   private pendingById = new Map<string, Pending>();
   /** Steps (run id + step id) the user allowed everything for, until the step ends (Allow all for this step). */
   private allowedSteps = new Set<string>();
-  /** Steps that have ended: a card of theirs still open can never arm the allowance again (until the step starts again). */
-  private endedSteps = new Set<string>();
+  /** Steps (run id + step id) that are running now: only a card of a running step can arm the allowance. */
+  private runningSteps = new Set<string>();
   /** The requests the user pressed Allow all on, until their wait logs it: one line per press, not one per request approved. */
   private pressed = new Set<string>();
 
@@ -53,8 +53,8 @@ export class ApprovalBroker extends EventEmitter {
     const p = this.pendingById.get(id);
     if (!p || decision.decision !== 'approve' || decision.scope !== 'step') return this.settle(id, decision);
     const { runId, nodeId } = p.request;
-    // A card left open by a step that has ended is answered once, and allows nothing.
-    if (this.endedSteps.has(stepKey(runId, nodeId))) return this.settle(id, { decision: 'approve' });
+    // A card left open by a step that is not running (it ended, or never started) is answered once, and allows nothing.
+    if (!this.runningSteps.has(stepKey(runId, nodeId))) return this.settle(id, { decision: 'approve' });
     this.allowedSteps.add(stepKey(runId, nodeId));
     this.pressed.add(id);
     this.settle(id, decision);
@@ -66,27 +66,28 @@ export class ApprovalBroker extends EventEmitter {
 
   /** Whether the user allowed everything for this step of this run, and it has not ended. */
   isStepAllowed(runId: string, nodeId: string): boolean {
-    return this.allowedSteps.has(stepKey(runId, nodeId));
+    const key = stepKey(runId, nodeId);
+    return this.runningSteps.has(key) && this.allowedSteps.has(key);
   }
 
-  /** The step starts: it may be allowed again. */
+  /** The step starts running: from now its cards can arm the allowance. */
   beginStep(runId: string, nodeId: string): void {
-    this.endedSteps.delete(stepKey(runId, nodeId));
+    this.runningSteps.add(stepKey(runId, nodeId));
   }
 
   /**
-   * The step ended (succeeded, failed, cancelled or stopped): its allowance ends with it, and a card of it still open can be answered once but
-   * never allows the step again.
+   * The step ended (succeeded, failed, cancelled or stopped): it is no longer running and its allowance is deleted. A
+   * card of it still open can be answered once but never allows anything, because only a running step can be allowed.
    */
   endStep(runId: string, nodeId: string): void {
     const key = stepKey(runId, nodeId);
+    this.runningSteps.delete(key);
     this.allowedSteps.delete(key);
-    this.endedSteps.add(key);
   }
 
   /** The run is over: nothing more is kept about its steps. */
   forgetRun(runId: string): void {
-    for (const set of [this.allowedSteps, this.endedSteps]) for (const key of [...set]) if (key.startsWith(`${runId}\0`)) set.delete(key);
+    for (const set of [this.allowedSteps, this.runningSteps]) for (const key of [...set]) if (key.startsWith(`${runId}\0`)) set.delete(key);
   }
 
   /** Whether the user pressed Allow all on this request (once: the caller logs the press). */

@@ -15,6 +15,12 @@ import { approvalParams, waitFor } from './codexFake';
 import { fakeChatModel, textPart, toolCallPart, userText } from './helpers';
 
 const STEP = { decision: 'approve', scope: 'step' } as const;
+/** A broker whose steps r1/n1, r1/n2, r2/n1 and r3/n1 are running, as the runner starts them. */
+function running(): ApprovalBroker {
+  const broker = new ApprovalBroker();
+  for (const [r, n] of [['r1', 'n1'], ['r1', 'n2'], ['r2', 'n1'], ['r3', 'n1']]) broker.beginStep(r, n);
+  return broker;
+}
 const node = (id: string): GraphNode => ({ id, title: `Step ${id}`, kind: 'agent', prompt: 'p', createdBy: 'user', updatedBy: 'user', updatedAt: 't' });
 const input = (runId = 'r1', nodeId = 'n1') => ({ runId, graphId: 'g', nodeId, nodeTitle: 'Step', toolName: 'Bash', input: { command: 'ls' } });
 
@@ -26,7 +32,7 @@ function ask(broker: ApprovalBroker, o: { runId?: string; nodeId?: string; card?
 
 describe('Allow all for this step: the broker', () => {
   it('approves the pressed request and everything else the same step has pending, and no other step', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const a = broker.request(input('r1', 'n1'));
     const b = broker.request(input('r1', 'n1'));
     const otherStep = broker.request(input('r1', 'n2'));
@@ -38,7 +44,7 @@ describe('Allow all for this step: the broker', () => {
   });
 
   it('is gone once the step ends, and when the run is cancelled', () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const a = broker.request(input('r1', 'n1'));
     broker.decide(a.id, STEP);
     expect(broker.isStepAllowed('r1', 'n1')).toBe(true);
@@ -52,8 +58,16 @@ describe('Allow all for this step: the broker', () => {
     expect(broker.isStepAllowed('r3', 'n1')).toBe(false);
   });
 
-  it('a decision that is not an approval with the step scope allows nothing', async () => {
+  it('a step that is not running can not be allowed: its card is answered once', async () => {
     const broker = new ApprovalBroker();
+    const card = broker.request(input('r1', 'n1'));
+    expect(broker.decide(card.id, STEP)).toBe(true);
+    await expect(card.decision).resolves.toEqual({ decision: 'approve' });
+    expect(broker.isStepAllowed('r1', 'n1')).toBe(false);
+  });
+
+  it('a decision that is not an approval with the step scope allows nothing', async () => {
+    const broker = running();
     const a = broker.request(input());
     broker.decide(a.id, { decision: 'approve', scope: 'site' });
     expect(broker.isStepAllowed('r1', 'n1')).toBe(false);
@@ -65,7 +79,7 @@ describe('Allow all for this step: the broker', () => {
 
 describe('Allow all for this step: requestApproval (the one path every step approval takes)', () => {
   it('logs the press, approves what is pending, and answers later requests of the step without a card', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const events: NodeEventBody[] = [];
     const first = ask(broker, { events });
     const second = ask(broker, { events, card: {} });
@@ -87,7 +101,7 @@ describe('Allow all for this step: requestApproval (the one path every step appr
   });
 
   it('still asks for another step, for the same step in a new run, and after the step ended', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const first = ask(broker);
     broker.decide(broker.pending()[0].id, STEP);
     await first;
@@ -100,7 +114,7 @@ describe('Allow all for this step: requestApproval (the one path every step appr
   });
 
   it('a card left open after its step ended can not set the allowance, and the step still asks', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const live = new AbortController();
     const stale = ask(broker, { signal: live.signal });
     const [card] = broker.pending();
@@ -116,8 +130,8 @@ describe('Allow all for this step: requestApproval (the one path every step appr
     expect(broker.pending()).toHaveLength(1);
   });
 
-  it('a step that starts again clears its ended mark', () => {
-    const broker = new ApprovalBroker();
+  it('a step that starts again can be allowed again', () => {
+    const broker = running();
     broker.endStep('r1', 'n1');
     broker.beginStep('r1', 'n1');
     const a = broker.request(input('r1', 'n1'));
@@ -126,7 +140,7 @@ describe('Allow all for this step: requestApproval (the one path every step appr
   });
 
   it('Stop still cancels: a pending request and the signal of the run', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const stop = new AbortController();
     const first = ask(broker, { signal: stop.signal });
     broker.decide(broker.pending()[0].id, STEP);
@@ -160,7 +174,7 @@ describe('Allow all for this step: every provider path ends in the same place', 
   }
 
   it('the tool gate (shell commands and file edits) approves through the broker, and logs it', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const events: NodeEventBody[] = [];
     const gate = stepGate(broker, events);
     const first = gate.decide('Bash', { command: 'ls' });
@@ -183,14 +197,14 @@ describe('Allow all for this step: every provider path ends in the same place', 
   });
 
   it('a read-only step still refuses what changes things', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const gate = stepGate(broker, [], { readOnly: true });
     broker.decide(broker.request(input()).id, STEP);
     expect(await gate.decide('Bash', { command: 'rm x' })).toMatchObject({ allow: false });
   });
 
   it('Claude: the PreToolUse hook and canUseTool allow without a card', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const ac = new AbortController();
     const gate = toSdkGate(stepGate(broker, []));
     const hook = (id: string) =>
@@ -206,7 +220,7 @@ describe('Allow all for this step: every provider path ends in the same place', 
   });
 
   it('Codex: command and patch requests are accepted without a card', async () => {
-    const broker = new ApprovalBroker();
+    const broker = running();
     const gate = stepGate(broker, []);
     const handle = createServerRequestHandler({ gate, cwd: resolve('/', 'p'), platform: 'linux', tools: new Map(), signal: new AbortController().signal, fileChanges: new Map(), onDeclined: () => {}, note: () => {} });
     const command = approvalParams({ command: `/bin/zsh -lc 'npm test'`, cwd: resolve('/', 'p'), actions: [{ type: 'unknown', command: 'npm test' }] });
@@ -220,7 +234,7 @@ describe('Allow all for this step: every provider path ends in the same place', 
 
   it('the agent loop (Copilot and the other loop providers): a tool call after the press runs without a card', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'allow-all-'));
-    const broker = new ApprovalBroker();
+    const broker = running();
     const noShell: RunShell = async () => ({ exitCode: 0, output: '' });
     const { model } = fakeChatModel([[toolCallPart('c1', 'Write', { file_path: 'a.txt', content: 'one' })], [toolCallPart('c2', 'Write', { file_path: 'b.txt', content: 'two' })], [textPart('Done.')]]);
     const gate = createStepGate({ broker, runId: 'r1', graphId: 'g', nodeId: 'n1', nodeTitle: 'Step', projectDir: cwd, privateFiles: [], signal: new AbortController().signal, emit: () => {} });

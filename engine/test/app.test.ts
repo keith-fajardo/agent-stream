@@ -266,6 +266,8 @@ describe('app', () => {
   it('passes the step scope of any approval to the broker, and approves what the step has pending', async () => {
     const { app, client } = setup();
     const a = client();
+    app.broker.beginStep('r', 'n1');
+    app.broker.beginStep('r', 'n2');
     const request = (nodeId: string, browserAction?: { site: string; url: string; title: string }) =>
       app.broker.request({ runId: 'r', graphId: 'g', nodeId, nodeTitle: 't', toolName: 'Bash', input: {}, browserAction });
     const first = request('n1');
@@ -320,6 +322,37 @@ describe('app', () => {
     const second = c.of('run').at(-1)!.run.id;
     expect(second).not.toBe(first);
     expect(answered.slice(2)).toEqual([`${second}/n1`, `${second}/n2`]);
+  });
+
+  it('a card left open by the last step of a run can not allow anything once the run has ended', async () => {
+    let gate: import('../src/providers/toolGate').ToolGate | undefined;
+    let stale: Promise<unknown> | undefined;
+    const provider = testProvider({
+      runStep: async (_ctx, g) => {
+        gate = g;
+        // The step ends with a request still waiting for the user.
+        stale = g.decide('Bash', { command: 'late' });
+        await vi.waitFor(() => expect(app.broker.pending()).toHaveLength(1));
+        return { ok: true, output: '' };
+      },
+    });
+    const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+    const c = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'only', kind: 'agent', prompt: 'p1' } }, 'user');
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const runId = c.of('run').at(-1)!.run.id;
+    const [card] = app.broker.pending();
+    expect(card).toMatchObject({ runId, nodeId: 'n1' });
+    // Allow all on the stale card: answered once, nothing allowed.
+    await app.handle(c.c, { type: 'decide', approvalId: card.id, decision: 'approve', scope: 'step' });
+    expect(await stale).toEqual({ allow: true, by: 'user' });
+    expect(app.broker.isStepAllowed(runId, 'n1')).toBe(false);
+    // A later request of that run and step, with a live signal, still asks.
+    void gate!.decide('Bash', { command: 'again' });
+    await vi.waitFor(() => expect(app.broker.pending()).toHaveLength(1));
+    expect(app.broker.pending()[0]).toMatchObject({ runId, nodeId: 'n1' });
   });
 
   it('asks the browser to confirm planner-requested runs', () => {

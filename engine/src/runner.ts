@@ -569,7 +569,7 @@ export class Runner extends EventEmitter {
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {
     run.running.delete(nodeId);
     run.waiting.delete(nodeId);
-    // Allow all for this step ends with the step, and withdraws the cards it left open.
+    // The step is no longer running: its Allow all for this step allowance is deleted, and a card it left open can no longer set one.
     this.deps.broker.endStep(run.meta.id, nodeId);
     try {
       this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);

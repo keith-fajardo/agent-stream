@@ -13,6 +13,7 @@ const node: GraphNode = { id: 'n3', title: 'Research', kind: 'agent', prompt: 'p
 /** One Browser step whose action tools ask through a real broker, on a page with a snapshot taken. */
 async function setup(o: { afterAsk?: () => void } = {}) {
   const broker = new ApprovalBroker();
+  broker.beginStep('r1', 'n3');
   const stop = new AbortController();
   const logged: NodeEventBody[] = [];
   const real = createBrowserAsk({ broker, ctx: { runId: 'r1', graph: emptyGraph('g', 'G', 't'), node, emit: (e) => void logged.push(e), signal: stop.signal } });
