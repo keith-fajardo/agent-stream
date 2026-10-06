@@ -103,12 +103,13 @@ export class AttachmentStore {
     return { ok: true, names, firstInFolder };
   }
 
-  /** Puts a removed file back (undo), unless one with its name is there again. */
-  restore(graphId: string, file: AttachmentFile): void {
-    if (attachmentNameProblem(file.name) || this.problem(graphId) || this.exists(graphId, file.name)) return;
+  /** Puts a removed file back (undo), unless one with its name is there again; true when it wrote the file. */
+  restore(graphId: string, file: AttachmentFile): boolean {
+    if (attachmentNameProblem(file.name) || this.problem(graphId) || this.exists(graphId, file.name)) return false;
     mkdirSync(this.dir(graphId), { recursive: true });
-    if (this.problem(graphId)) return;
+    if (this.problem(graphId)) return false;
     writeFileAtomic(this.path(graphId, file.name), Buffer.from(file.bytes));
+    return true;
   }
 
   /** A regular file only: a link, a folder or a bad name is missing. */

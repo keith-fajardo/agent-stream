@@ -187,6 +187,20 @@ describe('F5: undo keeps at most a capped number of file bytes', () => {
   });
 });
 
+describe('M-7: a failed undo leaves no restored file behind', () => {
+  it('removes the file an undo of a Remove wrote back when the graph edit fails', async () => {
+    const s = appSetup();
+    await s.attach({ kind: 'graph' }, ['a.md', 'x']);
+    await s.app.handle(s.c, { type: 'detach', graphId: s.graphId, target: { kind: 'graph' }, name: 'a.md' });
+    expect(s.app.attachments.exists(s.graphId, 'a.md')).toBe(false);
+    const batch = vi.spyOn(s.app.graphStore, 'applyBatch').mockReturnValueOnce({ ok: false, error: 'disk full' });
+    await s.app.handle(s.c, { type: 'undo', graphId: s.graphId });
+    expect(s.msgs.filter((m) => m.type === 'undone').at(-1)).toMatchObject({ message: "Can't undo removed a.md: disk full" });
+    expect(s.app.attachments.exists(s.graphId, 'a.md')).toBe(false);
+    batch.mockRestore();
+  });
+});
+
 describe('F6: a failed Add removes the files it wrote', () => {
   it('store: a write that throws removes the earlier files of the batch', () => {
     const paths = tmpProject();

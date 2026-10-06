@@ -534,9 +534,11 @@ export function createApp(d: AppDeps) {
     const unsafe = entry.files ? attachments.problem(graphId) : null;
     if (unsafe) return done(`Can't undo ${entry.label}: ${unsafe}`);
     // A removed attachment's file comes back before the graph names it again.
-    for (const f of entry.files?.deleted ?? []) attachments.restore(graphId, f);
+    const restored = (entry.files?.deleted ?? []).filter((f) => attachments.restore(graphId, f)).map((f) => f.name);
     const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo', order: entry.before });
     if (!r.ok) {
+      // The graph doesn't name them again, so the files just written back go too (unless something still names them).
+      for (const name of restored) if (!stillUsed(graphId, current.graph, name)) attachments.remove(graphId, name);
       undo.clear(client, graphId);
       return done(`Can't undo ${entry.label}: ${r.error}`);
     }
