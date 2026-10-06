@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Graph, Op } from '@agent-stream/shared';
 import { registerGraphDraft, sendEdit } from '../actions';
 import { useStore } from '../store';
+import { AttachmentList } from './AttachmentList';
 
 type Draft = { goal: string; instructions: string };
 const draftOf = (g: Graph): Draft => ({ goal: g.goal, instructions: g.instructions });
@@ -71,6 +72,7 @@ function GraphEditor({ graph }: { graph: Graph }) {
         />
       </div>
       <p className="muted">Every agent step and the planner receive the goal and these instructions. Both can use variables, e.g. {'{{ target_schema }}'}.</p>
+      <AttachmentList graphId={graph.id} target={{ kind: 'graph' }} names={graph.attachments ?? []} hint="Drop or paste files here. Every agent step gets them, after its own." />
       <div className="actions">
         <button className="primary" disabled={!dirty} onClick={save}>
           Save

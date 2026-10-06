@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions, registerNodeDraft } from '../actions';
+import { AttachmentList } from './AttachmentList';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
@@ -210,6 +211,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         </datalist>
       </div>
       {draft.kind === 'agent' && <StepModelFields model={draft.model} effort={draft.effort} onChange={(next) => setDraft({ ...draft, ...next })} />}
+      {node.kind === 'agent' && (
+        <AttachmentList graphId={graphId} target={{ kind: 'step', nodeId: node.id }} names={node.attachments ?? []} hint="Drop or paste files here. This step's agent gets them every time it runs." />
+      )}
       {draft.kind === 'agent' ? (
         <div className="field">
           <label>Prompt</label>
