@@ -96,6 +96,7 @@ export function graphFromDoc(doc: GraphDoc, meta: GraphMeta | undefined, id: str
     goal: doc.goal,
     instructions: doc.instructions,
     variables: doc.variables.map(({ name, description }) => ({ name, description })),
+    ...(doc.attachments?.names.length && { attachments: [...doc.attachments.names] }),
     nodes,
     edges: doc.edges.map(({ from, to }) => ({ id: edgeId(from, to), from, to })),
     nodeSeq: seq,

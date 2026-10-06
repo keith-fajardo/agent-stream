@@ -61,6 +61,7 @@ export function rng(seed: number): () => number {
 
 const TEXTS = ['', 'plain', '```', '````js\nx\n````', '{% raw %}{{ x }}{% endraw %}', '## not a heading', '# H1', '\n', ' leading space', 'trailing  ', '~~~', '> quote', '- kind: command', '\\## esc', '日本語 ✓', 'a · b', '"q"', '```\nunclosed', '\r\nwindows'];
 const TITLES = ['Build', 'Prüfen · 日本語', 'Say "hi"', '# hash', 'Goal', 'a\nb', '  padded  ', 'end'];
+const ATTACHMENT_LISTS = [['mockup.png'], ['Q3 report v2.pdf', 'notes.md'], ['größe_1.csv', 'a-b.c.json', 'b.png']];
 const MODELS: StepModel[] = [
   { provider: 'claude', id: 'opus' },
   { provider: 'claude', id: 'claude-opus-4-8' },
@@ -92,9 +93,11 @@ export function randomGraph(seed: number): Graph {
         ...(r() < 0.3 && { position: { x: Math.floor(r() * 500), y: Math.floor(r() * 500) } }),
         ...(kind === 'agent' && r() < 0.4 && { model: pick(MODELS) }),
         ...(kind === 'agent' && r() < 0.4 && { effort: pick(EFFORT_LEVELS) }),
+        ...(kind === 'agent' && r() < 0.3 && { attachments: pick(ATTACHMENT_LISTS) }),
       }),
     );
   }
   for (let a = 1; a <= count; a++) for (let b = a + 1; b <= count; b++) if (r() < 0.3) ops.push(connect(`n${a}`, `n${b}`));
+  if (r() < 0.3) ops.push({ type: 'setGraphAttachments', names: pick(ATTACHMENT_LISTS) });
   return build(pick(['G', 'Graph · 1', 'Ünïcode']), ops);
 }

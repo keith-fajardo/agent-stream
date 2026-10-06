@@ -27,6 +27,10 @@ Use the dev target. Never touch prod.
 
 - `target_schema`: Schema the tests write to
 
+## Attachments
+
+- `dim_customer spec.pdf`
+
 ## Flow
 
 ```mermaid
@@ -52,6 +56,7 @@ dbt run-operation table_exists --args '{table: dim_customer}'
 - workspace: wh_a
 - model: claude/sonnet
 - effort: low
+- attach: expected_rows.csv
 
 > Builds the model for the first time.
 
@@ -80,10 +85,11 @@ The file is read line by line. A `#` inside a fenced code block is never read as
   - A name can't be a reserved word: template keywords such as `true`, `none`, `if`, `for`, `set`, `raw`, `loop` and `self`, and names the template engine blocks, such as `constructor` and `__proto__`.
   - A name can't look like a step id (`n` and a number, such as `n1`): those are kept for step outputs, such as `{{ n1.model }}`.
   - A variable listed twice is an error.
+- **`## Attachments`:** files every agent step gets, one per bullet, `` - `name` ``, in order (below). Optional.
 - **`## Flow`:** exactly one ```` ```mermaid ```` block with the connections (below). Without a Flow section no step is connected.
 - **Every other `##` heading is a step.**
 
-Goal, Instructions, Variables and Flow may come in any order, before or between steps, each at most once. Their names are read in any letter case.
+Goal, Instructions, Variables, Attachments and Flow may come in any order, before or between steps, each at most once. Their names are read in any letter case.
 
 ## Steps
 
@@ -103,7 +109,9 @@ A step section holds, in this order:
    - `model`: the agent step's own model, written `<provider>/<model id>`: `claude/opus`, `codex/gpt-6-astra`, `copilot/auto`. The provider is `claude`, `codex` or `copilot`; the model id is everything after the first `/`, exactly as that provider's model list names it (1 to 200 characters, no spaces). Missing means the run's model (the `agentStream.model` setting). Agent Stream doesn't check here that the model exists, so the graph still opens on a machine with another plan or provider: a run checks it when it starts, and a step whose model isn't offered, or belongs to another provider than the run's, uses the run's model, with a warning.
    - `effort`: the agent step's own effort, one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Missing means the run's effort. A level the step's model doesn't offer is left out when the step runs.
 
-   Command steps have no model or effort: either line on a command step is an error.
+   - `attach`: a file the agent step gets every time it runs, by name. Repeat the line for each file; the order is kept.
+
+   Command steps have no model, effort or attachments: any of those lines on a command step is an error.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
 3. **Exactly one code block:**
    - ```` ```prompt ```` (or `text`, `md`) for an agent step's prompt;
@@ -114,6 +122,19 @@ A step section holds, in this order:
    The content is kept exactly, including `{{ variables }}`, dbt's `{% raw %}` blocks and inner code fences: use a longer fence outside (```` ```` ````) when the content has ```` ``` ```` lines. An empty block is an empty prompt or command. The block must match `kind`.
 
 Anything else in a step section (a paragraph, a second code block, a sub-heading) is an error: nothing you write is ever dropped silently.
+
+## Attachments
+
+Attachments give agents files and photos as context: a mockup, a spec, sample data. Add them in the graph tab (the Node panel for one step, the Graph panel for every step) with **Add…**, by dragging files in, or by pasting. Agent Stream copies each file into `.agent-stream/attachments/<graph id>/`, and the Markdown file names it:
+
+- under `## Attachments` for every agent step (`` - `brief.pdf` ``), after the step's own;
+- with an `attach` line for one agent step (`- attach: mockup.png`).
+
+That folder is not ignored by Git: attachments are committed with the graph, so teammates get them. Don't attach secrets: attachments are sent to your AI provider.
+
+- **Names** are the file's own name made safe: letters, digits, `.`, `-`, `_` and spaces, at most 100 characters, not starting or ending with `.` or a space. Two files with the same name become `name.png` and `name-2.png`. A name that isn't safe, a name listed twice in one list (in any letter case), more than 20 in one list, and `attach` on a command step are errors.
+- **Types:** images (`png`, `jpg`/`jpeg`, `gif`, `webp`, up to 10 MB), PDFs and text files (`md`, `txt`, `csv`, `tsv`, `json`, `yaml`/`yml`, `sql`, `xml`, `html`, `log` and source code), up to 5 MB.
+- **A missing file** is not an error here, so a graph opens before its files are pulled. A run that starts without one warns in the run dialog and the step's log.
 
 ## The Flow
 

@@ -19,6 +19,7 @@ export type DocStep = {
   /** Agent steps only. */
   model?: StepModel;
   effort?: EffortLevel;
+  attachments?: string[];
   description?: string;
   prompt?: string;
   command?: string;
@@ -26,8 +27,10 @@ export type DocStep = {
   line: number;
 };
 export type DocVariable = { name: string; description: string; line: number };
+/** The graph's "## Attachments" list, with the section's line for messages (step model spec §6b.3). */
+export type DocAttachments = { names: string[]; line: number };
 /** A graph's meaning as its Markdown file states it (Markdown graph files spec §3.1). Positions and bookkeeping are in the side file. */
-export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; steps: DocStep[]; edges: FlowEdge[] };
+export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; attachments?: DocAttachments; steps: DocStep[]; edges: FlowEdge[] };
 export type ParseGraphResult = { ok: true; doc: GraphDoc } | { ok: false; errors: GraphFileError[] };
 
 /** CRLF and lone CR as LF. */

@@ -186,7 +186,7 @@ describe('parseGraphMarkdown: errors', () => {
     );
     expect(e).toEqual([
       { line: 3, message: 'kind is "robot"; use agent or command.' },
-      { line: 4, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model and effort.' },
+      { line: 4, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model, effort and attach.' },
       { line: 5, message: 'access is "maybe"; use read or write.' },
       { line: 6, message: `workspace "Bad Name": ${WORKSPACE_NAME_PROBLEM}` },
       { line: 7, message: 'timeout is "1.5"; use a whole number of seconds from 1 to 2147483.' },

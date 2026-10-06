@@ -25,13 +25,14 @@ function patchOf(node: GraphNode, step: DocStep): NodePatch {
   // A step that becomes a command step loses both without a patch (applyOp drops them).
   if (step.kind === 'agent' && modelText(node.model) !== modelText(step.model)) patch.model = step.model ?? null;
   if (step.kind === 'agent' && (node.effort ?? '') !== (step.effort ?? '')) patch.effort = step.effort ?? null;
+  if (step.kind === 'agent' && JSON.stringify(node.attachments ?? []) !== JSON.stringify(step.attachments ?? [])) patch.attachments = step.attachments ?? [];
   return patch;
 }
 
 /**
  * The operations that turn `current` into what the Markdown file says (Markdown graph files spec §6.3), matching steps
- * by id, in this order: disconnect, deleteNode, addNode, updateNode, connect, setGoal and setInstructions, then
- * variables. `current` is in canonical form (the store keeps it so). The name is not an operation: the store renames.
+ * by id, in this order: disconnect, deleteNode, addNode, updateNode, connect, setGoal and setInstructions, the graph's
+ * attachments, then variables. `current` is in canonical form (the store keeps it so). The name is not an operation: the store renames.
  */
 export function diffToOps(current: Graph, doc: GraphDoc): Op[] {
   const ops: Op[] = [];
@@ -51,6 +52,8 @@ export function diffToOps(current: Graph, doc: GraphDoc): Op[] {
   for (const e of doc.edges) if (!currentEdges.has(edgeKey(e))) ops.push({ type: 'connect', from: e.from, to: e.to });
   if (doc.goal !== current.goal) ops.push({ type: 'setGoal', goal: doc.goal });
   if (doc.instructions !== current.instructions) ops.push({ type: 'setInstructions', instructions: doc.instructions });
+  const attachments = doc.attachments?.names ?? [];
+  if (JSON.stringify(attachments) !== JSON.stringify(current.attachments ?? [])) ops.push({ type: 'setGraphAttachments', names: attachments });
   const docVariables = new Map(doc.variables.map((v) => [v.name, v]));
   const variables = new Map(current.variables.map((v) => [v.name, v]));
   for (const v of current.variables) if (!docVariables.has(v.name)) ops.push({ type: 'deleteVariable', name: v.name });
@@ -74,6 +77,8 @@ export function opLine(doc: GraphDoc, op: Op): number {
     case 'addVariable':
     case 'setVariableDescription':
       return doc.variables.find((v) => v.name === op.name)?.line ?? 1;
+    case 'setGraphAttachments':
+      return doc.attachments?.line ?? 1;
     default:
       return 1;
   }

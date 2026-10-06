@@ -39,6 +39,7 @@ export function undoState(g: Graph): string {
     goal: g.goal,
     instructions: g.instructions,
     variables: [...g.variables].sort(byKey((v) => v.name)),
+    attachments: g.attachments ?? [],
     nodes: [...g.nodes].sort(byKey((n) => n.id)).map(({ createdBy: _c, updatedBy: _u, updatedAt: _a, ...n }) => n),
     edges: g.edges.map((e) => `${e.from}->${e.to}`).sort(),
   });
@@ -51,7 +52,8 @@ export function graphAsDoc(g: Graph): GraphDoc {
     goal: g.goal,
     instructions: g.instructions,
     variables: g.variables.map((v) => ({ name: v.name, description: v.description, line: 1 })),
-    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, description, prompt, command }) => ({
+    ...(g.attachments?.length && { attachments: { names: [...g.attachments], line: 1 } }),
+    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, attachments, description, prompt, command }) => ({
       id,
       title,
       kind,
@@ -60,6 +62,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
       ...(timeoutSec !== undefined && { timeoutSec }),
       ...(model && { model }),
       ...(effort && { effort }),
+      ...(attachments?.length && { attachments: [...attachments] }),
       ...(description && { description }),
       ...(prompt && { prompt }),
       ...(command && { command }),
