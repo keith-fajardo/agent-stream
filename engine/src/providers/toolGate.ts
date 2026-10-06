@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { Decision, NodeEventBody } from '@agent-stream/shared';
-import type { ApprovalBroker } from '../approvals';
+import { requestApproval, type ApprovalBroker } from '../approvals';
 import { privatePathDenial } from '../privatePaths';
 
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep']);
@@ -106,27 +106,15 @@ export function createStepGate(o: StepGateOptions): ToolGate {
       if (sdkSignal) signals.push(sdkSignal);
       const combinedSignal = AbortSignal.any(signals);
 
-      const { id, decision } = o.broker.request(
-        { runId: o.runId, graphId: o.graphId, nodeId: o.nodeId, nodeTitle: o.nodeTitle, toolName, input },
-        combinedSignal,
-      );
-      try {
-        o.emit({ type: 'approval_requested', approvalId: id, toolName, input });
-      } catch (error) {
-        o.broker.decide(id, { decision: 'cancelled' });
-        throw error;
-      }
-      const d = await decision;
-      try {
-        o.emit(
-          d.decision === 'deny' && d.note
-            ? { type: 'approval_decided', approvalId: id, decision: d.decision, note: d.note }
-            : { type: 'approval_decided', approvalId: id, decision: d.decision },
-        );
-      } catch (error) {
-        throw error;
-      }
-      return d;
+      // The one approval path of every step (requestApproval): Allow all for this step, the log lines and Stop work the same here as for the graph tools and the browser.
+      return await requestApproval({
+        broker: o.broker,
+        ctx: { runId: o.runId, graph: { id: o.graphId }, node: { id: o.nodeId, title: o.nodeTitle }, emit: o.emit },
+        toolName,
+        input,
+        card: {},
+        signal: combinedSignal,
+      });
     } finally {
       clearTimeout(timer);
     }

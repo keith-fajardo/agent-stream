@@ -232,6 +232,25 @@ describe('Runner', () => {
     fake.finish('n1');
     await r.done;
   });
+
+  it('does not move a node to waiting for an approval the step allowance made on its own', async () => {
+    const { runner, fake } = setup();
+    const r = started(runner.start(withRendered(graphOf([agent('a')]))));
+    await tick();
+    const { emit } = fake.contexts.get('n1')!;
+    const status = () => runner.get(r.run.id)!.nodes.n1.status;
+    emit({ type: 'approval_requested', approvalId: 'a1', toolName: 'Bash', input: {} });
+    expect(status()).toBe('waiting_approval');
+    // Decided by the allowance with no card: the pending one is still pending.
+    emit({ type: 'approval_decided', approvalId: 'x', decision: 'approve', scope: 'step', auto: true, toolName: 'Edit' });
+    expect(status()).toBe('waiting_approval');
+    emit({ type: 'approval_decided', approvalId: 'a1', decision: 'approve', scope: 'step' });
+    expect(status()).toBe('running');
+    emit({ type: 'approval_decided', approvalId: 'y', decision: 'approve', scope: 'step', auto: true, toolName: 'Edit' });
+    expect(status()).toBe('running');
+    fake.finish('n1');
+    await r.done;
+  });
 });
 
 describe('Runner when the filesystem or a listener fails', () => {

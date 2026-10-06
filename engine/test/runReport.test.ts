@@ -221,6 +221,19 @@ describe('buildRunReport', () => {
     expect(buildRunReport(input)).toContain('**Approvals**\n\n- t1 Bash: approved\n- t2 Bash: denied — no deleting\n');
   });
 
+  it('shows Allow all for this step: the press, and each request it approved', () => {
+    const { input } = fixture();
+    input.steps.n1.events = [
+      { at: 't1', type: 'approval_requested', approvalId: 'first', toolName: 'Bash', input: { command: 'ls' } },
+      { at: 't2', type: 'approval_allowed_all' },
+      { at: 't3', type: 'approval_decided', approvalId: 'first', decision: 'approve', scope: 'step' },
+      { at: 't4', type: 'approval_decided', approvalId: 'second', decision: 'approve', scope: 'step', auto: true, toolName: 'Write' },
+    ];
+    expect(buildRunReport(input)).toContain(
+      '**Approvals**\n\n- t1 Bash: approved (allowed for this step)\n- t2 Allowed everything for the rest of this step\n- t4 Write: approved (allowed for this step)\n',
+    );
+  });
+
   it('cuts long output to 2,000 characters and points at the full output file', () => {
     const md = buildRunReport(fixture().input);
     const n2 = md.slice(md.indexOf('### n2'));

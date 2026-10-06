@@ -43,14 +43,15 @@ describe('the browser approval card', () => {
     await done();
   });
 
-  it('offers Deny, Allow on this site for this step and Allow once, above the details', async () => {
+  it('offers Deny, Allow on this site for this step, Allow once and, apart and last, Allow all for this step, above the details', async () => {
     const { card, done } = await render(request);
     const buttons = [...card.querySelectorAll('.approval-actions button')] as HTMLButtonElement[];
-    expect(buttons.map((b) => b.textContent)).toEqual(['Deny', 'Allow on this site for this step', 'Allow once']);
+    expect(buttons.map((b) => b.textContent)).toEqual(['Deny', 'Allow on this site for this step', 'Allow once', 'Allow all for this step']);
     expect(buttons[2].compareDocumentPosition(card.querySelector('.browser-action')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     vi.mocked(send).mockClear();
     await act(async () => buttons[2].click());
     await act(async () => buttons[1].click());
+    await act(async () => buttons[3].click());
     const note = card.querySelector('input') as HTMLInputElement;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(note, 'Wrong field');
@@ -60,6 +61,7 @@ describe('the browser approval card', () => {
     expect(vi.mocked(send).mock.calls.map((c) => c[0])).toEqual([
       { type: 'decide', approvalId: 'a1', decision: 'approve' },
       { type: 'decide', approvalId: 'a1', decision: 'approve', scope: 'site' },
+      { type: 'decide', approvalId: 'a1', decision: 'approve', scope: 'step' },
       { type: 'decide', approvalId: 'a1', decision: 'deny', note: 'Wrong field' },
     ]);
     await done();

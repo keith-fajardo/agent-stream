@@ -13,7 +13,7 @@ import { GRAPH_VIEW_TYPE, GraphEditorProvider, GraphPanels, graphTarget, graphUr
 import { FolderItem, GraphsView } from './graphsView';
 import { ApprovalNotifier } from './notifications';
 import { parallelCommands, realParallelFs } from './parallelTickets';
-import { runCommands } from './runCommands';
+import { decideApproval, runCommands } from './runCommands';
 import { selectModel } from './selectModel';
 import { selectProvider } from './selectProvider';
 import { affectsProvider, readSettings } from './settings';
@@ -143,13 +143,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(graphsTree, vscode.workspace.onDidChangeWorkspaceFolders(() => graphsView.refresh()));
   const approvalsView = new ApprovalsView(() => manager.approvals());
   const approvalsTree = vscode.window.createTreeView('agentStream.approvals', { treeDataProvider: approvalsView });
-  const decideApproval = (folder: Folder, id: string, decision: 'approve' | 'deny') =>
-    manager.get(folder).broker.decide(id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
+  const decideOnce = (folder: Folder, id: string, decision: 'approve' | 'deny') => decideApproval(manager, folder, id, decision);
   const notifier = new ApprovalNotifier({
     pending: () => manager.approvals(),
     isVisible: (folder, graphId) => panels.isVisible(folder.key, graphId),
     ask: async (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
-    decide: decideApproval,
+    decide: decideOnce,
     reveal: (folder, request) => void openAndSend(panels, folder, request.graphId, { type: 'revealNode', nodeId: request.nodeId }),
   });
   events.approvals = () => {

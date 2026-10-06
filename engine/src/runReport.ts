@@ -1,4 +1,4 @@
-import { fenceFor, fmtDuration, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, statusLabel, stepAttachmentNames, staleNote, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, fenceFor, fmtDuration, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, statusLabel, stepAttachmentNames, staleNote, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -167,10 +167,15 @@ function approvals(events: NodeEvent[], status: NodeRunState['status']): string[
   for (const e of events) if (e.type === 'approval_decided') decisions.set(e.approvalId, e);
   const words = { approve: 'approved', deny: 'denied', cancelled: 'cancelled' } as const;
   const lines = events.flatMap((e) => {
+    // The press of Allow all for this step, in order among the requests it covers.
+    if (e.type === 'approval_allowed_all') return [`- ${e.at} ${ALLOWED_EVERYTHING_LINE}`];
+    // Approved by the allowance with no request before it.
+    if (e.type === 'approval_decided' && e.auto) return [`- ${e.at} ${inline(e.toolName ?? 'a tool')}: approved ${ALLOWED_FOR_STEP}`];
     if (e.type !== 'approval_requested') return [];
     const d = decisions.get(e.approvalId);
     const note = d?.note?.trim() ? ` — ${inline(d.note)}` : '';
-    return [`- ${e.at} ${inline(e.toolName)}: ${d ? words[d.decision] : undecided}${note}`];
+    const scope = d?.decision === 'approve' && d.scope === 'step' ? ` ${ALLOWED_FOR_STEP}` : '';
+    return [`- ${e.at} ${inline(e.toolName)}: ${d ? words[d.decision] : undecided}${scope}${note}`];
   });
   return lines.length ? ['**Approvals**', '', ...lines] : [];
 }

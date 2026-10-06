@@ -5,7 +5,10 @@ import { couldNotAsk, denialReason } from '../providers/toolGate';
 
 export type BrowserAskResult = { allow: true; site: boolean } | { allow: false; reason: string };
 /** Asks the user about one browser action, with its card (spec §4.2). Never throws. */
-export type AskBrowserAction = (o: { toolName: string; input: unknown; action: BrowserActionRequest; signal: AbortSignal }) => Promise<BrowserAskResult>;
+export type AskBrowserAction = ((o: { toolName: string; input: unknown; action: BrowserActionRequest; signal: AbortSignal }) => Promise<BrowserAskResult>) & {
+  /** Whether the user allowed everything for this step: the card would never be shown, so nothing is gathered for it. */
+  allowedAll?: () => boolean;
+};
 
 /**
  * The browser action card through the step's approval broker (ruling R4), logged on the step like any approval. So Stop
@@ -14,7 +17,7 @@ export type AskBrowserAction = (o: { toolName: string; input: unknown; action: B
  */
 export function createBrowserAsk(d: { broker: ApprovalBroker; ctx: Pick<NodeContext, 'runId' | 'graph' | 'node' | 'emit' | 'signal'> }): AskBrowserAction {
   const { broker, ctx } = d;
-  return async ({ toolName, input, action, signal }) => {
+  const ask: AskBrowserAction = async ({ toolName, input, action, signal }) => {
     let decided: Decision;
     try {
       decided = await requestApproval({ broker, ctx, toolName, input, card: { browserAction: action }, signal: AbortSignal.any([ctx.signal, signal]) });
@@ -28,4 +31,5 @@ export function createBrowserAsk(d: { broker: ApprovalBroker; ctx: Pick<NodeCont
     }
     return { allow: false, reason: denialReason(decided, ctx.signal.aborted) };
   };
+  return Object.assign(ask, { allowedAll: () => broker.isStepAllowed(ctx.runId, ctx.node.id) });
 }

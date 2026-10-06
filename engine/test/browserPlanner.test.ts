@@ -52,3 +52,14 @@ describe('planner: the Browser setting', () => {
     expect((await gate.decide('mcp__browser__browser_open', { url: 'https://example.com/' })).allow).toBe(false);
   });
 });
+
+describe('planner: the Browser rule asks for the switch whenever the text needs the browser', () => {
+  it('names logged-in sites, "use the browser", and login walls or CAPTCHAs, and never writing "use the browser" without the switch', () => {
+    expect(PLANNER_BROWSER_RULE).toContain('LinkedIn');
+    expect(PLANNER_BROWSER_RULE).toContain('logged in to');
+    expect(PLANNER_BROWSER_RULE).toContain('says to use the browser');
+    expect(PLANNER_BROWSER_RULE).toContain('login wall or CAPTCHA');
+    expect(PLANNER_BROWSER_RULE).toContain('Never write "use the browser" in a step\'s text without switching browser on');
+    expect(PLANNER_BROWSER_RULE).toContain("You can't browse yourself");
+  });
+});

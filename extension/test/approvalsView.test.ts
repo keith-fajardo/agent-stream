@@ -84,4 +84,9 @@ describe('ApprovalsView', () => {
     expect(approvalsBadge(1)).toEqual({ value: 1, tooltip: '1 approval waiting' });
     expect(approvalsBadge(3)).toEqual({ value: 3, tooltip: '3 approvals waiting' });
   });
+
+  it('offers nothing like Allow all for this step in the sidebar or the palette', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(JSON.stringify(manifest.contributes)).not.toMatch(/all for this step/i);
+  });
 });

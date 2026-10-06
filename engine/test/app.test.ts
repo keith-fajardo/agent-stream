@@ -263,6 +263,98 @@ describe('app', () => {
     await expect(bash.decision).resolves.toEqual({ decision: 'approve' });
   });
 
+  it('passes the step scope of any approval to the broker, and approves what the step has pending', async () => {
+    const { app, client } = setup();
+    const a = client();
+    app.broker.beginStep('r', 'n1');
+    app.broker.beginStep('r', 'n2');
+    const request = (nodeId: string, browserAction?: { site: string; url: string; title: string }) =>
+      app.broker.request({ runId: 'r', graphId: 'g', nodeId, nodeTitle: 't', toolName: 'Bash', input: {}, browserAction });
+    const first = request('n1');
+    const sibling = request('n1', { site: 's', url: 'u', title: 't' });
+    const other = request('n2');
+    await app.handle(a.c, { type: 'decide', approvalId: first.id, decision: 'approve', scope: 'step' });
+    await expect(first.decision).resolves.toEqual({ decision: 'approve', scope: 'step' });
+    await expect(sibling.decision).resolves.toEqual({ decision: 'approve', scope: 'step' });
+    expect(app.broker.pending().map((p) => p.id)).toEqual([other.id]);
+    // A denial never carries it.
+    await app.handle(a.c, { type: 'decide', approvalId: other.id, decision: 'deny', scope: 'step' });
+    await expect(other.decision).resolves.toEqual({ decision: 'deny' });
+    expect(app.broker.isStepAllowed('r', 'n2')).toBe(false);
+  });
+
+  it('ends the step allowance with the step: the same step in a second run, and other steps, still ask', async () => {
+    const answered: string[] = [];
+    const provider = testProvider({
+      runStep: async (ctx, gate) => {
+        const first = gate.decide('Bash', { command: 'one' });
+        const mine = () => app.broker.pending().find((p) => p.runId === ctx.runId && p.nodeId === ctx.node.id);
+        // Every step, in every run, has to be asked about its first request.
+        await vi.waitFor(() => expect(mine()).toBeDefined());
+        const press = ctx.node.id === 'n1' && answered.length === 0;
+        app.broker.decide(mine()!.id, press ? { decision: 'approve', scope: 'step' } : { decision: 'approve' });
+        await first;
+        if (press) {
+          // The allowance covers the rest of this step.
+          await expect(gate.decide('Bash', { command: 'two' })).resolves.toEqual({ allow: true, by: 'user' });
+          expect(app.broker.pending()).toEqual([]);
+        }
+        answered.push(`${ctx.runId}/${ctx.node.id}`);
+        return { ok: true, output: '' };
+      },
+    });
+    const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+    const c = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const first = c.of('run').at(-1)!.run.id;
+    // n2 of the same run asked (it answered its own first request); the allowance is gone with n1.
+    expect(answered).toEqual([`${first}/n1`, `${first}/n2`]);
+    expect(app.broker.isStepAllowed(first, 'n1')).toBe(false);
+    // A second run of the same graph: n1 asks again, although the first run allowed everything for it.
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.id).not.toBe(first));
+    await vi.waitFor(() => expect(answered).toHaveLength(4));
+    const second = c.of('run').at(-1)!.run.id;
+    expect(second).not.toBe(first);
+    expect(answered.slice(2)).toEqual([`${second}/n1`, `${second}/n2`]);
+  });
+
+  it('a card left open by the last step of a run can not allow anything once the run has ended', async () => {
+    let gate: import('../src/providers/toolGate').ToolGate | undefined;
+    let stale: Promise<unknown> | undefined;
+    const provider = testProvider({
+      runStep: async (_ctx, g) => {
+        gate = g;
+        // The step ends with a request still waiting for the user.
+        stale = g.decide('Bash', { command: 'late' });
+        await vi.waitFor(() => expect(app.broker.pending()).toHaveLength(1));
+        return { ok: true, output: '' };
+      },
+    });
+    const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+    const c = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'only', kind: 'agent', prompt: 'p1' } }, 'user');
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+    const runId = c.of('run').at(-1)!.run.id;
+    const [card] = app.broker.pending();
+    expect(card).toMatchObject({ runId, nodeId: 'n1' });
+    // Allow all on the stale card: answered once, nothing allowed.
+    await app.handle(c.c, { type: 'decide', approvalId: card.id, decision: 'approve', scope: 'step' });
+    expect(await stale).toEqual({ allow: true, by: 'user' });
+    expect(app.broker.isStepAllowed(runId, 'n1')).toBe(false);
+    // A later request of that run and step, with a live signal, still asks.
+    void gate!.decide('Bash', { command: 'again' });
+    await vi.waitFor(() => expect(app.broker.pending()).toHaveLength(1));
+    expect(app.broker.pending()[0]).toMatchObject({ runId, nodeId: 'n1' });
+  });
+
   it('asks the browser to confirm planner-requested runs', () => {
     const { app, client } = setup();
     const a = client();

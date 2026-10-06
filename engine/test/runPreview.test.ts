@@ -265,3 +265,34 @@ describe('previewRun notes and workspaces', () => {
     expect(previewRun({ graph: graphOf([agent('A', 'a')]), values: {}, env: env() }).preview).not.toHaveProperty('checkout');
   });
 });
+
+describe('previewRun: a step that mentions the browser while Browser is off', () => {
+  const research = (title: string, prompt: string, browser?: boolean): Op => ({ type: 'addNode', node: { title, kind: 'agent', prompt, ...(browser !== undefined && { browser }) } });
+  const warn = (id: string, phrase: string) => `${id} mentions "${phrase}", but Browser is off: it will use plain web search, not your logged-in browser.`;
+
+  it('warns for each such step that will run, and never blocks the run', () => {
+    const g = graphOf([research('Find them', 'Use browser to research them on Linkedin.'), research('On', 'Use the browser on LinkedIn.', true), agent('Plain', 'Summarise.'), cmd('Open', 'open https://linkedin.com/login')]);
+    const out = previewRun({ graph: g, values: {}, env: env() });
+    expect(out.preview.problems).toEqual([]);
+    expect(out.preview.warnings).toEqual([warn('n1', 'browser')]);
+    expect(out.rendered).toBeDefined();
+  });
+
+  it('names the step\'s title or description match, and does not change the signature', () => {
+    const quiet = graphOf([research('Check', 'Summarise.')]);
+    const loud = graphOf([{ type: 'addNode', node: { title: 'Check LinkedIn', kind: 'agent', prompt: 'Summarise.' } }]);
+    expect(previewRun({ graph: loud, values: {}, env: env() }).preview.warnings).toEqual([warn('n1', 'linkedin')]);
+    expect(previewRun({ graph: quiet, values: {}, env: env() }).preview.warnings).toEqual([]);
+  });
+
+  it('warns only for steps that will run: not a reused step, not a step Run only leaves out', () => {
+    const g = graphOf([research('A', 'Log in to the site.'), research('B', 'Solve the captcha.'), research('C', 'Open LinkedIn.'), link('n1', 'n2'), link('n2', 'n3')]);
+    const first = previewRun({ graph: g, values: {}, env: env() });
+    const done: RunMeta = { id: '20261002-100000-aaaa', graphId: 'g', status: 'succeeded', startedAt: 't', snapshot: g, nodes: { n1: { status: 'succeeded' }, n2: { status: 'succeeded' }, n3: { status: 'succeeded' } }, rendered: first.rendered };
+    expect(first.preview.warnings).toEqual([warn('n1', 'log in'), warn('n2', 'captcha'), warn('n3', 'linkedin')]);
+    expect(previewRun({ graph: g, values: {}, env: env(), source: done, mode: 'only', fromNodeId: 'n2' }).preview.warnings).toEqual([warn('n2', 'captcha')]);
+    expect(previewRun({ graph: g, values: {}, env: env(), source: done, mode: 'from', fromNodeId: 'n3' }).preview.warnings).toEqual([warn('n3', 'linkedin')]);
+    const stopped: RunMeta = { ...done, status: 'cancelled', nodes: { n1: { status: 'succeeded' }, n2: { status: 'cancelled' }, n3: { status: 'cancelled' } } };
+    expect(previewRun({ graph: g, values: {}, env: env(), source: stopped, mode: 'only', fromNodeId: 'n1' }).preview.warnings).toEqual([warn('n1', 'log in')]);
+  });
+});

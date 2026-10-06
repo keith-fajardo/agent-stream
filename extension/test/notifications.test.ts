@@ -87,4 +87,17 @@ describe('ApprovalNotifier', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(s.d.decide).not.toHaveBeenCalled();
   });
+
+  it('never offers Allow all for this step, on any kind of request, and never decides with the step scope', async () => {
+    const s = setup();
+    const change: ApprovalRequest = { ...request('c1'), toolName: 'Change graph', graphChange: { summary: 's', detail: 'd' } };
+    const click: ApprovalRequest = { ...request('b1'), toolName: 'browser_click', browserAction: { site: 'jobs.example', url: 'https://jobs.example/', title: 'Jobs' } };
+    s.setPending([{ folder: a, request: request('t1') }, { folder: a, request: change }, { folder: a, request: click }]);
+    s.notifier.update();
+    expect(s.d.ask).toHaveBeenCalledTimes(3);
+    for (const call of s.d.ask.mock.calls) expect(call.join(' ')).not.toMatch(/all for this step/i);
+    s.answers[0]('Approve');
+    await vi.waitFor(() => expect(s.d.decide).toHaveBeenCalledWith(a, 't1', 'approve'));
+    expect(s.d.decide.mock.calls.flat()).not.toContain('step');
+  });
 });
