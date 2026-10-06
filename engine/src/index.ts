@@ -13,7 +13,8 @@ export { CLAUDE_MISSING, findClaude, findGitBash, GIT_BASH_MISSING, type Found }
 export { envLookup } from './runPreview';
 export type { NodeContext, NodeOutcome } from './executors';
 export { createRunShell, type RunShell, type RunShellResult } from './shell';
-export { ChatModelError, type ChatMessage, type ChatModel, type ChatModelErrorCode, type ChatPart, type ToolSpec } from './agentLoop/chatModel';
+export { ChatModelError, type ChatMessage, type ChatModel, type ChatModelErrorCode, type ChatPart, type ImagePart, type ToolSpec } from './agentLoop/chatModel';
+export { ATTACHED_IMAGE, IMAGE_NOT_SHOWN, PDF_MAY_NOT_READ, readIfThere, readImages, withAttachedFiles, type ImageData, type StepAttachment } from './attachedFiles';
 export { builtinTools, type LoopTool, type ToolOutput } from './agentLoop/tools';
 export { toLoopTools } from './agentLoop/graphLoopTools';
 export { lastAssistantText, runAgentLoop, type LoopOptions, type LoopResult } from './agentLoop/loop';

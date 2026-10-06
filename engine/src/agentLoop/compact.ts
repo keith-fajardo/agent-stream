@@ -17,9 +17,15 @@ const SUMMARY_MAX_CHARS = 2000;
 const tokens = (chars: number) => Math.ceil(chars / 4);
 const userText = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
 
-/** ceil(chars / 4) over the system text, the messages and the tool specs (spec §4.6, ruling R7). */
+/** What an image counts for: about what providers charge for a large one, never its base64 length. */
+export const IMAGE_TOKENS = 1600;
+const withoutImageData = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.map((m) => (m.role === 'user' && m.content.some((c) => c.type === 'image') ? { ...m, content: m.content.map((c) => (c.type === 'image' ? { ...c, data: '' } : c)) } : m));
+const imageCount = (messages: ChatMessage[]) => messages.reduce((n, m) => n + (m.role === 'user' ? m.content.filter((c) => c.type === 'image').length : 0), 0);
+
+/** ceil(chars / 4) over the system text, the messages and the tool specs (spec §4.6, ruling R7); an image counts IMAGE_TOKENS. */
 export function estimateTokens(system: string, messages: ChatMessage[], tools: ToolSpec[]): number {
-  return tokens(system.length + JSON.stringify(messages).length + JSON.stringify(tools).length);
+  return tokens(system.length + JSON.stringify(withoutImageData(messages)).length + JSON.stringify(tools).length) + imageCount(messages) * IMAGE_TOKENS;
 }
 
 /** Messages grouped so a tool call and its results stay together: an assistant message with calls and the results after it. */
@@ -43,7 +49,9 @@ function transcriptText(messages: ChatMessage[]): string {
     .map((m) =>
       m.role === 'assistant'
         ? m.content.map((p) => (p.type === 'text' ? `Assistant: ${p.text}` : `Assistant called ${p.name} ${JSON.stringify(p.input)}`)).join('\n')
-        : m.content.map((c) => (c.type === 'text' ? `User: ${c.text}` : `Tool result${c.isError ? ' (error)' : ''}: ${clipResult(c.text, RESULT_CHARS_IN_SUMMARY)}`)).join('\n'),
+        : m.content
+            .map((c) => (c.type === 'text' ? `User: ${c.text}` : c.type === 'image' ? 'User attached an image.' : `Tool result${c.isError ? ' (error)' : ''}: ${clipResult(c.text, RESULT_CHARS_IN_SUMMARY)}`))
+            .join('\n'),
     )
     .join('\n\n');
 }

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type ToolGate } from '@agent-stream/engine';
+import { createPlannerGate, type ChatMessage, type GraphTool, type NodeContext, type PlannerEvent, type PlannerTurn, type RunShell, type StepAttachment, type ToolGate } from '@agent-stream/engine';
 import { emptyGraph, type EffortLevel, type GraphNode, type NodeEventBody } from '@agent-stream/shared';
 import { COPILOT_CONSENT_LATER, COPILOT_RESUME_FAILED, COPILOT_UNAVAILABLE, createCopilotProvider, type CopilotLimits, type LmAccess, type LmApi } from '../src/providers/copilot';
 import { COPILOT_PERMISSION } from '../src/providers/copilotModel';
@@ -25,7 +25,7 @@ function provider(o: { lm?: LmApi; access?: LmAccess; limits?: Partial<CopilotLi
   return createCopilotProvider({ lm: o.lm, access: o.access, runShell: noShell, limits: () => ({ maxRequestsPerStep: 25, maxRequestsPerTurn: 10, ...o.limits }) });
 }
 
-function step(o: { model?: string; effort?: EffortLevel; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal } = {}) {
+function step(o: { model?: string; effort?: EffortLevel; access?: 'read'; graphTools?: GraphTool[]; signal?: AbortSignal; attachments?: StepAttachment[] } = {}) {
   const events: NodeEventBody[] = [];
   const cwd = mkdtempSync(join(tmpdir(), 'copilot-step-'));
   const node: GraphNode = { id: 'n1', title: 'Step', kind: 'agent', prompt: 'p', ...(o.access && { access: o.access }), createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
@@ -40,6 +40,7 @@ function step(o: { model?: string; effort?: EffortLevel; access?: 'read'; graphT
     ...(o.model && { model: o.model }),
     ...(o.effort && { effort: o.effort }),
     ...(o.graphTools && { graphTools: o.graphTools }),
+    ...(o.attachments && { attachments: o.attachments }),
   };
   return { ctx, events, cwd };
 }
@@ -377,5 +378,38 @@ describe('Copilot effort (step model spec §6)', () => {
       { type: 'start', kind: 'agent', cwd: s.cwd, prompt: 'Do it.', model: 'auto' },
       { type: 'text', text: 'The Copilot model gpt-9 is no longer available; using Auto.' },
     ]);
+  });
+});
+
+describe('Copilot: attachments (step model spec §6b.5)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'copilot-attach-'));
+  writeFileSync(join(dir, 'mockup.png'), 'PNG');
+  const files: StepAttachment[] = [
+    { name: 'mockup.png', kind: 'image', missing: false, path: join(dir, 'mockup.png'), shown: '.agent-stream/attachments/g/mockup.png' },
+    { name: 'spec.pdf', kind: 'pdf', missing: false, path: join(dir, 'spec.pdf'), shown: '.agent-stream/attachments/g/spec.pdf' },
+  ];
+  const withImages = (id: string, images: boolean) => {
+    const m = fakeLmModel({ id, name: id });
+    (m.model as unknown as { capabilities: Record<string, boolean> }).capabilities.supportsImageToText = images;
+    return m;
+  };
+
+  it('sends images as data parts to a model that takes them', async () => {
+    const s = step({ attachments: files });
+    const m = withImages('auto', true);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([
+      text('Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n'),
+      new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png'),
+    ]);
+  });
+
+  it('for a model that doesn’t take images, says so in the list and sends none', async () => {
+    const s = step({ attachments: files });
+    const m = withImages('auto', false);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([text("Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (This image couldn't be shown to the model.)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n")]);
   });
 });

@@ -43,7 +43,7 @@ async function setup(script: (options: Options) => AsyncGenerator<SDKMessage>) {
   const graphId = graphStore.create('G').id;
   const calls: { prompt: string; options: Options }[] = [];
   const queryFn: QueryFn = ({ prompt, options }) => {
-    calls.push({ prompt, options: options! });
+    calls.push({ prompt: prompt as string, options: options! });
     return script(options!);
   };
   const provider = createClaudeProvider({

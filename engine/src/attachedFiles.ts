@@ -1,5 +1,6 @@
+import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
-import { attachmentKind, attachmentNameProblem, type AttachmentKind, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
+import { attachmentKind, attachmentNameProblem, imageMediaType, type AttachmentKind, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
 import type { AttachmentStore } from './attachmentStore';
 
 /**
@@ -40,3 +41,44 @@ export function stepAttachments(o: { store: AttachmentStore; graph: Graph; node:
 
 /** The step log's line for a file that isn't there (spec §6b.5). */
 export const missingAttachmentLine = (graphId: string, name: string) => `Attachment ${name} is missing from .agent-stream/attachments/${graphId}/, so this step runs without it.`;
+
+/** What a provider says after a file's path in the `Attached files:` list, by kind (spec §6b.5's table). */
+export type FileNotes = { image?: string; pdf?: string; text?: string };
+export const ATTACHED_IMAGE = 'image, attached to this message';
+export const IMAGE_NOT_SHOWN = "This image couldn't be shown to the model.";
+export const PDF_READ_TOOL = 'PDF: read it with the Read tool';
+export const PDF_MAY_NOT_READ = 'PDF: the model may not be able to read PDFs';
+
+/** The prompt with its `Attached files:` list (spec §6b.5): each file that is there, by path, with the provider's note for its kind. */
+export function withAttachedFiles(prompt: string, files: readonly StepAttachment[] | undefined, notes: FileNotes): string {
+  const present = (files ?? []).filter((f) => !f.missing);
+  if (!present.length) return prompt;
+  const lines = present.map((f) => {
+    const note = notes[f.kind];
+    return `- ${f.shown}${note ? ` (${note})` : ''}`;
+  });
+  return `${prompt.trimEnd()}\n\nAttached files:\n${lines.join('\n')}\n`;
+}
+
+/** An image to send with a message: its media type and its bytes as base64. */
+export type ImageData = { name: string; mediaType: string; data: string };
+
+/** The images among the files that are there, read now (one that vanished since is left out). */
+export function readImages(files: readonly StepAttachment[] | undefined, read: (path: string) => Buffer | undefined): ImageData[] {
+  const out: ImageData[] = [];
+  for (const f of files ?? []) {
+    const mediaType = f.kind === 'image' && !f.missing ? imageMediaType(f.name) : undefined;
+    const bytes = mediaType && read(f.path);
+    if (mediaType && bytes) out.push({ name: f.name, mediaType, data: bytes.toString('base64') });
+  }
+  return out;
+}
+
+/** Reads a regular file the store reported present, or undefined when it can't be read (gone, or a link by now: links are never followed). */
+export function readIfThere(path: string): Buffer | undefined {
+  try {
+    return lstatSync(path).isFile() ? readFileSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
+}

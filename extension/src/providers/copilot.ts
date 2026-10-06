@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import {
+  ATTACHED_IMAGE,
   builtinTools,
+  IMAGE_NOT_SHOWN,
   lastAssistantText,
+  PDF_MAY_NOT_READ,
+  readIfThere,
+  readImages,
   runAgentLoop,
   STEP_GRAPH_TOOL_PREFIX,
   toLoopTools,
+  withAttachedFiles,
   type AgentProvider,
   type ChatMessage,
+  type ImageData,
   type NodeOutcome,
   type RunShell,
 } from '@agent-stream/engine';
@@ -43,8 +50,10 @@ export type CopilotDeps = {
   limits: () => CopilotLimits;
 };
 
-/** Not in @types/vscode 1.106, but present at runtime (spec §2, ruling R17). */
-type ToolCalling = { capabilities?: { supportsToolCalling?: boolean } };
+/** Not in @types/vscode 1.106, but present at runtime (spec §2, ruling R17): whether a model calls tools, and takes images. */
+type ToolCalling = { capabilities?: { supportsToolCalling?: boolean; supportsImageToText?: boolean } };
+/** Whether VS Code says this model takes images (step model spec §6b.5); a model that doesn't say, doesn't. */
+export const takesImages = (m: vscode.LanguageModelChat): boolean => (m as ToolCalling).capabilities?.supportsImageToText === true;
 
 /** The models Agent Stream can run (spec §5.2): tool calling, no internal copilot-* ids, one per id, Auto first. */
 export function usableModels(models: readonly vscode.LanguageModelChat[]): vscode.LanguageModelChat[] {
@@ -67,6 +76,11 @@ const choiceOf = (m: vscode.LanguageModelChat): ModelChoice => ({ value: m.id, l
 /** Copilot reports no tokens or cost: only the request count (ruling R16). */
 const requestUsage = (requests: number): NodeUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, turns: requests });
 const userText = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
+/** A user message with images after its text. */
+const userWithImages = (text: string, images: readonly ImageData[]): ChatMessage => ({
+  role: 'user',
+  content: [{ type: 'text', text }, ...images.map((i) => ({ type: 'image' as const, mediaType: i.mediaType, data: i.data }))],
+});
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -180,15 +194,18 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
 
     async runStep(ctx, gate): Promise<NodeOutcome> {
       const picked = await pick(ctx.model);
+      // Attached images go to a model that takes them; for any other the list says so (step model spec §6b.5).
+      const images = 'model' in picked && takesImages(picked.model) ? readImages(ctx.attachments, readIfThere) : [];
+      const prompt = withAttachedFiles(ctx.prompt, ctx.attachments, { image: images.length ? ATTACHED_IMAGE : IMAGE_NOT_SHOWN, pdf: PDF_MAY_NOT_READ });
       // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
-      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt: ctx.prompt, ...('model' in picked && { model: picked.model.id }) });
+      ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt, ...('model' in picked && { model: picked.model.id }) });
       if ('error' in picked) return { ok: false, output: '', error: picked.error };
       if (picked.note) ctx.emit({ type: 'text', text: picked.note });
       const cap = d.limits().maxRequestsPerStep;
       const r = await runAgentLoop({
         model: chatModel(picked.model),
         system: stepPreamble(ctx.cwd),
-        messages: [userText(ctx.prompt)],
+        messages: [images.length ? userWithImages(prompt, images) : userText(prompt)],
         tools: [
           ...builtinTools({ cwd: ctx.cwd, runShell: d.runShell, readOnly: !isWriteCapable(ctx.node) }),
           ...toLoopTools(ctx.graphTools ?? [], STEP_GRAPH_TOOL_PREFIX),
