@@ -132,19 +132,41 @@ describe('F3: symlinks', () => {
     expect(graphs.delete(id)).toEqual({ ok: true });
     expect(readFileSync(join(out, 'x.md'), 'utf8')).toBe('precious');
   });
-  it('duplicate replaces a stale destination folder', () => {
+  it('a copy replaces a stale destination folder; duplicate moves past an id whose folder still holds files', () => {
     const paths = tmpProject();
     const graphs = new GraphStore(paths, fixedClock());
     // a stale folder where the copy will go is cleared, not merged into
     const files = new AttachmentStore(paths);
     const g2 = graphs.create('Two').id;
     files.add(g2, [{ name: 'a.md', bytes: bytes('a') }]);
+    mkdirSync(join(paths.attachmentsDir, 'dest'), { recursive: true });
+    writeFileSync(join(paths.attachmentsDir, 'dest', 'stale.md'), 'stale');
+    expect(files.copyFolder(g2, 'dest')).toEqual({ ok: true });
+    expect(files.names('dest')).toEqual(['a.md']);
+    // M-3: a folder with files left in it keeps its id taken, so the copy never meets it
     mkdirSync(join(paths.attachmentsDir, 'two-copy'), { recursive: true });
     writeFileSync(join(paths.attachmentsDir, 'two-copy', 'stale.md'), 'stale');
     const copy = graphs.duplicate(g2);
     if (!copy.ok) throw new Error(copy.error);
-    expect(copy.graph.id).toBe('two-copy');
-    expect(files.names('two-copy')).toEqual(['a.md']);
+    expect(copy.graph.id).toBe('two-copy-2');
+    expect(files.names('two-copy-2')).toEqual(['a.md']);
+    expect(files.names('two-copy')).toEqual(['stale.md']);
+  });
+});
+
+describe('M-3: a new or imported graph never inherits a stale attachments folder', () => {
+  it('an id whose attachments folder holds anything is taken; an empty folder is not', () => {
+    const paths = tmpProject();
+    const graphs = new GraphStore(paths, fixedClock());
+    mkdirSync(join(paths.attachmentsDir, 'shots'), { recursive: true });
+    writeFileSync(join(paths.attachmentsDir, 'shots', 'old.png'), 'old');
+    expect(graphs.create('Shots').id).toBe('shots-2');
+    const exported = graphs.exportGraph('shots-2');
+    if (!exported.ok) throw new Error(exported.error);
+    const imported = graphs.importGraph(exported.content);
+    expect(imported.ok && imported.graph.id).toBe('shots-3');
+    mkdirSync(join(paths.attachmentsDir, 'empty'), { recursive: true });
+    expect(graphs.create('Empty').id).toBe('empty');
   });
 });
 

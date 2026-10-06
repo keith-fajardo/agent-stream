@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
@@ -37,7 +37,7 @@ import {
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import { AttachmentStore } from './attachmentStore';
-import { isGraphId, type ProjectPaths } from './paths';
+import { graphAttachmentsDir, isGraphId, type ProjectPaths } from './paths';
 import { renameReferences } from './templates';
 
 export function slugify(name: string): string {
@@ -145,9 +145,22 @@ export class GraphStore extends EventEmitter {
     return join(this.paths.graphsDir, `${id}${BASELINE_SUFFIX}`);
   }
 
-  /** Whether any of the id's files is on disk: a graph file, or what a deleted one left (its side file, baseline, history). */
+  /**
+   * Whether any of the id's files is on disk: a graph file, or what a deleted one left (its side file, baseline, history,
+   * or an attachments folder with anything in it, which a new graph would otherwise inherit).
+   */
   private taken(id: string): boolean {
-    return [this.file(id), this.legacyFile(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id)].some((f) => existsSync(f));
+    return [this.file(id), this.legacyFile(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id)].some((f) => existsSync(f)) || this.attachmentsLeft(id);
+  }
+
+  /** Something is where the id's attachments folder goes: a folder that isn't empty, or a link or file (never followed). */
+  private attachmentsLeft(id: string): boolean {
+    const dir = graphAttachmentsDir(this.paths, id);
+    try {
+      return !lstatSync(dir).isDirectory() || readdirSync(dir).length > 0;
+    } catch {
+      return false;
+    }
   }
 
   private uniqueId(name: string): string {
