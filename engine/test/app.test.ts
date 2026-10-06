@@ -263,6 +263,55 @@ describe('app', () => {
     await expect(bash.decision).resolves.toEqual({ decision: 'approve' });
   });
 
+  it('passes the step scope of any approval to the broker, and approves what the step has pending', async () => {
+    const { app, client } = setup();
+    const a = client();
+    const request = (nodeId: string, browserAction?: { site: string; url: string; title: string }) =>
+      app.broker.request({ runId: 'r', graphId: 'g', nodeId, nodeTitle: 't', toolName: 'Bash', input: {}, browserAction });
+    const first = request('n1');
+    const sibling = request('n1', { site: 's', url: 'u', title: 't' });
+    const other = request('n2');
+    await app.handle(a.c, { type: 'decide', approvalId: first.id, decision: 'approve', scope: 'step' });
+    await expect(first.decision).resolves.toEqual({ decision: 'approve', scope: 'step' });
+    await expect(sibling.decision).resolves.toEqual({ decision: 'approve', scope: 'step' });
+    expect(app.broker.pending().map((p) => p.id)).toEqual([other.id]);
+    // A denial never carries it.
+    await app.handle(a.c, { type: 'decide', approvalId: other.id, decision: 'deny', scope: 'step' });
+    await expect(other.decision).resolves.toEqual({ decision: 'deny' });
+    expect(app.broker.isStepAllowed('r', 'n2')).toBe(false);
+  });
+
+  it('ends the step allowance with the step: the next run of it, and the other steps, still ask', async () => {
+    const asked: string[] = [];
+    const provider = testProvider({
+      runStep: async (ctx, gate) => {
+        const first = gate.decide('Bash', { command: 'one' });
+        await vi.waitFor(() => expect(app.broker.pending().some((p) => p.nodeId === ctx.node.id)).toBe(true));
+        if (ctx.node.id === 'n1') app.broker.decide(app.broker.pending().find((p) => p.nodeId === 'n1')!.id, { decision: 'approve', scope: 'step' });
+        else app.broker.decide(app.broker.pending().find((p) => p.nodeId === ctx.node.id)!.id, { decision: 'approve' });
+        await first;
+        if (ctx.node.id === 'n1') {
+          // The allowance covers the rest of this step.
+          await expect(gate.decide('Bash', { command: 'two' })).resolves.toEqual({ allow: true, by: 'user' });
+          expect(app.broker.pending()).toEqual([]);
+        }
+        asked.push(ctx.node.id);
+        return { ok: true, output: '' };
+      },
+    });
+    const { app, client } = setup(signedIn, instant, undefined, { provider, executors: undefined });
+    const c = client();
+    const g = app.graphStore.create('G');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'one', kind: 'agent', prompt: 'p1' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'addNode', node: { title: 'two', kind: 'agent', prompt: 'p2' } }, 'user');
+    app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
+    expect(asked).toEqual(['n1', 'n2']);
+    const runId = c.of('run').at(-1)!.run.id;
+    expect(app.broker.isStepAllowed(runId, 'n1')).toBe(false);
+  });
+
   it('asks the browser to confirm planner-requested runs', () => {
     const { app, client } = setup();
     const a = client();

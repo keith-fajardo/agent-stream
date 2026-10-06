@@ -175,7 +175,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('selectRun'), runId: z.string() }),
   z.object({ type: z.literal('getNodeLogs'), runId: z.string(), nodeId: z.string() }),
   z.object({ type: z.literal('exportRunReport'), graphId: z.string(), runId: z.string() }),
-  z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional(), scope: z.literal('site').optional() }),
+  z.object({ type: z.literal('decide'), approvalId: z.string(), decision: z.enum(['approve', 'deny']), note: z.string().optional(), scope: z.enum(['site', 'step']).optional() }),
   z.object({ type: z.literal('browserDone'), waitId: z.string().max(100) }),
 ]);
 

@@ -176,7 +176,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .approval-label { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .approval-warning { margin: 0; padding: 6px 8px; border-radius: 6px; color: var(--danger); background: rgba(180, 35, 24, 0.1); font-weight: 600; }
 .needs-approval { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--warn); }
-.approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: grid; place-items: center; z-index: 50; }
 .modal { background: var(--panel); border-radius: 10px; padding: 20px; width: min(640px, 92vw); max-height: 85vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }

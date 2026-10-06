@@ -69,6 +69,12 @@ export const EMBEDDED_FRAME = "Agent Stream can't act on an embedded frame as a 
 export const ALLOW_ONCE = 'Allow once';
 export const ALLOW_ON_SITE = 'Allow on this site for this step';
 export const DENY = 'Deny';
+/** The approval card's extra choice, on every kind of card: the step stops asking for the rest of its run. */
+export const ALLOW_ALL_FOR_STEP = 'Allow all for this step';
+/** The step log's line when the user pressed it. */
+export const ALLOWED_EVERYTHING_LINE = 'Allowed everything for the rest of this step';
+/** What a log line says of a request the allowance approved, like `(allowed on this site)` for a site. */
+export const ALLOWED_FOR_STEP = '(allowed for this step)';
 
 /**
  * The step log's line for an action that ran without a card because the user allowed its site for the step (spec §4.2):

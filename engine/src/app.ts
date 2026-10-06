@@ -259,6 +259,8 @@ export function createApp(d: AppDeps) {
         );
         return outcome;
       } finally {
+        // Allow all for this step ends with the step, before anything else about it is torn down.
+        broker.endStep(original.runId, original.node.id);
         if (step) {
           // Its tabs close when it succeeded; otherwise they stay, so the user can see where it got to (spec §3.2). Whatever
           // way the step ended (a provider that threw included), its signal aborts so a tool or wait still running ends.
@@ -1021,9 +1023,9 @@ export function createApp(d: AppDeps) {
         d.browser?.done(msg.waitId);
         return;
       case 'decide': {
-        // Only a browser action has a site to allow.
-        const forSite = msg.scope !== undefined && broker.pending().some((r) => r.id === msg.approvalId && r.browserAction);
-        broker.decide(msg.approvalId, msg.decision === 'approve' ? { decision: 'approve', ...(forSite && { scope: msg.scope }) } : { decision: 'deny', note: msg.note });
+        // Only a browser action has a site to allow; "all for this step" covers any request.
+        const scope = msg.scope === 'site' ? (broker.pending().some((r) => r.id === msg.approvalId && r.browserAction) ? 'site' : undefined) : msg.scope;
+        broker.decide(msg.approvalId, msg.decision === 'approve' ? { decision: 'approve', ...(scope && { scope }) } : { decision: 'deny', note: msg.note });
         return;
       }
     }

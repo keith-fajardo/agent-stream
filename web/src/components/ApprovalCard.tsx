@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ALLOW_ON_SITE, ALLOW_ONCE, browserActionText, DENY, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
+import { ALLOW_ALL_FOR_STEP, ALLOW_ON_SITE, ALLOW_ONCE, browserActionText, DENY, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
 import { describeApprovalInput, patchLineClass } from '../approvalView';
 import { send } from '../bridge';
 import { dispatch } from '../store';
@@ -35,6 +35,7 @@ function BrowserDetails({ action: b }: { action: BrowserActionRequest }) {
 export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
   const [note, setNote] = useState('');
   const view = describeApprovalInput(a.toolName, a.input);
+  const allowAll = () => send({ type: 'decide', approvalId: a.id, decision: 'approve', scope: 'step' });
   const deny = () => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined });
   const who = (
     <button className="link" onClick={() => dispatch({ kind: 'selectNode', id: a.nodeId })}>
@@ -53,6 +54,7 @@ export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
             {DENY}
           </button>
           <button onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'approve', scope: 'site' })}>{ALLOW_ON_SITE}</button>
+          <button onClick={allowAll}>{ALLOW_ALL_FOR_STEP}</button>
           <button className="primary" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'approve' })}>
             {ALLOW_ONCE}
           </button>
@@ -75,6 +77,7 @@ export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
         <button className="danger" onClick={deny}>
           Deny
         </button>
+        <button onClick={allowAll}>{ALLOW_ALL_FOR_STEP}</button>
         <button className="primary" onClick={() => send({ type: 'decide', approvalId: a.id, decision: 'approve' })}>
           Approve
         </button>

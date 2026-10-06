@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Markdown } from '../markdown';
-import { DONE, fmtDuration, type NodeEvent } from '@agent-stream/shared';
+import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, DONE, fmtDuration, type NodeEvent } from '@agent-stream/shared';
 import { send } from '../bridge';
 
 export const LOG_STREAM_CAP = 200_000;
@@ -73,11 +73,17 @@ function LogEvent({ event: e, ended, live }: { event: NodeEvent; ended: Readonly
           {time}⏸ Waiting for your approval: <b>{e.toolName}</b>
         </div>
       );
+    case 'approval_allowed_all':
+      return (
+        <div className="ev approval approve">
+          {time}✔ {ALLOWED_EVERYTHING_LINE}
+        </div>
+      );
     case 'approval_decided':
       return (
         <div className={`ev approval ${e.decision}`}>
           {time}
-          {e.decision === 'approve' ? `✔ Approved${e.scope === 'site' ? ': on this site for this step' : ''}` : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
+          {e.decision === 'approve' ? `✔ Approved${e.scope === 'site' ? ': on this site for this step' : e.scope === 'step' ? ` ${ALLOWED_FOR_STEP}` : ''}` : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
         </div>
       );
     case 'browser':

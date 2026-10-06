@@ -5,10 +5,15 @@ import { systemClock, type Clock } from './clock';
 
 type Pending = { request: ApprovalRequest; resolve: (decision: Decision) => void };
 export type ApprovalInput = Omit<ApprovalRequest, 'id' | 'createdAt'>;
+const stepKey = (runId: string, nodeId: string): string => `${runId}\0${nodeId}`;
 
 /** Agent tool calls waiting for the user. Emits 'changed' with the full pending list. */
 export class ApprovalBroker extends EventEmitter {
   private pendingById = new Map<string, Pending>();
+  /** Steps (run id + step id) the user allowed everything for, until the step ends (Allow all for this step). */
+  private allowedSteps = new Set<string>();
+  /** The requests the user pressed Allow all on, until their wait logs it: one line per press, not one per request approved. */
+  private pressed = new Set<string>();
 
   constructor(private clock: Clock = systemClock) {
     super();
@@ -38,11 +43,40 @@ export class ApprovalBroker extends EventEmitter {
     return { id: request.id, decision };
   }
 
+  /**
+   * `scope: 'step'` (Allow all for this step) approves the request and everything else its step has pending, and allows
+   * the step's later requests until endStep. Only an approval does: a denial's scope means nothing.
+   */
   decide(id: string, decision: Decision): boolean {
-    return this.settle(id, decision);
+    const p = this.pendingById.get(id);
+    if (!p || decision.decision !== 'approve' || decision.scope !== 'step') return this.settle(id, decision);
+    const { runId, nodeId } = p.request;
+    this.allowedSteps.add(stepKey(runId, nodeId));
+    this.pressed.add(id);
+    this.settle(id, decision);
+    for (const [otherId, other] of [...this.pendingById]) {
+      if (other.request.runId === runId && other.request.nodeId === nodeId) this.settle(otherId, { decision: 'approve', scope: 'step' });
+    }
+    return true;
+  }
+
+  /** Whether the user allowed everything for this step of this run, and it has not ended. */
+  isStepAllowed(runId: string, nodeId: string): boolean {
+    return this.allowedSteps.has(stepKey(runId, nodeId));
+  }
+
+  /** The step ended (succeeded, failed, cancelled or stopped): its allowance ends with it. */
+  endStep(runId: string, nodeId: string): void {
+    this.allowedSteps.delete(stepKey(runId, nodeId));
+  }
+
+  /** Whether the user pressed Allow all on this request (once: the caller logs the press). */
+  takePress(id: string): boolean {
+    return this.pressed.delete(id);
   }
 
   cancelRun(runId: string): void {
+    for (const key of [...this.allowedSteps]) if (key.startsWith(`${runId}\0`)) this.allowedSteps.delete(key);
     for (const [id, p] of [...this.pendingById]) {
       if (p.request.runId === runId) this.settle(id, { decision: 'cancelled' });
     }
@@ -81,6 +115,23 @@ export async function requestApproval(o: {
   signal: AbortSignal;
 }): Promise<Decision> {
   const { broker, ctx, toolName, input } = o;
+  const logDecision = (approvalId: string, decided: Decision): void =>
+    ctx.emit({
+      type: 'approval_decided',
+      approvalId,
+      decision: decided.decision,
+      ...(decided.decision === 'deny' && decided.note && { note: decided.note }),
+      ...(decided.decision === 'approve' && decided.scope && { scope: decided.scope }),
+    });
+  // Allow all for this step: every request of the step is approved here, whichever provider or card it comes from. It is
+  // still logged as asked and decided, with the step scope, but never reaches the user. A run that was stopped asks no more.
+  if (!o.signal.aborted && broker.isStepAllowed(ctx.runId, ctx.node.id)) {
+    const approvalId = randomUUID();
+    const decided: Decision = { decision: 'approve', scope: 'step' };
+    ctx.emit({ type: 'approval_requested', approvalId, toolName, input });
+    logDecision(approvalId, decided);
+    return decided;
+  }
   const { id, decision } = broker.request({ runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName, input, ...o.card }, o.signal);
   try {
     ctx.emit({ type: 'approval_requested', approvalId: id, toolName, input });
@@ -89,12 +140,7 @@ export async function requestApproval(o: {
     throw error;
   }
   const decided = await decision;
-  ctx.emit({
-    type: 'approval_decided',
-    approvalId: id,
-    decision: decided.decision,
-    ...(decided.decision === 'deny' && decided.note && { note: decided.note }),
-    ...(decided.decision === 'approve' && decided.scope && { scope: decided.scope }),
-  });
+  if (broker.takePress(id)) ctx.emit({ type: 'approval_allowed_all' });
+  logDecision(id, decided);
   return decided;
 }

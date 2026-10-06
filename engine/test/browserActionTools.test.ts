@@ -355,6 +355,45 @@ describe('browser action tools: a site is an origin, and a frame is its own site
     await again.result;
   });
 
+  it('Allow all for this step lets every later action of the step through, on any site and past a frame of another origin', async () => {
+    const s = await setup();
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    expect(s.logged.at(-1)).toEqual({ type: 'approval_decided', approvalId: first.request.id, decision: 'approve', scope: 'step' });
+    // Another site, and a page with a frame of another origin: no card.
+    await embedded(s);
+    expect((await s.call('browser_click', { ref: 'f1e2' })).text).toContain('Clicked button "Sign in".');
+    await s.call('browser_open', { url: 'https://other.example/' });
+    await s.call('browser_snapshot');
+    expect((await s.call('browser_click', { ref: 'e3' })).isError).toBeUndefined();
+    expect(s.broker.pending()).toEqual([]);
+    const decided = s.logged.filter((e) => e.type === 'approval_decided');
+    expect(decided.length).toBeGreaterThanOrEqual(3);
+    expect(decided.every((e) => e.type === 'approval_decided' && e.scope === 'step')).toBe(true);
+  });
+
+  it('Allow all for this step still refuses an embedded frame as a whole, and still checks the page did not change', async () => {
+    const s = await setup();
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    await embedded(s);
+    expect(await s.call('browser_click', { ref: 'e6' })).toEqual({ text: EMBEDDED_FRAME, isError: true });
+    expect(s.broker.pending()).toEqual([]);
+  });
+
+  it('Allow all for this step ends with the step: a request after it asks again', async () => {
+    const s = await setup();
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    s.broker.endStep('r1', 'n3');
+    const next = await s.asking('browser_click', { ref: 'e2' });
+    s.broker.decide(next.request.id, { decision: 'deny' });
+    await next.result;
+  });
+
   it('Allow on this site for a frame is recorded for that frame\'s origin, and still asks on a page that has a foreign frame', async () => {
     const s = await setup();
     await embedded(s);

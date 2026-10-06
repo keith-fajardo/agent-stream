@@ -91,6 +91,24 @@ describe('run commands', () => {
     expect(await three.decision).toEqual({ decision: 'approve' });
   });
 
+  it('Approve and Approve all approve each request once: they never allow the rest of a step', async () => {
+    const s = setup();
+    const ask = () => s.app.broker.request({ runId: 'r', graphId: s.g.id, nodeId: 'n1', nodeTitle: 'b', toolName: 'Bash', input: {} });
+    const one = ask();
+    s.cmds.approve({ folder: s.f, request: s.app.broker.pending()[0] });
+    expect(await one.decision).toEqual({ decision: 'approve' });
+    expect(s.app.broker.isStepAllowed('r', 'n1')).toBe(false);
+    const two = ask();
+    const three = ask();
+    s.cmds.approveAll();
+    expect(await two.decision).toEqual({ decision: 'approve' });
+    expect(await three.decision).toEqual({ decision: 'approve' });
+    expect(s.app.broker.isStepAllowed('r', 'n1')).toBe(false);
+    // A later request of the same step still asks.
+    ask();
+    expect(s.app.broker.pending()).toHaveLength(1);
+  });
+
   it('leaves graph-change approvals out of Approve all, since each needs its own approval', async () => {
     const s = setup();
     const ask = (graphChange?: { summary: string; detail: string }) =>

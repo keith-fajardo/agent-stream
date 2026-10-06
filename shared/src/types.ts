@@ -304,8 +304,10 @@ export type RunAmendment = { at: string; byNodeId: string; nodeId: string; summa
 /** `amendments`: how many changes step agents made to the run, when there were any. */
 export type RunSummary = { id: string; graphId: string; status: RunStatus; startedAt: string; endedAt?: string; provider?: ProviderId; amendments?: number; checkout?: RunCheckout; waitingFor?: WaitingFor; model?: string; effort?: EffortLevel };
 
-/** `scope: 'site'`: a browser action allowed on its site for the rest of the step (browser spec §4.2). */
-export type Decision = { decision: 'approve'; scope?: 'site' } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
+/** How far an approval reaches: 'site' is a browser action allowed on its site for the rest of the step (browser spec §4.2); 'step' is everything the step asks about, for the rest of the step. */
+export type ApprovalScope = 'site' | 'step';
+
+export type Decision = { decision: 'approve'; scope?: ApprovalScope } | { decision: 'deny'; note?: string } | { decision: 'cancelled' };
 
 export type NodeEventBody =
   /** `model`/`effort`: what an agent step actually ran with, as the provider sent it (absent: the provider's default). */
@@ -314,7 +316,9 @@ export type NodeEventBody =
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError: boolean }
   | { type: 'approval_requested'; approvalId: string; toolName: string; input: unknown }
-  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string; scope?: 'site' }
+  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string; scope?: ApprovalScope }
+  /** The user pressed Allow all for this step: the step stops asking for the rest of its run. */
+  | { type: 'approval_allowed_all' }
   | { type: 'retry'; attempt: number; maxRetries: number; error: string }
   /** A browser step's page log line: `🌐 opened <url>`, `🌐 searched "<query>"`, `🌐 now on <url>` (browser spec §4.4). */
   | { type: 'browser'; text: string }
@@ -502,8 +506,8 @@ export type ClientMessage =
   | { type: 'exportRunReport'; graphId: string; runId: string }
   /** The step log's Done for a browser step waiting for the user (browser spec §5.3). */
   | { type: 'browserDone'; waitId: string }
-  /** `scope: 'site'` with approve: Allow on this site for this step (browser spec §4.2). */
-  | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string; scope?: 'site' };
+  /** `scope: 'site'` with approve: Allow on this site for this step (browser spec §4.2). `scope: 'step'`: Allow all for this step. */
+  | { type: 'decide'; approvalId: string; decision: 'approve' | 'deny'; note?: string; scope?: ApprovalScope };
 
 /** Graph actions that need VS Code's own UI (input box, file dialogs, confirmations, quick pick). */
 export type ChatTarget = { graphId: string; graphName: string; sessionId: string; sessionName: string };

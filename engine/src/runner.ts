@@ -554,6 +554,7 @@ export class Runner extends EventEmitter {
         if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
           run.running.delete(nodeId);
           run.waiting.delete(nodeId);
+          this.deps.broker.endStep(run.meta.id, nodeId);
           this.setNode(run, nodeId, {
             status: 'failed',
             endedAt: this.clock(),
@@ -567,6 +568,8 @@ export class Runner extends EventEmitter {
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {
     run.running.delete(nodeId);
     run.waiting.delete(nodeId);
+    // Allow all for this step ends with the step.
+    this.deps.broker.endStep(run.meta.id, nodeId);
     try {
       this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);
     } catch (e) {
