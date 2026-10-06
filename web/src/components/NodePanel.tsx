@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BROWSER_HINT, parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
+import { BROWSER_HINT, TURN_ON_BROWSER, browserMention, browserMentionHint, parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions, registerNodeDraft } from '../actions';
 import { AttachmentList } from './AttachmentList';
 import { changedSentence, changeKey } from '../changeLabels';
@@ -111,6 +111,8 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
+  // Judged on the draft, so the hint follows what the user types and goes once Browser is on.
+  const mention = browserMention({ kind: draft.kind, browser: draft.browser, title: draft.title, description: draft.description, prompt: draft.prompt });
   const canRefine = refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   useEffect(() => {
     reportDraft('node', dirty);
@@ -226,6 +228,12 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
             Browser
           </label>
           <p className="static-note">{BROWSER_HINT}</p>
+          {mention && (
+            <p className="browser-hint">
+              {browserMentionHint(mention)}{' '}
+              <button onClick={() => setDraft({ ...draft, browser: true })}>{TURN_ON_BROWSER}</button>
+            </p>
+          )}
         </div>
       )}
       {node.kind === 'agent' && (

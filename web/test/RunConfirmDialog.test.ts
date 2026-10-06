@@ -286,3 +286,15 @@ describe('RunConfirmDialog: each step’s model', () => {
     expect(button('Start run').disabled).toBe(false);
   });
 });
+
+describe('RunConfirmDialog: a step that mentions the browser while Browser is off', () => {
+  const warning = 'n2 mentions "linkedin", but Browser is off: it will use plain web search, not your logged-in browser.';
+
+  it("lists the engine's warning and still lets the run start", async () => {
+    await act(async () => dispatch({ kind: 'openConfirm', request: {} }));
+    await act(async () => dispatch({ kind: 'server', msg: { type: 'runPreview', preview: preview({ warnings: [warning] }), requestId: lastRequestId() } }));
+    const warnings = [...container.querySelectorAll('.approval-warning')].map((p) => p.textContent);
+    expect(warnings).toEqual([`⚠ ${warning}`]);
+    expect(button('Start run').disabled).toBe(false);
+  });
+});

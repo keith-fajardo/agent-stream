@@ -269,3 +269,6 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 
 .switch-row { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .browser-badge { line-height: 1; }
+.browser-mention-badge { line-height: 1; color: var(--muted); }
+.browser-hint { margin: 6px 0 0; color: var(--warn); }
+.browser-hint button { margin-left: 4px; }

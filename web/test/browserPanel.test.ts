@@ -81,3 +81,82 @@ describe('canvas card: 🌐', () => {
     expect(await card(step())).toBeNull();
   });
 });
+
+describe('Node panel: the browser-off hint', () => {
+  const HINT = 'This step mentions "linkedin", but Browser is off, so it can\'t use your logged-in browser.';
+  const turnOn = (el: HTMLElement) => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Turn on Browser') as HTMLButtonElement | undefined;
+  const hint = (el: HTMLElement) => el.querySelector('.browser-hint');
+
+  it('shows next to the switch when an agent step mentions LinkedIn and Browser is off', async () => {
+    const { el, done } = await panel(step({ prompt: 'Research them on LinkedIn.' }));
+    expect(hint(el)?.textContent).toContain(HINT);
+    expect(hint(el)?.closest('.field')).toBe((el.querySelector('#node-browser') as HTMLElement).closest('.field'));
+    expect(turnOn(el)).toBeDefined();
+    await done();
+  });
+
+  it('Turn on Browser turns the switch on in the draft, hides the hint, and leaves saving to Save', async () => {
+    const { el, done } = await panel(step({ prompt: 'Research them on LinkedIn.' }));
+    vi.mocked(send).mockClear();
+    expect(save(el).disabled).toBe(true);
+    await act(async () => turnOn(el)!.click());
+    expect((el.querySelector('#node-browser') as HTMLInputElement).checked).toBe(true);
+    expect(hint(el)).toBeNull();
+    expect(turnOn(el)).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+    expect(save(el).disabled).toBe(false);
+    await act(async () => save(el).click());
+    expect(send).toHaveBeenCalledWith({ type: 'op', graphId: 'g', op: { type: 'updateNode', id: 'n1', patch: { browser: true } } });
+    await done();
+  });
+
+  it('follows the draft: typing a mention shows it, switching Browser on by hand hides it', async () => {
+    const { el, done } = await panel(step());
+    expect(hint(el)).toBeNull();
+    const prompt = el.querySelector('textarea[placeholder^="What this step"]') as HTMLTextAreaElement;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      set.call(prompt, 'Please sign in first.');
+      prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(hint(el)?.textContent).toContain('mentions "sign in"');
+    await act(async () => (el.querySelector('#node-browser') as HTMLInputElement).click());
+    expect(hint(el)).toBeNull();
+    await done();
+  });
+
+  it('is not shown when Browser is on, when nothing is mentioned, or on a command step', async () => {
+    for (const node of [step({ prompt: 'On LinkedIn.', browser: true }), step({ prompt: 'Summarise the repo.' }), step({ kind: 'command', command: 'open linkedin.com', prompt: undefined })]) {
+      const { el, done } = await panel(node);
+      expect(hint(el)).toBeNull();
+      expect(turnOn(el)).toBeUndefined();
+      await done();
+    }
+  });
+});
+
+describe('canvas card: 🌐? marker', () => {
+  async function marker(node: GraphNode) {
+    const el = document.createElement('div');
+    const root = createRoot(el);
+    const props = { id: node.id, data: { node, waiting: false }, selected: false } as unknown as NodeProps<StepFlowNode>;
+    await act(async () => root.render(createElement(ReactFlowProvider, null, createElement(StepNode, props))));
+    const found = { mark: el.querySelector('.browser-mention-badge'), badge: el.querySelector('.browser-badge') };
+    await act(async () => root.unmount());
+    return found;
+  }
+
+  it('marks a step that mentions the browser while Browser is off', async () => {
+    const { mark, badge } = await marker(step({ prompt: 'Use browser to look them up.' }));
+    expect(mark?.textContent).toBe('🌐?');
+    expect(mark?.getAttribute('title')).toBe('Mentions the browser, but Browser is off');
+    expect(badge).toBeNull();
+  });
+
+  it('shows nothing when Browser is on (🌐 instead), nothing is mentioned, or the step is a command', async () => {
+    expect((await marker(step({ prompt: 'Use browser.', browser: true }))).mark).toBeNull();
+    expect((await marker(step({ prompt: 'Use browser.', browser: true }))).badge).not.toBeNull();
+    expect((await marker(step())).mark).toBeNull();
+    expect((await marker(step({ kind: 'command', command: 'open linkedin.com', prompt: undefined }))).mark).toBeNull();
+  });
+});

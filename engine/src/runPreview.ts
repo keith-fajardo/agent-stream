@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
+  browserMention,
+  browserOffWarning,
   contentSignature,
   onlyRunPlan,
   parallelWriteSteps,
@@ -211,6 +213,11 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
   for (const n of graph.nodes) {
     if (n.kind !== 'agent' || !runs(n.id)) continue;
     for (const name of n.attachments ?? []) if (missing.has(name)) warnings.push(`${n.id}'s attachment ${name} is missing from ${folder}, so the step runs without it.`);
+  }
+  // The agent gets no browser tools unless the switch is on, whatever its text says: tell the user before it runs without one.
+  for (const n of graph.nodes) {
+    const phrase = runs(n.id) ? browserMention(n) : undefined;
+    if (phrase) warnings.push(browserOffWarning(n.id, phrase));
   }
   const order = topoOrder(graph);
   const ids = order.length === graph.nodes.length ? order : graph.nodes.map((n) => n.id);

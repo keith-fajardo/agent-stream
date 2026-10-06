@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { fmtDuration, staleNote, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
+import { BROWSER_MENTION_TITLE, browserMention, fmtDuration, staleNote, statusLabel, type ChangeSource, type ChangedField, type GraphNode, type NodeRunState } from '@agent-stream/shared';
 import { badgeText } from '../changeLabels';
 import type { ModelChip } from '../stepModelMenus';
 import { workspaceColor } from '../workspaceColor';
@@ -45,6 +45,11 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
         {node.kind === 'agent' && node.browser && (
           <span className="browser-badge" title="Browser on: this step uses the Agent Stream browser">
             🌐
+          </span>
+        )}
+        {browserMention(node) && (
+          <span className="browser-mention-badge" title={BROWSER_MENTION_TITLE}>
+            🌐?
           </span>
         )}
         {node.workspace && (

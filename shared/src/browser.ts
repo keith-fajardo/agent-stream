@@ -3,7 +3,7 @@
  * extension say exactly the same thing. Later tasks add to this file.
  */
 
-import type { BrowserActionRequest } from './types';
+import type { BrowserActionRequest, GraphNode } from './types';
 
 /** applyOp's refusal for `browser: true` on a command step (ruling R1). */
 export const ONLY_AGENT_STEPS_BROWSER = 'Only agent steps can use the browser.';
@@ -141,3 +141,33 @@ export const CLEAR_BROWSER_QUESTION = "Delete the Agent Stream browser's data? T
 
 /** The Node panel's hint under the Browser switch (spec §2.3). */
 export const BROWSER_HINT = 'Lets this step use the Agent Stream browser, with your logins. Clicking and typing ask you first.';
+
+/**
+ * Words that say a step wants the browser: the browser itself, LinkedIn, or logging in. Whole words, any case; "browsers",
+ * `loginForm` and `login_form` don't count, but "browser's" and "browser-based" do. Generic words (web, website, search, online) are left out: too noisy.
+ */
+const BROWSER_WORDS = /\b(browser|linkedin|log\s+in|login|logged\s+in|sign\s+in|signin|signed\s+in|captcha)\b/i;
+
+/**
+ * The first phrase in an agent step's title, description or prompt (raw text, in that order, the earliest in each) that
+ * asks for the browser while its Browser switch is off, as lowercase words with single spaces; `undefined` if none, for a
+ * step with Browser on, and for a command step. Writing "use the browser" in a step doesn't turn the browser on.
+ */
+export function browserMention(node: Pick<GraphNode, 'kind' | 'browser' | 'title' | 'description' | 'prompt'>): string | undefined {
+  if (node.kind !== 'agent' || node.browser === true) return undefined;
+  for (const text of [node.title, node.description, node.prompt]) {
+    const found = text?.match(BROWSER_WORDS)?.[1];
+    if (found) return found.toLowerCase().replace(/\s+/g, ' ');
+  }
+  return undefined;
+}
+
+/** The Node panel's hint by the Browser switch when the step mentions the browser (or LinkedIn, or logging in) with Browser off. */
+export const browserMentionHint = (phrase: string): string => `This step mentions "${phrase}", but Browser is off, so it can't use your logged-in browser.`;
+/** The hint's button: turns the switch on in the draft. */
+export const TURN_ON_BROWSER = 'Turn on Browser';
+/** The canvas card's 🌐? marker tooltip. */
+export const BROWSER_MENTION_TITLE = 'Mentions the browser, but Browser is off';
+/** The run dialog's warning for a step that will run: it never blocks the run. */
+export const browserOffWarning = (nodeId: string, phrase: string): string =>
+  `${nodeId} mentions "${phrase}", but Browser is off: it will use plain web search, not your logged-in browser.`;
