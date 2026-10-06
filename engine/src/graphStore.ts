@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyOp,
@@ -36,7 +36,7 @@ import {
 } from '@agent-stream/shared';
 import { systemClock, type Clock } from './clock';
 import { readJsonLines, writeFileAtomic } from './fsutil';
-import { isGraphId, type ProjectPaths } from './paths';
+import { graphAttachmentsDir, isGraphId, type ProjectPaths } from './paths';
 import { renameReferences } from './templates';
 
 export function slugify(name: string): string {
@@ -313,7 +313,7 @@ export class GraphStore extends EventEmitter {
   }
 
   /** While the Markdown file has errors, edits that would rewrite it are refused, so a half-finished hand edit is never lost. */
-  private brokenFile(id: string): string | null {
+  brokenFile(id: string): string | null {
     const errors = this.fileErrors(id);
     return errors.length ? `The file ${id}.md has errors (${formatFileErrors(errors)}). Fix it first: until then this graph can't be changed here.` : null;
   }
@@ -394,15 +394,20 @@ export class GraphStore extends EventEmitter {
     const names = new Set(this.list().map((g) => g.name));
     let name = `${r.graph.name} copy`;
     for (let i = 2; names.has(name); i++) name = `${r.graph.name} copy ${i}`;
-    const graph = this.save({ ...r.graph, id: this.uniqueId(name), name, updatedAt: this.clock() });
+    const copy = this.uniqueId(name);
+    // Its attachments come along (step model spec §6b.2), before its file names them.
+    const files = graphAttachmentsDir(this.paths, id);
+    if (existsSync(files)) cpSync(files, graphAttachmentsDir(this.paths, copy), { recursive: true });
+    const graph = this.save({ ...r.graph, id: copy, name, updatedAt: this.clock() });
     return { ok: true, graph };
   }
 
-  /** Removes the graph, its side file, its agent-change baseline, its edit history and its chat. Run logs stay on disk. */
+  /** Removes the graph, its side file, its agent-change baseline, its edit history, its chat and its attachments. Run logs stay on disk. */
   delete(id: string): { ok: true } | { ok: false; error: string } {
     if (!isGraphId(id)) return { ok: false, error: `invalid graph id "${id}"` };
     if (!existsSync(this.file(id))) return { ok: false, error: `graph "${id}" not found` };
     for (const f of [this.file(id), this.metaFile(id), this.baselineFile(id), this.opsFile(id), this.chatFile(id)]) rmSync(f, { force: true });
+    rmSync(graphAttachmentsDir(this.paths, id), { recursive: true, force: true });
     this.forget(id);
     return { ok: true };
   }

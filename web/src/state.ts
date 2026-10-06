@@ -354,6 +354,9 @@ function reduceServer(state: State, msg: HostMessage): State {
       return msg.graphId === current ? { ...state, undoLabel: msg.label } : state;
     case 'undone':
       return msg.graphId === current ? { ...state, toast: msg.message } : state;
+    case 'attached':
+      // The graph's first attachment: the one-time notice (spec §6b.2).
+      return msg.graphId === current && msg.notice ? { ...state, toast: msg.notice } : state;
     case 'error':
       // A save the engine or the extension refused before it could answer (a message too large, a throw) is over too.
       return { ...state, toast: msg.message, ...(state.markdown.saving && { markdown: { ...state.markdown, saving: undefined } }) };

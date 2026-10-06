@@ -312,6 +312,10 @@ export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', '
  * runs when none is chosen (Codex marks one; Claude Code has a `default` row instead).
  */
 export type ModelChoice = { value: string; label: string; description?: string; efforts: EffortLevel[]; unavailable?: boolean; resolved?: string; isDefault?: boolean };
+/** Where an attachment goes: the whole graph, or one agent step (step model spec §6b.1). */
+export type AttachTarget = { kind: 'graph' } | { kind: 'step'; nodeId: string };
+/** A file a tab sends: its own name, and its bytes as base64. */
+export type AttachmentUpload = { name: string; data: string };
 /** A step's own model: the provider's model id exactly as its model list reports it, tagged with the provider (spec §2.1). */
 export type StepModel = { provider: ProviderId; id: string };
 /** A model and effort choice; an absent field means Default. */
@@ -392,6 +396,8 @@ export type ServerMessage =
   | { type: 'undoState'; graphId: string; label?: string }
   /** The answer to undo, for the toast: `Undid moved 2 steps.`, `Nothing to undo.`, or why it can't. */
   | { type: 'undone'; graphId: string; message: string }
+  /** Files were attached under these names; `notice`: the one-time notice for a graph's first attachment (spec §6b.2). */
+  | { type: 'attached'; graphId: string; target: AttachTarget; names: string[]; notice?: string }
   | { type: 'error'; message: string };
 
 export type ClientMessage =
@@ -402,6 +408,10 @@ export type ClientMessage =
   | { type: 'ops'; graphId: string; ops: Op[]; label: string }
   /** Edit › Undo (⌘Z): reverses this tab's newest graph edit, if the graph is still as that edit left it. */
   | { type: 'undo'; graphId: string }
+  /** Copies files into the graph's attachments folder and adds them to the target's list (spec §6b.4). */
+  | { type: 'attach'; graphId: string; target: AttachTarget; files: AttachmentUpload[] }
+  /** Removes one name from the target's list; its file goes when nothing in the graph uses it any more (spec §6b.2). */
+  | { type: 'detach'; graphId: string; target: AttachTarget; name: string }
   /** Asks for the graph's Markdown file as it is on disk; the engine answers with graphMarkdown and keeps sending it as the text changes. */
   | { type: 'getGraphMarkdown'; graphId: string }
   /**
@@ -450,7 +460,11 @@ export type WebviewHostMessage =
   /** Export Run Report: the extension saves the selected run's report to a file and opens it. */
   | { type: 'exportRunReport'; runId: string }
   | { type: 'setUpParallelTickets' }
-  | { type: 'openExternal'; url: string };
+  | { type: 'openExternal'; url: string }
+  /** Add…: the extension shows VS Code's file picker and attaches the files picked (spec §6b.4). */
+  | { type: 'pickAttachments'; target: AttachTarget }
+  /** Open: the extension opens the graph's attachment in VS Code (images in its image viewer). */
+  | { type: 'openAttachment'; name: string };
 
 export type WebviewMessage = ClientMessage | WebviewHostMessage;
 

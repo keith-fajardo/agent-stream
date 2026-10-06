@@ -32,6 +32,10 @@ import {
   type SessionResult,
   type SessionTab,
   supportsEffort,
+  ATTACHMENT_NOTICE,
+  MAX_ATTACHMENTS,
+  ONLY_AGENT_STEPS_ATTACH,
+  type AttachTarget,
   MARKDOWN_SAVE_LABEL,
   NOTHING_TO_UNDO,
   UNDO_CHANGED,
@@ -43,6 +47,7 @@ import {
   withStepModelLines,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
+import { AttachmentStore, type AttachmentFile } from './attachmentStore';
 import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor } from './executors';
@@ -154,6 +159,7 @@ export function createApp(d: AppDeps) {
   if (d.legacyValuesFile) migrationWarnings.push(...migrateValuesFile(d.valuesFile, d.legacyValuesFile, d.rename));
   ensureDataDirs(paths);
   const graphStore = new GraphStore(paths, clock);
+  const attachments = new AttachmentStore(paths);
   const sessions = new SessionStore(paths, clock);
   // Planner state and chats from before work sessions move into the Default session.
   const legacyMoveFailed = new Set<string>();
@@ -498,10 +504,10 @@ export function createApp(d: AppDeps) {
     client.send({ type: 'undoState', graphId, ...(label !== undefined && { label }) });
   }
   /** `savedValues`: the graph's values from before the action, of which those of the variables it deleted are kept for undo. */
-  function recordUndo(client: Client, graphId: string, before: Graph, after: Graph, label: string, ops: Op[], savedValues: Record<string, string> = {}): void {
+  function recordUndo(client: Client, graphId: string, before: Graph, after: Graph, label: string, ops: Op[], savedValues: Record<string, string> = {}, files?: { written?: string[]; deleted?: AttachmentFile[] }): void {
     const kept = Object.fromEntries(before.variables.filter((v) => !after.variables.some((a) => a.name === v.name) && Object.hasOwn(savedValues, v.name)).map((v) => [v.name, savedValues[v.name]]));
     const values = Object.keys(kept).length ? kept : undefined;
-    if (undo.record(client, graphId, { before, after, label, ops, ...(values && { values }) })) sendUndoState(client, graphId);
+    if (undo.record(client, graphId, { before, after, label, ops, ...(values && { values }), ...(files && { files }) })) sendUndoState(client, graphId);
   }
   /**
    * Edit › Undo: restores the graph from before this tab's newest action, as user edits recorded `via: 'undo'` — only when
@@ -521,16 +527,75 @@ export function createApp(d: AppDeps) {
       undo.clear(client, graphId);
       return done(UNDO_CHANGED);
     }
+    // A removed attachment's file comes back before the graph names it again.
+    for (const f of entry.files?.deleted ?? []) attachments.restore(graphId, f);
     const r = graphStore.applyBatch(graphId, undoOps(current.graph, entry.before, entry.ops), 'user', { via: 'undo', order: entry.before });
     if (!r.ok) {
       undo.clear(client, graphId);
       return done(`Can't undo ${entry.label}: ${r.error}`);
     }
+    // An attached file nothing uses any more goes again.
+    for (const name of entry.files?.written ?? []) if (!attachedNames(r.graph).includes(name)) attachments.remove(graphId, name);
     // A deleted variable's saved value comes back with it (the delete took it away).
     const have = values.get(graphId);
     for (const [name, value] of Object.entries(entry.values ?? {})) if (!Object.hasOwn(have, name)) values.set(graphId, name, value);
     undo.pop(client, graphId);
     done(undoneMessage(entry.label));
+  }
+
+  /** Every attachment name the graph uses: its own list and every step's. */
+  const attachedNames = (g: Graph): string[] => [...(g.attachments ?? []), ...g.nodes.flatMap((n) => n.attachments ?? [])];
+  /** The target's attachment list, or why it has none. */
+  function attachmentList(g: Graph, target: AttachTarget): { ok: true; names: string[] } | { ok: false; error: string } {
+    if (target.kind === 'graph') return { ok: true, names: g.attachments ?? [] };
+    const node = g.nodes.find((n) => n.id === target.nodeId);
+    if (!node) return { ok: false, error: `node ${target.nodeId} does not exist` };
+    if (node.kind !== 'agent') return { ok: false, error: ONLY_AGENT_STEPS_ATTACH };
+    return { ok: true, names: node.attachments ?? [] };
+  }
+  const listOp = (target: AttachTarget, names: string[]): Op =>
+    target.kind === 'graph' ? { type: 'setGraphAttachments', names } : { type: 'updateNode', id: target.nodeId, patch: { attachments: names } };
+  /**
+   * Attaches files (spec §6b.4): each is checked, copied into the graph's attachments folder under its own name made safe,
+   * and added to the target's list as a user edit (one undo step). Files of an edit that is refused are removed again.
+   */
+  function attach(client: Client, msg: Extract<ClientMessage, { type: 'attach' }>): void {
+    const reject = (error: string) => client.send({ type: 'opRejected', graphId: msg.graphId, error });
+    const g = graphStore.load(msg.graphId);
+    if (!g.ok) return reject(g.error);
+    const broken = graphStore.brokenFile(msg.graphId);
+    if (broken) return reject(broken);
+    const list = attachmentList(g.graph, msg.target);
+    if (!list.ok) return reject(list.error);
+    if (list.names.length + msg.files.length > MAX_ATTACHMENTS) {
+      return reject(`${msg.target.kind === 'graph' ? 'The graph' : `Step ${msg.target.nodeId}`} can have at most ${MAX_ATTACHMENTS} attachments.`);
+    }
+    const files = msg.files.map((f) => ({ name: f.name, bytes: Buffer.from(f.data, 'base64') }));
+    const added = attachments.add(msg.graphId, files, attachedNames(g.graph));
+    if (!added.ok) return reject(added.error);
+    const op = listOp(msg.target, [...list.names, ...added.names]);
+    const r = graphStore.apply(msg.graphId, op, 'user');
+    if (!r.ok) {
+      for (const name of added.names) attachments.remove(msg.graphId, name);
+      return reject(r.error);
+    }
+    recordUndo(client, msg.graphId, g.graph, r.graph, `attached ${added.names.join(', ')}`, [op], {}, { written: added.names });
+    client.send({ type: 'attached', graphId: msg.graphId, target: msg.target, names: added.names, ...(added.firstInFolder && { notice: ATTACHMENT_NOTICE }) });
+  }
+  /** Removes a name from the target's list; its file is deleted once nothing in the graph uses it (spec §6b.2). Undo brings both back. */
+  function detach(client: Client, msg: Extract<ClientMessage, { type: 'detach' }>): void {
+    const reject = (error: string) => client.send({ type: 'opRejected', graphId: msg.graphId, error });
+    const g = graphStore.load(msg.graphId);
+    if (!g.ok) return reject(g.error);
+    const list = attachmentList(g.graph, msg.target);
+    if (!list.ok) return reject(list.error);
+    if (!list.names.includes(msg.name)) return reject(`${msg.name} isn't attached there.`);
+    const op = listOp(msg.target, list.names.filter((n) => n !== msg.name));
+    const r = graphStore.apply(msg.graphId, op, 'user');
+    if (!r.ok) return reject(r.error);
+    const bytes = attachedNames(r.graph).includes(msg.name) ? undefined : attachments.read(msg.graphId, msg.name);
+    if (bytes) attachments.remove(msg.graphId, msg.name);
+    recordUndo(client, msg.graphId, g.graph, r.graph, `removed ${msg.name}`, [op], {}, bytes ? { deleted: [{ name: msg.name, bytes }] } : undefined);
   }
 
   /** A revert would change a step that a run in progress is about to run or is running. */
@@ -624,6 +689,10 @@ export function createApp(d: AppDeps) {
       }
       case 'undo':
         return undoLast(client, msg.graphId);
+      case 'attach':
+        return attach(client, msg);
+      case 'detach':
+        return detach(client, msg);
       case 'getGraphMarkdown': {
         const text = graphStore.markdownText(msg.graphId);
         if (text === undefined) return error(`graph "${msg.graphId}" not found`);
@@ -904,6 +973,7 @@ export function createApp(d: AppDeps) {
     handle,
     requestRun,
     graphStore,
+    attachments,
     runStore,
     sessionStore: sessions,
     runner,

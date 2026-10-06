@@ -18,6 +18,9 @@ const stepModel = z.object({ provider: z.enum(PROVIDER_IDS), id: z.string().rege
 const effort = z.enum(EFFORT_LEVELS);
 /** An attachment list as a client sends it; the names are checked by attachmentListProblem in applyOp. */
 const attachmentNames = z.array(z.string().max(200)).max(MAX_ATTACHMENTS);
+const attachTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('graph') }), z.object({ kind: z.literal('step'), nodeId: z.string() })]);
+/** A file's bytes as base64: an image of 10 MB is under 14 million characters. */
+const upload = z.object({ name: z.string().min(1).max(1000), data: z.string().max(14_000_000) });
 
 const graphNodeSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
@@ -148,6 +151,8 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('op'), graphId: z.string(), op: opSchema }),
   z.object({ type: z.literal('ops'), graphId: z.string(), ops: z.array(opSchema).min(1).max(500), label: z.string().min(1).max(MAX_UNDO_LABEL_CHARS) }),
   z.object({ type: z.literal('undo'), graphId: z.string() }),
+  z.object({ type: z.literal('attach'), graphId: z.string(), target: attachTarget, files: z.array(upload).min(1).max(MAX_ATTACHMENTS) }),
+  z.object({ type: z.literal('detach'), graphId: z.string(), target: attachTarget, name: z.string().max(200) }),
   z.object({ type: z.literal('getGraphMarkdown'), graphId: z.string() }),
   z.object({ type: z.literal('saveGraphMarkdown'), graphId: z.string(), text: markdownText, base: markdownText, force: z.boolean().optional() }),
   z.object({ type: z.literal('openChat'), graphId: z.string(), sessionId: z.string() }),
@@ -181,6 +186,8 @@ const webviewHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exportRunReport'), runId: z.string() }),
   z.object({ type: z.literal('setUpParallelTickets') }),
   z.object({ type: z.literal('openExternal'), url: z.string().max(4096) }),
+  z.object({ type: z.literal('pickAttachments'), target: attachTarget }),
+  z.object({ type: z.literal('openAttachment'), name: z.string().max(200) }),
 ]);
 
 /** Validates what a graph tab posts: an engine message, or one of the tab's own messages for the extension. */
