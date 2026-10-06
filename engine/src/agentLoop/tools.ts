@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
+import { MAX_OTHER_BYTES } from '@agent-stream/shared';
 import { writeFileAtomic } from '../fsutil';
 import { PRIVATE_FOLDER } from '../privatePaths';
 import { truncateHead } from '../prompt';
@@ -22,7 +23,10 @@ const MAX_GLOB_RESULTS = 1000;
 const MAX_GREP_MATCHES = 500;
 const MAX_GREP_LINE_CHARS = 500;
 const MAX_GREP_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_READ_BYTES = 2 * 1024 * 1024;
+/** A file Grep is pointed at by name may be as large as a text attachment, which Read can't take whole (over 2 MB). */
+const MAX_GREP_ONE_FILE_BYTES = MAX_OTHER_BYTES;
+/** The largest file Read takes (a larger one is refused, before offset and limit apply). */
+export const MAX_READ_BYTES = 2 * 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8192;
 const MAX_GLOB_FOUND = 10_000;
 /** Glob stops walking after this many entries, and lets the event loop run (so Stop is seen) every GLOB_YIELD_EVERY. */
@@ -284,7 +288,7 @@ export function readOnlyTools(cwd: string, options: { grepTimeoutMs?: number; gl
           isDir: st.isDirectory(),
           globSource: glob ? globToRegExp(glob).source : undefined,
           byPath: !!glob && /[\\/]/.test(glob),
-          maxFileBytes: MAX_GREP_FILE_BYTES,
+          maxFileBytes: st.isDirectory() ? MAX_GREP_FILE_BYTES : MAX_GREP_ONE_FILE_BYTES,
           sniffBytes: BINARY_SNIFF_BYTES,
           maxMatches: MAX_GREP_MATCHES,
           maxLineChars: MAX_GREP_LINE_CHARS,

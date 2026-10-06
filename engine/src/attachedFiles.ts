@@ -49,6 +49,8 @@ export const IMAGE_NOT_SHOWN = "This image couldn't be shown to the model.";
 export const IMAGE_OVER_5_MB = 'image over 5 MB: read it with the Read tool';
 export const PDF_READ_TOOL = 'PDF: read it with the Read tool';
 export const PDF_MAY_NOT_READ = 'PDF: the model may not be able to read PDFs';
+/** The agent loop's Read takes files up to 2 MB, while a text attachment may be 5 MB: Grep searches one up to 5 MB. */
+export const TEXT_OVER_2_MB = 'larger than 2 MB: search it with Grep';
 /** The Claude API refuses an image block over 5 MB (raw bytes), while attachments allow 10 MB. */
 export const CLAUDE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 /**
@@ -108,15 +110,25 @@ export function attachedPrompt(
   prompt: string,
   files: readonly StepAttachment[] | undefined,
   read: (path: string) => Buffer | undefined,
-  o: { send: boolean; maxBytes?: number; pdf?: string; budget?: { bytes: number; images: number }; notSent?: { tooBig: string; overBudget: string } },
+  o: {
+    send: boolean;
+    maxBytes?: number;
+    pdf?: string;
+    budget?: { bytes: number; images: number };
+    notSent?: { tooBig: string; overBudget: string };
+    /** A note for a text file larger than `maxBytes` (a provider whose Read tool can't take it whole). */
+    bigText?: { maxBytes: number; note: string };
+  },
 ): { text: string; images: ImageData[] } {
   const images: ImageData[] = [];
   const lines: string[] = [];
   const budget = inlineBudget(o.budget);
   const notSent = o.notSent ?? { tooBig: IMAGE_OVER_5_MB, overBudget: IMAGE_OVER_BUDGET };
   for (const f of (files ?? []).filter((x) => !x.missing)) {
-    if (f.kind !== 'image') {
-      lines.push(line(f, f.kind === 'pdf' ? o.pdf : undefined));
+    if (f.kind === 'text') {
+      lines.push(line(f, o.bigText && (sizeOf(f.path) ?? 0) > o.bigText.maxBytes ? o.bigText.note : undefined));
+    } else if (f.kind === 'pdf') {
+      lines.push(line(f, o.pdf));
     } else if (!o.send) {
       lines.push(line(f, IMAGE_NOT_SHOWN));
     } else {
@@ -141,6 +153,16 @@ export function storeReader(store: AttachmentStore, graphId: string, files: read
     const file = files.find((f) => f.path === path);
     return file ? store.read(graphId, file.name) : undefined;
   };
+}
+
+/** A regular file's size, never following a link; undefined when it isn't one. */
+function sizeOf(path: string): number | undefined {
+  try {
+    const st = lstatSync(path);
+    return st.isFile() ? st.size : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Reads a regular file the store reported present, or undefined when it can't be read (gone, or a link by now: links are never followed). Where a store reader isn't given. */

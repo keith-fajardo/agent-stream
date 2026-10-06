@@ -455,6 +455,17 @@ describe('Copilot: the 5 MB image rule and the inline budget per request (ruling
     expect(m2.requests[0].messages[1].content.filter((c) => c instanceof vscode.LanguageModelDataPart)).toHaveLength(4);
   });
 
+  it('a text file over 2 MB is listed with a note to search it with Grep (Read takes up to 2 MB)', async () => {
+    const textFile = (name: string, size: number): StepAttachment => {
+      writeFileSync(join(dir, name), Buffer.alloc(size, 0x61));
+      return { name, kind: 'text', missing: false, path: join(dir, name), shown: name };
+    };
+    const s = step({ attachments: [textFile('big.csv', 2 * MB + 1), textFile('edge.csv', 2 * MB)] });
+    const m = takingImages();
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    expect(m.requests[0].messages[1].content).toEqual([text('Do it.\n\nAttached files:\n- big.csv (larger than 2 MB: search it with Grep)\n- edge.csv\n')]);
+  });
+
   it('a chat message leaves out an image over 5 MB and any image past the budget, with a line for each', async () => {
     const png = (name: string, size: number): TurnFile => ({ name, kind: 'image', path: name, mediaType: 'image/png', data: Buffer.alloc(size).toString('base64') });
     const m = takingImages();

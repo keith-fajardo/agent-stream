@@ -7,10 +7,12 @@ import {
   inlineBudget,
   OVER_BUDGET_IN_CHAT,
   lastAssistantText,
+  MAX_READ_BYTES,
   PDF_MAY_NOT_READ,
   readIfThere,
   runAgentLoop,
   STEP_GRAPH_TOOL_PREFIX,
+  TEXT_OVER_2_MB,
   toLoopTools,
   type AgentProvider,
   type ChatMessage,
@@ -216,6 +218,8 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
         maxBytes: MAX_IMAGE_BYTES,
         notSent: COPILOT_IMAGE_NOT_SENT,
         pdf: PDF_MAY_NOT_READ,
+        // The agent loop's Read takes up to 2 MB; Grep searches a named text attachment whole.
+        bigText: { maxBytes: MAX_READ_BYTES, note: TEXT_OVER_2_MB },
       });
       // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
       ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt, ...('model' in picked && { model: picked.model.id }) });

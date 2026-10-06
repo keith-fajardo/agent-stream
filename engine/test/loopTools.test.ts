@@ -152,6 +152,13 @@ describe('Grep', () => {
     expect(await run(cwd, 'Grep', { pattern: 'export' })).toEqual({ text: 'ok.ts:1: export' });
   });
 
+  it('searches one named file up to 5 MB (a text attachment’s limit), though a folder search skips files over 2 MB', async () => {
+    const cwd = project({ 'big.txt': `${'x\n'.repeat(1_500_000)}needle\n`, 'huge.txt': `${'x'.repeat(5 * 1024 * 1024)}\nneedle\n` });
+    expect(await run(cwd, 'Grep', { pattern: 'needle', path: 'big.txt' })).toEqual({ text: 'big.txt:1500001: needle' });
+    expect(await run(cwd, 'Grep', { pattern: 'needle', path: 'huge.txt' })).toEqual({ text: 'No matches found.' });
+    expect(await run(cwd, 'Grep', { pattern: 'needle' })).toEqual({ text: 'No matches found.' });
+  });
+
   it('stops after 500 matches and cuts long lines', async () => {
     const cwd = project({ 'hits.txt': Array.from({ length: 600 }, () => 'hit').join('\n'), 'wide.txt': `hot ${'z'.repeat(600)}` });
     const lines = (await run(cwd, 'Grep', { pattern: 'hit' })).text.split('\n');
