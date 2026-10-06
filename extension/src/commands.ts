@@ -110,12 +110,17 @@ export function graphCommands(d: CommandDeps) {
     async exportGraph(target?: GraphTarget): Promise<void> {
       const t = await targetFor(target);
       if (!t) return;
-      const r = app(t.folder).exportGraph(t.graphId);
+      const engine = app(t.folder);
+      const r = engine.exportGraph(t.graphId);
       if (!r.ok) return d.ui.error(r.error);
       const file = await d.ui.saveFile(join(t.folder.path, r.fileName), 'markdown');
       if (!file) return;
       await file.write(r.content);
-      d.ui.info(`Exported ${r.fileName}. Variable values were left out.`);
+      // Spec §9: the export names attachments (the graph's or a step's) but doesn't include the files.
+      const g = engine.graphStore.load(t.graphId);
+      const named = g.ok && (!!g.graph.attachments?.length || g.graph.nodes.some((n) => !!n.attachments?.length));
+      const files = named ? ` Attachment files aren't included: send them with it (from .agent-stream/attachments/${t.graphId}/).` : '';
+      d.ui.info(`Exported ${r.fileName}. Variable values were left out.${files}`);
     },
 
     /**
