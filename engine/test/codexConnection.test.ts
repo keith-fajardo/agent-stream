@@ -33,7 +33,7 @@ describe('openCodex', () => {
     await waitFor(() => p.received.length === 2);
     expect(p.received[0]).toMatchObject({
       method: 'initialize',
-      params: { clientInfo: { name: 'agent-stream', title: 'Agent Stream', version: '0.4.0' }, capabilities: { experimentalApi: true, requestAttestation: false } },
+      params: { clientInfo: { name: 'agent-stream', title: 'Agent Stream', version: '0.5.0' }, capabilities: { experimentalApi: true, requestAttestation: false } },
     });
     expect(p.received[1].method).toBe('initialized');
     expect(p.received[1].id).toBeUndefined();
