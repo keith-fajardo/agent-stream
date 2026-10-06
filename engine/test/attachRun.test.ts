@@ -49,9 +49,11 @@ describe('Runner: a step’s attachments (spec §6b.5)', () => {
     for (const name of ['brief.pdf', 'logo.png']) writeFileSync(join(dir, name), name);
     const runStore = new RunStore(paths);
     const seen: Record<string, NodeContext['attachments']> = {};
+    const readers: Record<string, NodeContext['readAttachment']> = {};
     const exec: NodeExecutor = async (ctx) => {
       ctx.emit({ type: 'start', kind: ctx.node.kind, cwd: ctx.cwd });
       seen[ctx.node.id] = ctx.attachments;
+      readers[ctx.node.id] = ctx.readAttachment;
       return { ok: true, output: '' };
     };
     const runner = new Runner({ runStore, broker: new ApprovalBroker(), executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 1, leases: testLeases() });
@@ -69,6 +71,10 @@ describe('Runner: a step’s attachments (spec §6b.5)', () => {
     expect(seen.n1?.[1].path).toBe(join(dir, 'logo.png'));
     expect(seen.n2?.map((f) => f.name)).toEqual(['brief.pdf', 'logo.png']);
     expect(seen.n3).toBeUndefined();
+    // Each step reads its files through the attachment store, and only those it was given.
+    expect(readers.n1?.(join(dir, 'logo.png'))?.toString()).toBe('logo.png');
+    expect(readers.n1?.(join(paths.root, 'elsewhere.png'))).toBeUndefined();
+    expect(readers.n3).toBeUndefined();
     const log: NodeEvent[] = runStore.readEvents(done.id, 'n1');
     expect(log.slice(0, 2)).toMatchObject([{ type: 'start' }, { type: 'text', text: 'Attachment mockup.png is missing from .agent-stream/attachments/g/, so this step runs without it.' }]);
   });

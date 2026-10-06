@@ -1,17 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import {
-  ATTACHED_IMAGE,
+  attachedPrompt,
   builtinTools,
-  IMAGE_NOT_SHOWN,
   lastAssistantText,
   PDF_MAY_NOT_READ,
   readIfThere,
-  readImages,
   runAgentLoop,
   STEP_GRAPH_TOOL_PREFIX,
   toLoopTools,
-  withAttachedFiles,
   type AgentProvider,
   type ChatMessage,
   type ImageData,
@@ -195,8 +192,8 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
     async runStep(ctx, gate): Promise<NodeOutcome> {
       const picked = await pick(ctx.model);
       // Attached images go to a model that takes them; for any other the list says so (step model spec §6b.5).
-      const images = 'model' in picked && takesImages(picked.model) ? readImages(ctx.attachments, readIfThere) : [];
-      const prompt = withAttachedFiles(ctx.prompt, ctx.attachments, { image: images.length ? ATTACHED_IMAGE : IMAGE_NOT_SHOWN, pdf: PDF_MAY_NOT_READ });
+      // Each image's line says what happened to it: sent, or (for a model that takes none) not shown; one that vanished is left out.
+      const { text: prompt, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, { send: 'model' in picked && takesImages(picked.model), pdf: PDF_MAY_NOT_READ });
       // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
       ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt, ...('model' in picked && { model: picked.model.id }) });
       if ('error' in picked) return { ok: false, output: '', error: picked.error };

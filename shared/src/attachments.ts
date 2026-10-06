@@ -15,7 +15,9 @@ export const ALLOWED_ATTACHMENTS = 'images (png, jpg, gif, webp), PDFs, and text
 
 export type AttachmentKind = 'image' | 'pdf' | 'text';
 
-const IMAGE_TYPES = new Map<string, string>([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp']]);
+/** The image types the providers take. */
+export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+const IMAGE_TYPES = new Map<string, ImageMediaType>([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp']]);
 /** An extension longer than this is dropped when a name is made safe or made unique, so the stem keeps room. */
 const MAX_EXTENSION_CHARS = 90;
 const TEXT_TYPES = new Set([
@@ -43,7 +45,7 @@ export function attachmentKind(name: string): AttachmentKind | undefined {
 }
 
 /** An image's media type (`image/png`), for providers that take the bytes. */
-export const imageMediaType = (name: string): string | undefined => IMAGE_TYPES.get(extensionOf(name));
+export const imageMediaType = (name: string): ImageMediaType | undefined => IMAGE_TYPES.get(extensionOf(name));
 
 /**
  * Why `name` can't name an attachment, or null (spec §6b.2): letters, digits, `.`, `-`, `_` and spaces, at most 100

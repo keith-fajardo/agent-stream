@@ -356,4 +356,44 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     await runStep({ queryFn: fn }, { ...a.c, attachments: [{ name: 'notes.md', kind: 'text', missing: false, path: '/nowhere/notes.md', shown: 'notes.md' }] });
     expect(calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- notes.md\n');
   });
+
+  it('an image over 5 MB is not sent: it is listed with its path and a note to read it with the Read tool', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-big-'));
+    writeFileSync(join(dir, 'big.png'), Buffer.alloc(5 * 1024 * 1024 + 1, 1));
+    writeFileSync(join(dir, 'small.png'), 'PNG');
+    const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
+    const big = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: big.fn }, { ...a.c, attachments: [at('big.png')] });
+    expect(big.calls[0].prompt).toBe('FULL PROMPT\n\nAttached files:\n- .agent-stream/attachments/g/big.png (image over 5 MB: read it with the Read tool)\n');
+
+    const both = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const b = ctx();
+    await runStep({ queryFn: both.fn }, { ...b.c, attachments: [at('big.png'), at('small.png')] });
+    const prompt = both.calls[0].prompt;
+    if (typeof prompt === 'string') throw new Error('expected a message with an image');
+    const messages: SDKUserMessage[] = [];
+    for await (const m of prompt) messages.push(m);
+    const content = messages[0].message.content as { type: string }[];
+    expect(content.map((c) => c.type)).toEqual(['text', 'image']);
+    expect(JSON.stringify(content[0])).toContain('big.png (image over 5 MB: read it with the Read tool)');
+    expect(JSON.stringify(content[0])).toContain('small.png (image, attached to this message)');
+  });
+
+  it('an image that vanished after the run started is left out of the list, not described as attached', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-gone-'));
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: [{ name: 'gone.png', kind: 'image', missing: false, path: join(dir, 'gone.png'), shown: 'gone.png' }] });
+    expect(calls[0].prompt).toBe('FULL PROMPT');
+  });
 });

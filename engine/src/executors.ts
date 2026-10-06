@@ -20,6 +20,8 @@ export type NodeContext = {
   effort?: EffortLevel;
   /** Agent steps: the files the step gets, its own then the graph's (step model spec §6b.5); a missing one is marked. */
   attachments?: StepAttachment[];
+  /** Reads one of `attachments` by its path, through the attachment store, when the step sends it (a link swapped in since the start is not followed). */
+  readAttachment?: (path: string) => Buffer | undefined;
 };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeOutcome>;

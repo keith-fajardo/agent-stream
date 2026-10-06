@@ -412,4 +412,15 @@ describe('Copilot: attachments (step model spec §6b.5)', () => {
     const user = m.requests[0].messages[1];
     expect(user.content).toEqual([text("Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (This image couldn't be shown to the model.)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n")]);
   });
+
+  it('labels each image by what was read: one that vanished is left out, the others stay attached', async () => {
+    const s = step({ attachments: [...files, { name: 'gone.png', kind: 'image', missing: false, path: join(dir, 'gone.png'), shown: '.agent-stream/attachments/g/gone.png' }] });
+    const m = withImages('auto', true);
+    await provider({ lm: models(m.model) }).runStep(s.ctx, allowAll);
+    const user = m.requests[0].messages[1];
+    expect(user.content).toEqual([
+      text('Do it.\n\nAttached files:\n- .agent-stream/attachments/g/mockup.png (image, attached to this message)\n- .agent-stream/attachments/g/spec.pdf (PDF: the model may not be able to read PDFs)\n'),
+      new vscode.LanguageModelDataPart(Buffer.from('PNG'), 'image/png'),
+    ]);
+  });
 });

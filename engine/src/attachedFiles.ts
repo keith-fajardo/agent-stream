@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
-import { attachmentKind, attachmentNameProblem, imageMediaType, type AttachmentKind, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
+import { attachmentKind, attachmentNameProblem, imageMediaType, type AttachmentKind, type ImageMediaType, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
 import type { AttachmentStore } from './attachmentStore';
 
 /**
@@ -46,22 +46,22 @@ export const missingAttachmentLine = (graphId: string, name: string) => `Attachm
 export type FileNotes = { image?: string; pdf?: string; text?: string };
 export const ATTACHED_IMAGE = 'image, attached to this message';
 export const IMAGE_NOT_SHOWN = "This image couldn't be shown to the model.";
+export const IMAGE_OVER_5_MB = 'image over 5 MB: read it with the Read tool';
 export const PDF_READ_TOOL = 'PDF: read it with the Read tool';
 export const PDF_MAY_NOT_READ = 'PDF: the model may not be able to read PDFs';
+/** The Claude API refuses an image block over 5 MB (raw bytes), while attachments allow 10 MB. */
+export const CLAUDE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+const listed = (prompt: string, lines: string[]): string => (lines.length ? `${prompt.trimEnd()}\n\nAttached files:\n${lines.join('\n')}\n` : prompt);
+const line = (f: StepAttachment, note: string | undefined) => `- ${f.shown}${note ? ` (${note})` : ''}`;
 
 /** The prompt with its `Attached files:` list (spec §6b.5): each file that is there, by path, with the provider's note for its kind. */
 export function withAttachedFiles(prompt: string, files: readonly StepAttachment[] | undefined, notes: FileNotes): string {
-  const present = (files ?? []).filter((f) => !f.missing);
-  if (!present.length) return prompt;
-  const lines = present.map((f) => {
-    const note = notes[f.kind];
-    return `- ${f.shown}${note ? ` (${note})` : ''}`;
-  });
-  return `${prompt.trimEnd()}\n\nAttached files:\n${lines.join('\n')}\n`;
+  return listed(prompt, (files ?? []).filter((f) => !f.missing).map((f) => line(f, notes[f.kind])));
 }
 
 /** An image to send with a message: its media type and its bytes as base64. */
-export type ImageData = { name: string; mediaType: string; data: string };
+export type ImageData = { name: string; mediaType: ImageMediaType; data: string };
 
 /** The images among the files that are there, read now (one that vanished since is left out). */
 export function readImages(files: readonly StepAttachment[] | undefined, read: (path: string) => Buffer | undefined): ImageData[] {
@@ -74,7 +74,47 @@ export function readImages(files: readonly StepAttachment[] | undefined, read: (
   return out;
 }
 
-/** Reads a regular file the store reported present, or undefined when it can't be read (gone, or a link by now: links are never followed). */
+/**
+ * The step's prompt with its list, and the images to send. Each image's note comes from what happened to it now: sent
+ * (attached), too big to send (`maxBytes`: listed with the Read tool note), or gone since the run started (left out, as
+ * a missing file is). A provider that sends no images (`send: false`) lists every image as not shown, unread.
+ */
+export function attachedPrompt(
+  prompt: string,
+  files: readonly StepAttachment[] | undefined,
+  read: (path: string) => Buffer | undefined,
+  o: { send: boolean; maxBytes?: number; pdf?: string },
+): { text: string; images: ImageData[] } {
+  const images: ImageData[] = [];
+  const lines: string[] = [];
+  for (const f of (files ?? []).filter((x) => !x.missing)) {
+    if (f.kind !== 'image') {
+      lines.push(line(f, f.kind === 'pdf' ? o.pdf : undefined));
+    } else if (!o.send) {
+      lines.push(line(f, IMAGE_NOT_SHOWN));
+    } else {
+      const [image] = readImages([f], read);
+      if (!image) continue;
+      const tooBig = o.maxBytes !== undefined && Buffer.byteLength(image.data, 'base64') > o.maxBytes;
+      if (!tooBig) images.push(image);
+      lines.push(line(f, tooBig ? IMAGE_OVER_5_MB : ATTACHED_IMAGE));
+    }
+  }
+  return { text: listed(prompt, lines), images };
+}
+
+/**
+ * Reads an attachment through the store at the moment of reading (a linked folder or a link where the file was counts as
+ * gone). Only the paths of `files` can be read.
+ */
+export function storeReader(store: AttachmentStore, graphId: string, files: readonly StepAttachment[]): (path: string) => Buffer | undefined {
+  return (path) => {
+    const file = files.find((f) => f.path === path);
+    return file ? store.read(graphId, file.name) : undefined;
+  };
+}
+
+/** Reads a regular file the store reported present, or undefined when it can't be read (gone, or a link by now: links are never followed). Where a store reader isn't given. */
 export function readIfThere(path: string): Buffer | undefined {
   try {
     return lstatSync(path).isFile() ? readFileSync(path) : undefined;

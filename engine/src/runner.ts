@@ -30,7 +30,7 @@ import {
 import type { ApprovalBroker } from './approvals';
 import { systemClock, type Clock } from './clock';
 import type { Executors, NodeExecutor, NodeOutcome } from './executors';
-import { missingAttachmentLine, stepAttachments } from './attachedFiles';
+import { missingAttachmentLine, stepAttachments, storeReader } from './attachedFiles';
 import { AttachmentStore } from './attachmentStore';
 import { realOrResolved } from './git';
 import { projectPaths } from './paths';
@@ -498,7 +498,7 @@ export class Runner extends EventEmitter {
           emit,
           ...(use?.model && { model: use.model }),
           ...(use?.effort && { effort: use.effort }),
-          ...(files.length > 0 && { attachments: files }),
+          ...(files.length > 0 && { attachments: files, readAttachment: storeReader(this.attachmentStore, meta.graphId, files) }),
         });
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
