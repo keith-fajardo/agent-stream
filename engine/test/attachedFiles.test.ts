@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { estimateTokens, IMAGE_TOKENS } from '../src/agentLoop/compact';
-import { attachedPrompt, ATTACHED_IMAGE, IMAGE_NOT_SHOWN, IMAGE_OVER_5_MB, PDF_READ_TOOL, readIfThere, readImages, storeReader, withAttachedFiles, type StepAttachment } from '../src/attachedFiles';
+import { attachedPrompt, ATTACHED_IMAGE, IMAGE_NOT_SHOWN, IMAGE_OVER_5_MB, IMAGE_OVER_BUDGET, INLINE_MAX_BYTES, INLINE_MAX_IMAGES, inlineBudget, PDF_READ_TOOL, readIfThere, readImages, storeReader, withAttachedFiles, type StepAttachment } from '../src/attachedFiles';
 import { AttachmentStore } from '../src/attachmentStore';
 import { tmpProject } from './helpers';
 
@@ -79,6 +79,64 @@ describe('what the prompt says about each image is decided from what was read (f
     expect(r.images).toEqual([]);
     expect(r.text).toContain(`mockup.png (${IMAGE_NOT_SHOWN})`);
     expect(r.text).toContain(`vanished.png (${IMAGE_NOT_SHOWN})`);
+  });
+});
+
+describe('the inline budget per request (ruling on I-2)', () => {
+  const MB = 1024 * 1024;
+  const sized = (name: string, size: number) => {
+    writeFileSync(join(dir, name), Buffer.alloc(size, 1));
+    return file(name, 'image');
+  };
+
+  it('is 20 MB of raw bytes and 20 images, and pins the note', () => {
+    expect(INLINE_MAX_BYTES).toBe(20 * MB);
+    expect(INLINE_MAX_IMAGES).toBe(20);
+    expect(IMAGE_OVER_BUDGET).toBe('image not sent inline (too many large images): read it with the Read tool');
+  });
+
+  it('counts bytes and images in order; a file that doesn’t fit is refused and not counted', () => {
+    const b = inlineBudget({ bytes: 10, images: 2 });
+    expect(b.take(4, true)).toBe(true);
+    expect(b.take(7, false)).toBe(false);
+    expect(b.take(6, false)).toBe(true);
+    expect(b.take(0, true)).toBe(true);
+    expect(b.take(0, true)).toBe(false);
+    const c = inlineBudget({ bytes: 10, images: 1 });
+    expect(c.take(1, true)).toBe(true);
+    expect(c.take(1, true)).toBe(false);
+    expect(c.take(9, false)).toBe(true);
+  });
+
+  it('sends images in order until 20 MB is spent; the rest are listed by path with the budget note', () => {
+    const list = ['b1', 'b2', 'b3', 'b4', 'b5'].map((n) => sized(`${n}.png`, Math.floor(4.5 * MB)));
+    const r = attachedPrompt('Do it.', [...list, sized('tiny.png', 10)], readIfThere, { send: true, maxBytes: 5 * MB });
+    expect(r.images.map((i) => i.name)).toEqual(['b1.png', 'b2.png', 'b3.png', 'b4.png', 'tiny.png']);
+    expect(r.text).toContain(`- .agent-stream/attachments/g/b4.png (${ATTACHED_IMAGE})`);
+    expect(r.text).toContain(`- .agent-stream/attachments/g/b5.png (${IMAGE_OVER_BUDGET})`);
+    expect(r.text).toContain(`- .agent-stream/attachments/g/tiny.png (${ATTACHED_IMAGE})`);
+  });
+
+  it('sends at most 20 images; an image over 5 MB is not sent and counts toward nothing', () => {
+    const list = Array.from({ length: 21 }, (_, i) => sized(`i${i}.png`, 10));
+    const r = attachedPrompt('Do it.', [sized('huge.png', 5 * MB + 1), ...list], readIfThere, { send: true, maxBytes: 5 * MB });
+    expect(r.images).toHaveLength(20);
+    expect(r.images.map((i) => i.name)).not.toContain('i20.png');
+    expect(r.text).toContain(`huge.png (${IMAGE_OVER_5_MB})`);
+    expect(r.text).toContain(`i19.png (${ATTACHED_IMAGE})`);
+    expect(r.text).toContain(`i20.png (${IMAGE_OVER_BUDGET})`);
+  });
+
+  it('takes the provider’s own wording for an image it didn’t send', () => {
+    const r = attachedPrompt('Do it.', [sized('huge.png', 11), sized('one.png', 1), sized('two.png', 1)], readIfThere, {
+      send: true,
+      maxBytes: 10,
+      budget: { bytes: 100, images: 1 },
+      notSent: { tooBig: 'too big here', overBudget: 'too many here' },
+    });
+    expect(r.text).toContain('huge.png (too big here)');
+    expect(r.text).toContain(`one.png (${ATTACHED_IMAGE})`);
+    expect(r.text).toContain('two.png (too many here)');
   });
 });
 

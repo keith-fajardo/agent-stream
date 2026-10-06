@@ -10,7 +10,7 @@ import { GraphStore } from '../src/graphStore';
 import { graphTools } from '../src/plannerTools';
 import { privatePathDenial, PRIVATE_FOLDER } from '../src/privatePaths';
 import { createClaudeProvider } from '../src/providers/claude';
-import type { PlannerTurn } from '../src/providers/types';
+import type { PlannerTurn, TurnFile } from '../src/providers/types';
 import { RunStore } from '../src/runStore';
 import { appTestDeps, fixedClock, outsideGit, signedIn, testGitBash, testProvider, tmpProject, tmpValuesFile } from './helpers';
 
@@ -306,6 +306,57 @@ describe('Claude planner: an image over 5 MB', () => {
       onEvent: () => {},
     });
     expect(prompts[0]).toBe("Look.\n\nNote: big.png couldn't be included: it is too large to send (Claude takes images up to 5 MB).\n");
+  });
+});
+
+describe('Claude planner: the inline budget per request (ruling on I-2)', () => {
+  async function send(files: TurnFile[]) {
+    const prompts: (string | AsyncIterable<SDKUserMessage>)[] = [];
+    const provider = createClaudeProvider({
+      findClaude: () => ({ ok: true, path: '/bin/claude' }),
+      checkAuth: async () => signedIn,
+      queryFn: ({ prompt }: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }) => {
+        prompts.push(prompt);
+        return (async function* (): AsyncGenerator<SDKMessage> {
+          yield { type: 'result', subtype: 'success', is_error: false, result: 'ok', num_turns: 1, total_cost_usd: 0, usage: {}, session_id: 's1' } as unknown as SDKMessage;
+        })();
+      },
+    });
+    await provider.status();
+    const events: { type: string; text?: string }[] = [];
+    await provider.planTurn({
+      prompt: 'Look.',
+      systemAppend: '',
+      cwd: tmpProject().root,
+      tools: [],
+      files,
+      gate: { privacy: () => null, isReadOnly: () => true, isSelfApproving: () => false, approve: async () => ({ allow: true, by: 'user' }), decide: async () => ({ allow: true, by: 'user' }) },
+      transcript: { load: () => undefined, save: () => {} },
+      signal: new AbortController().signal,
+      onEvent: (e) => events.push(e),
+    });
+    const prompt = prompts[0];
+    if (typeof prompt === 'string') throw new Error('expected a message with files');
+    const sent: SDKUserMessage[] = [];
+    for await (const m of prompt) sent.push(m);
+    return { content: sent[0].message.content as { type: string; text?: string }[], events };
+  }
+  const MB = 1024 * 1024;
+  const png = (name: string, size: number): TurnFile => ({ name, kind: 'image', path: name, mediaType: 'image/png', data: Buffer.alloc(size).toString('base64') });
+  const pdf = (name: string, size: number): TurnFile => ({ name, kind: 'pdf', path: name, mediaType: 'application/pdf', data: Buffer.alloc(size).toString('base64') });
+  const together = (name: string) => `${name} couldn't be included: the message's files were too large to send together.`;
+
+  it('fills 20 MB in message order, PDFs counting too; a file past it gets a line naming it (no path)', async () => {
+    const { content, events } = await send([pdf('spec.pdf', 18 * MB), png('big.png', 4 * MB), png('small.png', MB)]);
+    expect(content.map((c) => c.type)).toEqual(['text', 'document', 'image']);
+    expect(content[0].text).toBe(`Look.\n\nNote: ${together('big.png')}\n`);
+    expect(events).toContainEqual({ type: 'note', text: together('big.png') });
+  });
+
+  it('sends at most 20 images', async () => {
+    const { content } = await send(Array.from({ length: 21 }, (_, i) => png(`i${i}.png`, 10)));
+    expect(content.filter((c) => c.type === 'image')).toHaveLength(20);
+    expect(content[0].text).toBe(`Look.\n\nNote: ${together('i20.png')}\n`);
   });
 });
 

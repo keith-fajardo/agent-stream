@@ -386,6 +386,27 @@ describe('Claude provider: attachments (step model spec §6b.5)', () => {
     expect(JSON.stringify(content[0])).toContain('small.png (image, attached to this message)');
   });
 
+  it('sends images in order until the request’s 20 MB inline budget is spent; the rest are read with the Read tool', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-attach-budget-'));
+    const names = ['own1.png', 'own2.png', 'own3.png', 'graph1.png', 'graph2.png'];
+    for (const n of names) writeFileSync(join(dir, n), Buffer.alloc(Math.floor(4.5 * 1024 * 1024), 1));
+    const at = (name: string): StepAttachment => ({ name, kind: 'image', missing: false, path: join(dir, name), shown: `.agent-stream/attachments/g/${name}` });
+    const { fn, calls } = fake(async function* () {
+      yield init();
+      yield success('ok');
+    });
+    const a = ctx();
+    await runStep({ queryFn: fn }, { ...a.c, attachments: names.map(at) });
+    const prompt = calls[0].prompt;
+    if (typeof prompt === 'string') throw new Error('expected a message with images');
+    const messages: SDKUserMessage[] = [];
+    for await (const m of prompt) messages.push(m);
+    const content = messages[0].message.content as { type: string; text?: string }[];
+    expect(content.map((c) => c.type)).toEqual(['text', 'image', 'image', 'image', 'image']);
+    expect(content[0].text).toContain('graph1.png (image, attached to this message)');
+    expect(content[0].text).toContain('- .agent-stream/attachments/g/graph2.png (image not sent inline (too many large images): read it with the Read tool)');
+  });
+
   it('an image that vanished after the run started is left out of the list, not described as attached', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'claude-attach-gone-'));
     const { fn, calls } = fake(async function* () {

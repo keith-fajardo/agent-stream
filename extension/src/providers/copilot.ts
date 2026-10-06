@@ -3,6 +3,9 @@ import * as vscode from 'vscode';
 import {
   attachedPrompt,
   builtinTools,
+  CLAUDE_IMAGE_MAX_BYTES,
+  inlineBudget,
+  OVER_BUDGET_IN_CHAT,
   lastAssistantText,
   PDF_MAY_NOT_READ,
   readIfThere,
@@ -35,6 +38,15 @@ export const copilotCapMessage = (n: number, setting: 'maxRequestsPerStep' | 'ma
     ? 'Raise the setting to let planner turns run longer, or type continue to pick up where it stopped.'
     : 'Raise the setting to let steps run longer.');
 export const requestLine = (n: number, cap: number) => `Copilot requests: ${n} of ${cap}`;
+/**
+ * Copilot sends an image up to 5 MB (Claude's limit, since the picked model may be a Claude model) within the request's
+ * inline budget. The agent loop's Read can't show an image, so one that isn't sent is said to be unseen.
+ */
+const MAX_IMAGE_BYTES = CLAUDE_IMAGE_MAX_BYTES;
+export const COPILOT_IMAGE_NOT_SENT = {
+  tooBig: "image over 5 MB: it couldn't be shown to the model",
+  overBudget: "image not sent (too many large images): it couldn't be shown to the model",
+};
 
 /** The slice of vscode.lm the provider uses. */
 export type LmApi = { selectChatModels(selector: { vendor: string }): Thenable<readonly vscode.LanguageModelChat[]> };
@@ -199,7 +211,12 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       const picked = await pick(ctx.model);
       // Attached images go to a model that takes them; for any other the list says so (step model spec §6b.5).
       // Each image's line says what happened to it: sent, or (for a model that takes none) not shown; one that vanished is left out.
-      const { text: prompt, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, { send: 'model' in picked && takesImages(picked.model), pdf: PDF_MAY_NOT_READ });
+      const { text: prompt, images } = attachedPrompt(ctx.prompt, ctx.attachments, ctx.readAttachment ?? readIfThere, {
+        send: 'model' in picked && takesImages(picked.model),
+        maxBytes: MAX_IMAGE_BYTES,
+        notSent: COPILOT_IMAGE_NOT_SENT,
+        pdf: PDF_MAY_NOT_READ,
+      });
       // The model the step actually runs on (Auto for one that is gone). Copilot has no effort levels, so ctx.effort is never sent (step model spec §6).
       ctx.emit({ type: 'start', kind: 'agent', cwd: ctx.cwd, prompt, ...('model' in picked && { model: picked.model.id }) });
       if ('error' in picked) return { ok: false, output: '', error: picked.error };
@@ -236,10 +253,20 @@ export function createCopilotProvider(d: CopilotDeps): AgentProvider {
       }
       const picked = await pick(turn.model);
       if ('error' in picked) return { ok: false, error: picked.error };
-      // A chat message's images go to a model that takes them; PDFs can't be sent here (step model spec §6b.5).
-      const files: readonly TurnFile[] = turn.files ?? [];
-      const images = takesImages(picked.model) ? files.filter((f) => f.kind === 'image') : [];
-      const notes = files.flatMap((f) => (f.kind === 'pdf' ? [notIncluded(f.name, "GitHub Copilot can't read PDFs in the chat")] : images.includes(f) ? [] : [notIncluded(f.name, `${picked.model.name} doesn't take images`)]));
+      // A chat message's images go to a model that takes them, up to 5 MB each and within the request's inline budget (in
+      // message order); PDFs can't be sent here (step model spec §6b.5).
+      const takes = takesImages(picked.model);
+      const budget = inlineBudget();
+      const images: TurnFile[] = [];
+      const notes: string[] = [];
+      for (const f of turn.files ?? []) {
+        const size = Buffer.byteLength(f.data, 'base64');
+        if (f.kind === 'pdf') notes.push(notIncluded(f.name, "GitHub Copilot can't read PDFs in the chat"));
+        else if (!takes) notes.push(notIncluded(f.name, `${picked.model.name} doesn't take images`));
+        else if (size > MAX_IMAGE_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (images up to 5 MB are sent)'));
+        else if (!budget.take(size, true)) notes.push(notIncluded(f.name, OVER_BUDGET_IN_CHAT));
+        else images.push(f);
+      }
       // Said in the chat and in the message itself, so the model knows.
       for (const note of notes) turn.onEvent({ type: 'note', text: note });
       const prompt = promptWithNotes(turn.prompt, notes);

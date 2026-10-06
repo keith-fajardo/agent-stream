@@ -51,6 +51,29 @@ export const PDF_READ_TOOL = 'PDF: read it with the Read tool';
 export const PDF_MAY_NOT_READ = 'PDF: the model may not be able to read PDFs';
 /** The Claude API refuses an image block over 5 MB (raw bytes), while attachments allow 10 MB. */
 export const CLAUDE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * What one request carries inline at most: 20 MB of raw bytes (images, and PDFs sent as documents) and 20 images, filled
+ * in order. Keeps a request under the API's size cap, and under the count past which it tightens images' dimensions.
+ */
+export const INLINE_MAX_BYTES = 20 * 1024 * 1024;
+export const INLINE_MAX_IMAGES = 20;
+export const IMAGE_OVER_BUDGET = 'image not sent inline (too many large images): read it with the Read tool';
+/** Why a chat file past the inline budget couldn't be included (`notIncluded`). */
+export const OVER_BUDGET_IN_CHAT = "the message's files were too large to send together";
+
+/** A running inline budget for one request: `take` says whether a file still fits and, if it does, counts it. */
+export function inlineBudget(max: { bytes: number; images: number } = { bytes: INLINE_MAX_BYTES, images: INLINE_MAX_IMAGES }) {
+  let bytes = 0;
+  let images = 0;
+  return {
+    take(size: number, image: boolean): boolean {
+      if (bytes + size > max.bytes || (image && images >= max.images)) return false;
+      bytes += size;
+      if (image) images++;
+      return true;
+    },
+  };
+}
 
 const listed = (prompt: string, lines: string[]): string => (lines.length ? `${prompt.trimEnd()}\n\nAttached files:\n${lines.join('\n')}\n` : prompt);
 const line = (f: StepAttachment, note: string | undefined) => `- ${f.shown}${note ? ` (${note})` : ''}`;
@@ -76,17 +99,21 @@ export function readImages(files: readonly StepAttachment[] | undefined, read: (
 
 /**
  * The step's prompt with its list, and the images to send. Each image's note comes from what happened to it now: sent
- * (attached), too big to send (`maxBytes`: listed with the Read tool note), or gone since the run started (left out, as
- * a missing file is). A provider that sends no images (`send: false`) lists every image as not shown, unread.
+ * (attached), too big to send (`maxBytes`: listed with the Read tool note), past the request's inline budget (in order:
+ * listed with the budget note), or gone since the run started (left out, as a missing file is). `notSent` replaces the
+ * two notes for a provider whose model can't read an image from its file. A provider that sends no images
+ * (`send: false`) lists every image as not shown, unread.
  */
 export function attachedPrompt(
   prompt: string,
   files: readonly StepAttachment[] | undefined,
   read: (path: string) => Buffer | undefined,
-  o: { send: boolean; maxBytes?: number; pdf?: string },
+  o: { send: boolean; maxBytes?: number; pdf?: string; budget?: { bytes: number; images: number }; notSent?: { tooBig: string; overBudget: string } },
 ): { text: string; images: ImageData[] } {
   const images: ImageData[] = [];
   const lines: string[] = [];
+  const budget = inlineBudget(o.budget);
+  const notSent = o.notSent ?? { tooBig: IMAGE_OVER_5_MB, overBudget: IMAGE_OVER_BUDGET };
   for (const f of (files ?? []).filter((x) => !x.missing)) {
     if (f.kind !== 'image') {
       lines.push(line(f, f.kind === 'pdf' ? o.pdf : undefined));
@@ -95,9 +122,11 @@ export function attachedPrompt(
     } else {
       const [image] = readImages([f], read);
       if (!image) continue;
-      const tooBig = o.maxBytes !== undefined && Buffer.byteLength(image.data, 'base64') > o.maxBytes;
-      if (!tooBig) images.push(image);
-      lines.push(line(f, tooBig ? IMAGE_OVER_5_MB : ATTACHED_IMAGE));
+      const size = Buffer.byteLength(image.data, 'base64');
+      const tooBig = o.maxBytes !== undefined && size > o.maxBytes;
+      const fits = !tooBig && budget.take(size, true);
+      if (fits) images.push(image);
+      lines.push(line(f, tooBig ? notSent.tooBig : fits ? ATTACHED_IMAGE : notSent.overBudget));
     }
   }
   return { text: listed(prompt, lines), images };

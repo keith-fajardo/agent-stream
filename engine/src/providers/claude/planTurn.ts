@@ -1,5 +1,5 @@
 import type { HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
-import { CLAUDE_IMAGE_MAX_BYTES } from '../../attachedFiles';
+import { CLAUDE_IMAGE_MAX_BYTES, inlineBudget, OVER_BUDGET_IN_CHAT } from '../../attachedFiles';
 import { notIncluded, promptWithNotes } from '../../chatAttachments';
 import { couldNotAsk } from '../toolGate';
 import type { PlannerTurn, PlannerTurnResult } from '../types';
@@ -53,12 +53,16 @@ export function claudePlanTurn(deps: ClaudeRunDeps) {
     };
     if (turn.resume) options.resume = turn.resume;
     // A chat message's images and PDFs go with it, as images and documents (step model spec §6b.5). The API refuses an image
-    // block over 5 MB, so a larger image gets a note in the chat instead.
+    // block over 5 MB, so a larger image gets a note in the chat instead; so does a file past the request's inline budget
+    // (filled in message order).
     const fileBlocks: UserBlock[] = [];
     const notes: string[] = [];
+    const budget = inlineBudget();
     for (const f of turn.files ?? []) {
-      if (f.kind === 'pdf') fileBlocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
-      else if (Buffer.byteLength(f.data, 'base64') > CLAUDE_IMAGE_MAX_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (Claude takes images up to 5 MB)'));
+      const size = Buffer.byteLength(f.data, 'base64');
+      if (f.kind === 'image' && size > CLAUDE_IMAGE_MAX_BYTES) notes.push(notIncluded(f.name, 'it is too large to send (Claude takes images up to 5 MB)'));
+      else if (!budget.take(size, f.kind === 'image')) notes.push(notIncluded(f.name, OVER_BUDGET_IN_CHAT));
+      else if (f.kind === 'pdf') fileBlocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
       else fileBlocks.push({ type: 'image', source: { type: 'base64', media_type: f.mediaType as 'image/png', data: f.data } });
     }
     // Said in the chat and in the message itself, so the model doesn't answer as if it had seen the file.
