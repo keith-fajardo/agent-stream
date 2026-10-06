@@ -17,6 +17,14 @@ export type RunCommandDeps = {
   showSidebar(): void;
 };
 
+/**
+ * Approve or deny one request, once: the one place the notification, the sidebar and the commands decide. None of them
+ * can allow the rest of a step; that is offered on the approval card only.
+ */
+export function decideApproval(engines: Pick<RunCommandDeps['engines'], 'get'>, folder: Folder, id: string, decision: 'approve' | 'deny'): boolean {
+  return engines.get(folder).broker.decide(id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
+}
+
 /** Run, approval and view commands for the Command Palette, the sidebar and notifications. */
 export function runCommands(d: RunCommandDeps) {
   const current = async (target?: GraphTarget): Promise<GraphTarget | undefined> => {
@@ -25,8 +33,7 @@ export function runCommands(d: RunCommandDeps) {
     return panel ? { folder: panel.folder, graphId: panel.graphId } : d.pickGraph();
   };
   const isItem = (item: unknown): item is ApprovalTarget => !!item && typeof item === 'object' && 'folder' in item && 'request' in item;
-  const decide = (item: ApprovalTarget, decision: 'approve' | 'deny') =>
-    d.engines.get(item.folder).broker.decide(item.request.id, decision === 'approve' ? { decision: 'approve' } : { decision: 'deny' });
+  const decide = (item: ApprovalTarget, decision: 'approve' | 'deny') => decideApproval(d.engines, item.folder, item.request.id, decision);
 
   return {
     async runGraph(target?: GraphTarget): Promise<void> {

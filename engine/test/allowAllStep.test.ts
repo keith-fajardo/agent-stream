@@ -77,14 +77,13 @@ describe('Allow all for this step: requestApproval (the one path every step appr
     expect(events[2]).toEqual({ type: 'approval_allowed_all' });
     expect(events[3]).toEqual({ type: 'approval_decided', approvalId: r1.id, decision: 'approve', scope: 'step' });
     expect(events[4]).toEqual({ type: 'approval_decided', approvalId: r2.id, decision: 'approve', scope: 'step' });
-    // A graph change and a plain tool call after the press are approved at once: logged as asked and decided with scope step.
+    // A graph change and a browser action after the press are approved at once: only the approved line is logged, with its tool, never a request that "waits".
     events.length = 0;
     expect(await ask(broker, { events })).toEqual(STEP);
     expect(await ask(broker, { events, card: { browserAction: { site: 's', url: 'u', title: 't' } } })).toEqual(STEP);
     expect(broker.pending()).toEqual([]);
-    expect(events.map((e) => e.type)).toEqual(['approval_requested', 'approval_decided', 'approval_requested', 'approval_decided']);
-    expect(events[1]).toMatchObject({ decision: 'approve', scope: 'step' });
-    expect(events[0]).toMatchObject({ approvalId: (events[1] as { approvalId: string }).approvalId });
+    expect(events.map((e) => e.type)).toEqual(['approval_decided', 'approval_decided']);
+    expect(events[0]).toMatchObject({ type: 'approval_decided', decision: 'approve', scope: 'step', auto: true, toolName: 'T' });
   });
 
   it('still asks for another step, for the same step in a new run, and after the step ended', async () => {
@@ -98,6 +97,32 @@ describe('Allow all for this step: requestApproval (the one path every step appr
     broker.endStep('r1', 'n1');
     void ask(broker);
     expect(broker.pending().map((p) => `${p.runId}/${p.nodeId}`)).toEqual(['r1/n2', 'r2/n1', 'r1/n1']);
+  });
+
+  it('a card left open after its step ended can not set the allowance, and the step still asks', async () => {
+    const broker = new ApprovalBroker();
+    const live = new AbortController();
+    const stale = ask(broker, { signal: live.signal });
+    const [card] = broker.pending();
+    // The step ended with its card (and its signal) still alive.
+    broker.endStep('r1', 'n1');
+    expect(broker.decide(card.id, STEP)).toBe(true);
+    // Answered once, as an approval with no scope: nothing is allowed.
+    expect(await stale).toEqual({ decision: 'approve' });
+    expect(broker.isStepAllowed('r1', 'n1')).toBe(false);
+    expect(broker.decide(card.id, STEP)).toBe(false);
+    // A later request of that run and step, even with a live signal, asks.
+    void ask(broker, { signal: live.signal });
+    expect(broker.pending()).toHaveLength(1);
+  });
+
+  it('a step that starts again clears its ended mark', () => {
+    const broker = new ApprovalBroker();
+    broker.endStep('r1', 'n1');
+    broker.beginStep('r1', 'n1');
+    const a = broker.request(input('r1', 'n1'));
+    broker.decide(a.id, STEP);
+    expect(broker.isStepAllowed('r1', 'n1')).toBe(true);
   });
 
   it('Stop still cancels: a pending request and the signal of the run', async () => {
@@ -149,6 +174,7 @@ describe('Allow all for this step: every provider path ends in the same place', 
     expect(broker.pending()).toEqual([]);
     const decided = events.filter((e) => e.type === 'approval_decided');
     expect(decided).toHaveLength(3);
+    expect(events.filter((e) => e.type === 'approval_requested')).toHaveLength(2);
     expect(decided.every((e) => e.type === 'approval_decided' && e.decision === 'approve' && e.scope === 'step')).toBe(true);
     expect(events.filter((e) => e.type === 'approval_allowed_all')).toHaveLength(1);
     broker.endStep('r1', 'n1');

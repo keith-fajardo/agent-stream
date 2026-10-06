@@ -71,6 +71,8 @@ export const ALLOW_ON_SITE = 'Allow on this site for this step';
 export const DENY = 'Deny';
 /** The approval card's extra choice, on every kind of card: the step stops asking for the rest of its run. */
 export const ALLOW_ALL_FOR_STEP = 'Allow all for this step';
+/** The button's tooltip: it reaches further than it looks. */
+export const ALLOW_ALL_HINT = 'Approves everything this step asks, including graph changes, for the rest of this step.';
 /** The step log's line when the user pressed it. */
 export const ALLOWED_EVERYTHING_LINE = 'Allowed everything for the rest of this step';
 /** What a log line says of a request the allowance approved, like `(allowed on this site)` for a site. */

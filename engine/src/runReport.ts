@@ -169,6 +169,8 @@ function approvals(events: NodeEvent[], status: NodeRunState['status']): string[
   const lines = events.flatMap((e) => {
     // The press of Allow all for this step, in order among the requests it covers.
     if (e.type === 'approval_allowed_all') return [`- ${e.at} ${ALLOWED_EVERYTHING_LINE}`];
+    // Approved by the allowance with no request before it.
+    if (e.type === 'approval_decided' && e.auto) return [`- ${e.at} ${inline(e.toolName ?? 'a tool')}: approved ${ALLOWED_FOR_STEP}`];
     if (e.type !== 'approval_requested') return [];
     const d = decisions.get(e.approvalId);
     const note = d?.note?.trim() ? ` — ${inline(d.note)}` : '';

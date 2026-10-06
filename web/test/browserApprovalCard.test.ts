@@ -43,15 +43,15 @@ describe('the browser approval card', () => {
     await done();
   });
 
-  it('offers Deny, Allow on this site for this step, Allow all for this step and Allow once, above the details', async () => {
+  it('offers Deny, Allow on this site for this step, Allow once and, apart and last, Allow all for this step, above the details', async () => {
     const { card, done } = await render(request);
     const buttons = [...card.querySelectorAll('.approval-actions button')] as HTMLButtonElement[];
-    expect(buttons.map((b) => b.textContent)).toEqual(['Deny', 'Allow on this site for this step', 'Allow all for this step', 'Allow once']);
-    expect(buttons[3].compareDocumentPosition(card.querySelector('.browser-action')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(buttons.map((b) => b.textContent)).toEqual(['Deny', 'Allow on this site for this step', 'Allow once', 'Allow all for this step']);
+    expect(buttons[2].compareDocumentPosition(card.querySelector('.browser-action')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     vi.mocked(send).mockClear();
-    await act(async () => buttons[3].click());
-    await act(async () => buttons[1].click());
     await act(async () => buttons[2].click());
+    await act(async () => buttons[1].click());
+    await act(async () => buttons[3].click());
     const note = card.querySelector('input') as HTMLInputElement;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(note, 'Wrong field');

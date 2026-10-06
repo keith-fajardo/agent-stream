@@ -83,7 +83,7 @@ function LogEvent({ event: e, ended, live }: { event: NodeEvent; ended: Readonly
       return (
         <div className={`ev approval ${e.decision}`}>
           {time}
-          {e.decision === 'approve' ? `✔ Approved${e.scope === 'site' ? ': on this site for this step' : e.scope === 'step' ? ` ${ALLOWED_FOR_STEP}` : ''}` : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
+          {e.decision === 'approve' ? `✔ Approved${e.scope === 'site' ? ': on this site for this step' : e.scope === 'step' ? ` ${ALLOWED_FOR_STEP}${e.auto && e.toolName ? `: ${e.toolName}` : ''}` : ''}` : e.decision === 'deny' ? `✖ Denied${e.note ? `: ${e.note}` : ''}` : '■ Cancelled (run stopped)'}
         </div>
       );
     case 'browser':

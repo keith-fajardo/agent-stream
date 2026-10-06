@@ -25,6 +25,7 @@ button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); bord
 button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--danger); border-color: var(--danger); }
+button.caution { color: var(--warn); border-color: var(--warn); }
 button.link { border: none; background: none; padding: 0; color: var(--info); text-decoration: underline; }
 input, select, textarea { font: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
 input, select, textarea { background: var(--vscode-input-background, var(--panel)); color: var(--vscode-input-foreground, var(--text)); border-color: var(--vscode-input-border, var(--border)); }
@@ -176,6 +177,7 @@ pre { background: var(--code-bg); padding: 8px; border-radius: 6px; white-space:
 .approval-label { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .approval-warning { margin: 0; padding: 6px 8px; border-radius: 6px; color: var(--danger); background: rgba(180, 35, 24, 0.1); font-weight: 600; }
 .needs-approval { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--warn); }
+.approval-actions .caution { margin-left: 16px; }
 .approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: grid; place-items: center; z-index: 50; }

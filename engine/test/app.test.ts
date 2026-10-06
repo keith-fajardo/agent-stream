@@ -281,21 +281,23 @@ describe('app', () => {
     expect(app.broker.isStepAllowed('r', 'n2')).toBe(false);
   });
 
-  it('ends the step allowance with the step: the next run of it, and the other steps, still ask', async () => {
-    const asked: string[] = [];
+  it('ends the step allowance with the step: the same step in a second run, and other steps, still ask', async () => {
+    const answered: string[] = [];
     const provider = testProvider({
       runStep: async (ctx, gate) => {
         const first = gate.decide('Bash', { command: 'one' });
-        await vi.waitFor(() => expect(app.broker.pending().some((p) => p.nodeId === ctx.node.id)).toBe(true));
-        if (ctx.node.id === 'n1') app.broker.decide(app.broker.pending().find((p) => p.nodeId === 'n1')!.id, { decision: 'approve', scope: 'step' });
-        else app.broker.decide(app.broker.pending().find((p) => p.nodeId === ctx.node.id)!.id, { decision: 'approve' });
+        const mine = () => app.broker.pending().find((p) => p.runId === ctx.runId && p.nodeId === ctx.node.id);
+        // Every step, in every run, has to be asked about its first request.
+        await vi.waitFor(() => expect(mine()).toBeDefined());
+        const press = ctx.node.id === 'n1' && answered.length === 0;
+        app.broker.decide(mine()!.id, press ? { decision: 'approve', scope: 'step' } : { decision: 'approve' });
         await first;
-        if (ctx.node.id === 'n1') {
+        if (press) {
           // The allowance covers the rest of this step.
           await expect(gate.decide('Bash', { command: 'two' })).resolves.toEqual({ allow: true, by: 'user' });
           expect(app.broker.pending()).toEqual([]);
         }
-        asked.push(ctx.node.id);
+        answered.push(`${ctx.runId}/${ctx.node.id}`);
         return { ok: true, output: '' };
       },
     });
@@ -307,9 +309,17 @@ describe('app', () => {
     app.graphStore.apply(g.id, { type: 'connect', from: 'n1', to: 'n2' }, 'user');
     await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
     await vi.waitFor(() => expect(c.of('run').at(-1)?.run.status).toBe('succeeded'));
-    expect(asked).toEqual(['n1', 'n2']);
-    const runId = c.of('run').at(-1)!.run.id;
-    expect(app.broker.isStepAllowed(runId, 'n1')).toBe(false);
+    const first = c.of('run').at(-1)!.run.id;
+    // n2 of the same run asked (it answered its own first request); the allowance is gone with n1.
+    expect(answered).toEqual([`${first}/n1`, `${first}/n2`]);
+    expect(app.broker.isStepAllowed(first, 'n1')).toBe(false);
+    // A second run of the same graph: n1 asks again, although the first run allowed everything for it.
+    await app.handle(c.c, { type: 'startRun', graphId: g.id, reviewed: (await reviewed(app, c, g.id)).signature });
+    await vi.waitFor(() => expect(c.of('run').at(-1)?.run.id).not.toBe(first));
+    await vi.waitFor(() => expect(answered).toHaveLength(4));
+    const second = c.of('run').at(-1)!.run.id;
+    expect(second).not.toBe(first);
+    expect(answered.slice(2)).toEqual([`${second}/n1`, `${second}/n2`]);
   });
 
   it('asks the browser to confirm planner-requested runs', () => {

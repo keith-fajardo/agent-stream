@@ -269,7 +269,8 @@ export function createBrowserTools(d: BrowserToolDeps): BrowserTool[] {
     const askUser = async (): Promise<BrowserReply | undefined> => {
       // Whether the page the card shows has such a frame: one that appears while the user decides was never seen.
       const framedBefore = await foreignFrames();
-      const shot = (await bounded(() => page.screenshot({ fullPage: false, type: 'jpeg' })).catch(() => undefined))?.data;
+      // Under Allow all for this step the card is never shown: no screenshot is taken for it.
+      const shot = d.ask.allowedAll?.() ? undefined : (await bounded(() => page.screenshot({ fullPage: false, type: 'jpeg' })).catch(() => undefined))?.data;
       const action: BrowserActionRequest = { site, url, title: await bounded(() => page.title()), ...a.detail, ...(shot && shot.length <= APPROVAL_SHOT_MAX_BYTES && { screenshot: shot.toString('base64') }) };
       const decision = await d.ask({ toolName: a.name, input: a.input, action, signal });
       if (!decision.allow) return failed(decision.reason);

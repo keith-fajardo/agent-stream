@@ -12,6 +12,8 @@ export class ApprovalBroker extends EventEmitter {
   private pendingById = new Map<string, Pending>();
   /** Steps (run id + step id) the user allowed everything for, until the step ends (Allow all for this step). */
   private allowedSteps = new Set<string>();
+  /** Steps that have ended: a card of theirs still open can never arm the allowance again (until the step starts again). */
+  private endedSteps = new Set<string>();
   /** The requests the user pressed Allow all on, until their wait logs it: one line per press, not one per request approved. */
   private pressed = new Set<string>();
 
@@ -51,6 +53,8 @@ export class ApprovalBroker extends EventEmitter {
     const p = this.pendingById.get(id);
     if (!p || decision.decision !== 'approve' || decision.scope !== 'step') return this.settle(id, decision);
     const { runId, nodeId } = p.request;
+    // A card left open by a step that has ended is answered once, and allows nothing.
+    if (this.endedSteps.has(stepKey(runId, nodeId))) return this.settle(id, { decision: 'approve' });
     this.allowedSteps.add(stepKey(runId, nodeId));
     this.pressed.add(id);
     this.settle(id, decision);
@@ -65,9 +69,24 @@ export class ApprovalBroker extends EventEmitter {
     return this.allowedSteps.has(stepKey(runId, nodeId));
   }
 
-  /** The step ended (succeeded, failed, cancelled or stopped): its allowance ends with it. */
+  /** The step starts: it may be allowed again. */
+  beginStep(runId: string, nodeId: string): void {
+    this.endedSteps.delete(stepKey(runId, nodeId));
+  }
+
+  /**
+   * The step ended (succeeded, failed, cancelled or stopped): its allowance ends with it, and a card of it still open can be answered once but
+   * never allows the step again.
+   */
   endStep(runId: string, nodeId: string): void {
-    this.allowedSteps.delete(stepKey(runId, nodeId));
+    const key = stepKey(runId, nodeId);
+    this.allowedSteps.delete(key);
+    this.endedSteps.add(key);
+  }
+
+  /** The run is over: nothing more is kept about its steps. */
+  forgetRun(runId: string): void {
+    for (const set of [this.allowedSteps, this.endedSteps]) for (const key of [...set]) if (key.startsWith(`${runId}\0`)) set.delete(key);
   }
 
   /** Whether the user pressed Allow all on this request (once: the caller logs the press). */
@@ -124,12 +143,11 @@ export async function requestApproval(o: {
       ...(decided.decision === 'approve' && decided.scope && { scope: decided.scope }),
     });
   // Allow all for this step: every request of the step is approved here, whichever provider or card it comes from. It is
-  // still logged as asked and decided, with the step scope, but never reaches the user. A run that was stopped asks no more.
+  // logged as one approved line (scope step), never as a request that waited, and never reaches the user. A run that was
+  // stopped asks no more.
   if (!o.signal.aborted && broker.isStepAllowed(ctx.runId, ctx.node.id)) {
-    const approvalId = randomUUID();
     const decided: Decision = { decision: 'approve', scope: 'step' };
-    ctx.emit({ type: 'approval_requested', approvalId, toolName, input });
-    logDecision(approvalId, decided);
+    ctx.emit({ type: 'approval_decided', approvalId: randomUUID(), decision: 'approve', scope: 'step', auto: true, toolName });
     return decided;
   }
   const { id, decision } = broker.request({ runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName, input, ...o.card }, o.signal);

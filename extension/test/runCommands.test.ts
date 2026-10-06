@@ -7,7 +7,10 @@ import type { HostMessage } from '@agent-stream/shared';
 import { EngineManager, type Folder } from '../src/engines';
 import { noGit } from './helpers';
 import { GraphPanel, GraphPanels } from '../src/graphEditor';
-import { runCommands } from '../src/runCommands';
+import { readFileSync } from 'node:fs';
+import type { ApprovalRequest } from '@agent-stream/shared';
+import { ApprovalNotifier } from '../src/notifications';
+import { decideApproval, runCommands } from '../src/runCommands';
 
 const folder = (name: string): Folder => {
   const path = mkdtempSync(join(tmpdir(), `cs-${name}-`));
@@ -107,6 +110,54 @@ describe('run commands', () => {
     // A later request of the same step still asks.
     ask();
     expect(s.app.broker.pending()).toHaveLength(1);
+  });
+
+  it('the notification, the sidebar and the Approve command never send a scope', async () => {
+    const s = setup();
+    const broker = s.app.broker;
+    const decide = vi.spyOn(broker, 'decide');
+    const ask = (nodeId: string) => broker.request({ runId: 'r', graphId: s.g.id, nodeId, nodeTitle: 'b', toolName: 'Bash', input: {} });
+    const item = (id: string) => ({ folder: s.f, request: broker.pending().find((p) => p.id === id)! });
+
+    // The notification: its Approve and Deny go through the wiring extension.ts uses.
+    const answers: ((choice?: string) => void)[] = [];
+    const notifier = new ApprovalNotifier({
+      pending: () => s.manager.approvals(),
+      isVisible: () => false,
+      ask: (_message, ...actions) => new Promise<string | undefined>((resolve) => answers.push((c) => resolve(c && actions.includes(c) ? c : undefined))),
+      decide: (folder, id, decision) => decideApproval(s.manager, folder, id, decision),
+      reveal: () => {},
+    });
+    const n1 = ask('n1');
+    const n2 = ask('n2');
+    notifier.update();
+    answers[0]('Approve');
+    answers[1]('Deny');
+    expect(await n1.decision).toEqual({ decision: 'approve' });
+    expect(await n2.decision).toEqual({ decision: 'deny' });
+
+    // The sidebar: every command its items and view title offer, for a request that can be approved there.
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const menus: { command: string; when?: string }[] = [...manifest.contributes.menus['view/item/context'], ...(manifest.contributes.menus['view/title'] ?? [])];
+    const offered = [...new Set(menus.filter((m) => (m.when ?? '').includes('agentStream.approvals')).map((m) => m.command.replace('agentStream.', '')))];
+    expect(offered).toEqual(expect.arrayContaining(['approve', 'deny']));
+    for (const name of offered) {
+      const run = (s.cmds as unknown as Record<string, (i?: unknown) => unknown>)[name];
+      const fresh = ask('n3');
+      await run(item(fresh.id));
+      broker.cancelRun('r');
+      await fresh.decision;
+    }
+    // The Approve command, one request and all of them.
+    const one = ask('n4');
+    s.cmds.approve(item(one.id));
+    const rest = ask('n4');
+    s.cmds.approveAll();
+    expect(await one.decision).toEqual({ decision: 'approve' });
+    expect(await rest.decision).toEqual({ decision: 'approve' });
+
+    for (const [, d] of decide.mock.calls) expect(d).not.toHaveProperty('scope');
+    for (const n of ['n1', 'n2', 'n3', 'n4']) expect(broker.isStepAllowed('r', n)).toBe(false);
   });
 
   it('leaves graph-change approvals out of Approve all, since each needs its own approval', async () => {

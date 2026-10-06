@@ -227,8 +227,7 @@ describe('buildRunReport', () => {
       { at: 't1', type: 'approval_requested', approvalId: 'first', toolName: 'Bash', input: { command: 'ls' } },
       { at: 't2', type: 'approval_allowed_all' },
       { at: 't3', type: 'approval_decided', approvalId: 'first', decision: 'approve', scope: 'step' },
-      { at: 't4', type: 'approval_requested', approvalId: 'second', toolName: 'Write', input: { file_path: 'x' } },
-      { at: 't5', type: 'approval_decided', approvalId: 'second', decision: 'approve', scope: 'step' },
+      { at: 't4', type: 'approval_decided', approvalId: 'second', decision: 'approve', scope: 'step', auto: true, toolName: 'Write' },
     ];
     expect(buildRunReport(input)).toContain(
       '**Approvals**\n\n- t1 Bash: approved (allowed for this step)\n- t2 Allowed everything for the rest of this step\n- t4 Write: approved (allowed for this step)\n',

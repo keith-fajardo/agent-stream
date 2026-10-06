@@ -26,6 +26,11 @@ describe('Allow all for this step on the approval card', () => {
     const buttons = [...container.querySelectorAll('.approval-actions button')] as HTMLButtonElement[];
     const allowAll = buttons.filter((b) => b.textContent === 'Allow all for this step');
     expect(allowAll).toHaveLength(1);
+    // Last, and in the caution style, never the Deny style or the primary one.
+    expect(buttons.at(-1)).toBe(allowAll[0]);
+    expect(allowAll[0].className).toContain('caution');
+    expect(allowAll[0].className).not.toContain('danger');
+    expect(allowAll[0].className).not.toContain('primary');
     vi.mocked(send).mockClear();
     await act(async () => allowAll[0].click());
     expect(vi.mocked(send).mock.calls.map((c) => c[0])).toEqual([{ type: 'decide', approvalId: 'a1', decision: 'approve', scope: 'step' }]);
@@ -39,11 +44,16 @@ describe('LogView: Allow all for this step', () => {
     const events = [
       { type: 'approval_allowed_all', at } as NodeEvent,
       { type: 'approval_decided', at, approvalId: 'a', decision: 'approve', scope: 'step' } as NodeEvent,
+      { type: 'approval_decided', at, approvalId: 'b', decision: 'approve', scope: 'step', auto: true, toolName: 'Bash' } as NodeEvent,
     ];
     const el = document.createElement('div');
     await act(async () => createRoot(el).render(createElement(LogView, { events })));
     const lines = [...el.querySelectorAll('.ev.approval')].map((l) => l.textContent);
     expect(lines[0]).toContain('Allowed everything for the rest of this step');
     expect(lines[1]).toContain('✔ Approved (allowed for this step)');
+    // A request the allowance approved on its own says what it was, and never "waiting".
+    expect(lines[2]).toContain('✔ Approved (allowed for this step)');
+    expect(lines[2]).toContain('Bash');
+    expect(el.textContent).not.toContain('Waiting for your approval');
   });
 });

@@ -488,6 +488,7 @@ export class Runner extends EventEmitter {
     const node = meta.snapshot.nodes.find((n) => n.id === nodeId)!;
     const controller = new AbortController();
     run.running.set(nodeId, controller);
+    this.deps.broker.beginStep(run.meta.id, nodeId);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
     const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
@@ -568,7 +569,7 @@ export class Runner extends EventEmitter {
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {
     run.running.delete(nodeId);
     run.waiting.delete(nodeId);
-    // Allow all for this step ends with the step.
+    // Allow all for this step ends with the step, and withdraws the cards it left open.
     this.deps.broker.endStep(run.meta.id, nodeId);
     try {
       this.deps.runStore.writeOutput(run.meta.id, nodeId, outcome.output);
@@ -600,7 +601,7 @@ export class Runner extends EventEmitter {
     if (body.type === 'approval_requested') {
       run.waiting.set(nodeId, (run.waiting.get(nodeId) ?? 0) + 1);
       this.setNode(run, nodeId, { status: 'waiting_approval' });
-    } else if (body.type === 'approval_decided') {
+    } else if (body.type === 'approval_decided' && !body.auto) {
       const left = Math.max(0, (run.waiting.get(nodeId) ?? 1) - 1);
       run.waiting.set(nodeId, left);
       if (left === 0 && run.meta.nodes[nodeId].status === 'waiting_approval') this.setNode(run, nodeId, { status: 'running' });
@@ -617,6 +618,7 @@ export class Runner extends EventEmitter {
   private finish(run: ActiveRun): void {
     if (run.finished) return;
     run.finished = true;
+    this.deps.broker.forgetRun(run.meta.id);
     this.endWait(run);
     delete run.meta.waitingFor;
     const statuses = Object.values(run.meta.nodes).map((s) => s.status);

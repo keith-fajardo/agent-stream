@@ -316,7 +316,8 @@ export type NodeEventBody =
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError: boolean }
   | { type: 'approval_requested'; approvalId: string; toolName: string; input: unknown }
-  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string; scope?: ApprovalScope }
+  /** `auto`: the step allowance approved it with no card and no `approval_requested` before it; `toolName` says what it was. */
+  | { type: 'approval_decided'; approvalId: string; decision: Decision['decision']; note?: string; scope?: ApprovalScope; auto?: true; toolName?: string }
   /** The user pressed Allow all for this step: the step stops asking for the rest of its run. */
   | { type: 'approval_allowed_all' }
   | { type: 'retry'; attempt: number; maxRetries: number; error: string }

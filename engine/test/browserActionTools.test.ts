@@ -11,11 +11,20 @@ const elements = Object.fromEntries(['e2', 'e3', 'e4', 'e5'].map((ref) => [ref, 
 const node: GraphNode = { id: 'n3', title: 'Research', kind: 'agent', prompt: 'p', browser: true, createdBy: 'user', updatedBy: 'user', updatedAt: 't' };
 
 /** One Browser step whose action tools ask through a real broker, on a page with a snapshot taken. */
-async function setup() {
+async function setup(o: { afterAsk?: () => void } = {}) {
   const broker = new ApprovalBroker();
   const stop = new AbortController();
   const logged: NodeEventBody[] = [];
-  const ask = createBrowserAsk({ broker, ctx: { runId: 'r1', graph: emptyGraph('g', 'G', 't'), node, emit: (e) => void logged.push(e), signal: stop.signal } });
+  const real = createBrowserAsk({ broker, ctx: { runId: 'r1', graph: emptyGraph('g', 'G', 't'), node, emit: (e) => void logged.push(e), signal: stop.signal } });
+  // `afterAsk` runs once the user (or the step allowance) has answered, before the action goes ahead: the page can change under it.
+  const ask = Object.assign(
+    async (a: Parameters<typeof real>[0]) => {
+      const answer = await real(a);
+      o.afterAsk?.();
+      return answer;
+    },
+    { allowedAll: real.allowedAll },
+  );
   const s = toolSetup({ ask });
   s.ctx.sites[JOBS] = { title: 'Jobs', snapshot: SNAP, elements };
   s.ctx.sites['https://other.example/'] = { title: 'Other', snapshot: SNAP, elements };
@@ -373,7 +382,7 @@ describe('browser action tools: a site is an origin, and a frame is its own site
     expect(decided.every((e) => e.type === 'approval_decided' && e.scope === 'step')).toBe(true);
   });
 
-  it('Allow all for this step still refuses an embedded frame as a whole, and still checks the page did not change', async () => {
+  it('Allow all for this step still refuses an embedded frame as a whole', async () => {
     const s = await setup();
     const first = await s.asking('browser_click', { ref: 'e3' });
     s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
@@ -381,6 +390,44 @@ describe('browser action tools: a site is an origin, and a frame is its own site
     await embedded(s);
     expect(await s.call('browser_click', { ref: 'e6' })).toEqual({ text: EMBEDDED_FRAME, isError: true });
     expect(s.broker.pending()).toEqual([]);
+  });
+
+  it('Allow all for this step still does nothing when the frame went to another origin while it was answered', async () => {
+    let change = () => {};
+    const s = await setup({ afterAsk: () => change() });
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    await embedded(s);
+    s.page().actions.length = 0;
+    change = () => (s.ctx.sites[EMBED].frames = { f1e2: 'https://evil.example/' });
+    expect(await s.call('browser_click', { ref: 'f1e2' })).toEqual({ text: PAGE_CHANGED, isError: true });
+    expect(s.page().actions.filter((x) => x.startsWith('click'))).toEqual([]);
+    expect(s.broker.pending()).toEqual([]);
+  });
+
+  it('Allow all for this step still does nothing when the page moved on while it was answered', async () => {
+    let change = () => {};
+    const s = await setup({ afterAsk: () => change() });
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    s.page().actions.length = 0;
+    change = () => s.page().land(JOBS);
+    expect(await s.call('browser_click', { ref: 'e3' })).toEqual({ text: PAGE_CHANGED, isError: true });
+    expect(s.page().actions.filter((x) => x.startsWith('click'))).toEqual([]);
+  });
+
+  it('Allow all for this step takes no screenshot for the card nobody sees', async () => {
+    const s = await setup();
+    const first = await s.asking('browser_click', { ref: 'e3' });
+    expect(s.page().actions).toContain('screenshot jpeg');
+    s.broker.decide(first.request.id, { decision: 'approve', scope: 'step' });
+    await first.result;
+    s.page().actions.length = 0;
+    expect((await s.call('browser_click', { ref: 'e2' })).isError).toBeUndefined();
+    expect(s.page().actions).toContain('click e2');
+    expect(s.page().actions.filter((x) => x.startsWith('screenshot'))).toEqual([]);
   });
 
   it('Allow all for this step ends with the step: a request after it asks again', async () => {
