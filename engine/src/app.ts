@@ -411,8 +411,8 @@ export function createApp(d: AppDeps) {
     values.deleteGraph(id);
     agentChangeCounts.delete(id);
     markdownSent.delete(id);
-    homes.forget(id);
     try {
+      homes.forget(id);
       sessions.removeGraph(id);
     } catch (e) {
       // The graph is gone either way: clients still hear about it.
