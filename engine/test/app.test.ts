@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { HookInput, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { emptyGraph, type EffortLevel, type ModelChoice, type ModelSelection, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
+import { emptyGraph, SHARED_HOME, type EffortLevel, type ModelChoice, type ModelSelection, type Op, type ProviderStatus, type RunMeta, type ServerMessage } from '@agent-stream/shared';
 import { CHANGED_SINCE_REVIEW, createApp, type App, type AppDeps } from '../src/app';
 import type { NodeExecutor } from '../src/executors';
 import type { GitExec } from '../src/git';
@@ -83,7 +83,7 @@ describe('app', () => {
       type: 'hello',
       status: signedIn,
       project: expect.any(String),
-      graphs: [{ id: 'first', name: 'First', updatedAt: expect.any(String) }],
+      graphs: [{ id: 'first', name: 'First', updatedAt: expect.any(String), home: 'default' }],
       approvals: [],
     });
   });
@@ -104,7 +104,7 @@ describe('app', () => {
     const b = client();
     await app.handle(a.c, { type: 'createGraph', name: 'Parity' });
     expect(a.of('graphOpened')[0].graph.id).toBe('parity');
-    expect(b.of('graphs').at(-1)?.graphs).toEqual([{ id: 'parity', name: 'Parity', updatedAt: expect.any(String) }]);
+    expect(b.of('graphs').at(-1)?.graphs).toEqual([{ id: 'parity', name: 'Parity', updatedAt: expect.any(String), home: 'default' }]);
     await app.handle(a.c, { type: 'op', graphId: 'parity', op: { type: 'addNode', node: { title: 'Plan', kind: 'agent', prompt: 'p' } } });
     expect(b.of('graph').at(-1)?.graph.nodes[0]).toMatchObject({ id: 'n1', createdBy: 'user' });
     await app.handle(a.c, { type: 'op', graphId: 'parity', op: { type: 'connect', from: 'n1', to: 'n1' } });
@@ -727,6 +727,40 @@ describe('app', () => {
   });
 
   describe('work sessions', () => {
+    it('lists each graph with its home, moves it, and keeps it in Default unless moved', () => {
+      const { app, graphId } = setupWithGraph();
+      expect(app.listGraphs()[0].home).toBe('default');
+      app.createSession('Work');
+      expect(app.moveGraph(graphId, 'work')).toEqual({ ok: true });
+      expect(app.listGraphs()[0].home).toBe('work');
+      expect(app.moveGraph(graphId, SHARED_HOME)).toEqual({ ok: true });
+      expect(app.listGraphs()[0].home).toBe(SHARED_HOME);
+      expect(app.moveGraph(graphId, 'nope')).toEqual({ ok: false, error: 'session "nope" not found' });
+      expect(app.moveGraph('missing', 'work')).toEqual({ ok: false, error: 'graph "missing" not found' });
+    });
+
+    it('creates a graph in the given home, and duplicates keep the source home unless told otherwise', () => {
+      const { app } = setupWithGraph();
+      app.createSession('Work');
+      const g = app.createGraph('Fresh', 'work');
+      expect(app.listGraphs().find((x) => x.id === g.id)?.home).toBe('work');
+      const copy = app.duplicateGraph(g.id);
+      expect(copy.ok && app.listGraphs().find((x) => x.id === copy.graph.id)?.home).toBe('work');
+    });
+
+    it("forgets a deleted graph, and sends a deleted session's graphs to Default", () => {
+      const { app, graphId } = setupWithGraph();
+      app.createSession('Work');
+      const w = app.createGraph('W', 'work').id;
+      app.moveGraph(graphId, SHARED_HOME);
+      app.deleteGraph(w);
+      expect(app.listGraphs().map((g) => g.id)).toEqual([graphId]);
+      const work = app.listSessions().find((s) => s.name === 'Work')!;
+      app.moveGraph(graphId, work.id);
+      expect(app.deleteSession(work.id)).toEqual({ ok: true });
+      expect(app.listGraphs()[0].home).toBe('default');
+    });
+
     it('migrates legacy planner state and chats into the Default session on start', () => {
       const paths = tmpProject();
       writeFileSync(join(paths.graphsDir, 'g1.json'), JSON.stringify({ id: 'g1', name: 'G', goal: '', instructions: '', variables: [], nodes: [], edges: [], nodeSeq: 0, updatedAt: 't', plannerSessionId: 's', plannerOpCursor: 2 }));
@@ -1110,7 +1144,7 @@ describe('app', () => {
       await app.handle(a.c, { type: 'openGraph', graphId: g.id });
       expect(a.of('graphOpened').at(-1)).toMatchObject({ baseline: { nodes: [{ prompt: 'p' }] } });
       expect(a.of('graphOpened').at(-1)?.changes).toEqual([change]);
-      expect(app.listGraphs()).toEqual([{ id: g.id, name: 'G', updatedAt: expect.any(String), agentChanges: 1, steps: 1 }]);
+      expect(app.listGraphs()).toEqual([{ id: g.id, name: 'G', updatedAt: expect.any(String), agentChanges: 1, steps: 1, home: 'default' }]);
       await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'acceptChange', target: { kind: 'node', id: 'n1' } } });
       expect(a.of('graph').at(-1)?.changes).toEqual([]);
       expect(a.of('graph').at(-1)).not.toHaveProperty('baseline');

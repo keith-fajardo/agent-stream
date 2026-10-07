@@ -53,6 +53,7 @@ import {
   undoState,
   withStepModelLines,
   RUN_STOPPED,
+  isSharedHome,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
 import { runAttachments, runAttachmentsOf } from './attachedFiles';
@@ -65,6 +66,7 @@ import { systemClock, type Clock } from './clock';
 import { createCommandExecutor } from './commandExecutor';
 import type { Executors, NodeExecutor, NodeOutcome } from './executors';
 import { inspectCheckout, type GitExec } from './git';
+import { GraphHomes } from './graphHomes';
 import { GraphStore, type FileSync } from './graphStore';
 import { migrateGraphsToMarkdown, migrateProjectFolder, migrateValuesFile } from './migrate';
 import { ensureDataDirs, projectPaths } from './paths';
@@ -182,6 +184,11 @@ export function createApp(d: AppDeps) {
   });
   const attachments = new AttachmentStore(paths);
   const sessions = new SessionStore(paths, clock);
+  const homes = new GraphHomes(paths, (m) => d.log?.(m));
+  /** The session a graph is in when nothing says otherwise: the one ensureDefault() gives (graph homes spec, Data). */
+  const homeDefault = (): string => sessions.ensureDefault().id;
+  /** Each graph's home for the Graphs list: its recorded session or Shared, else Default. */
+  const resolveHome = () => homes.resolver(sessions.list().map((s) => s.id), homeDefault());
   // Planner state and chats from before work sessions move into the Default session.
   const legacyMoveFailed = new Set<string>();
   migrationWarnings.push(...migrateLegacy(paths, sessions, undefined, legacyMoveFailed));
@@ -350,9 +357,11 @@ export function createApp(d: AppDeps) {
   /** Planner's request_run: validate, then let the user confirm in the browser. */
   function listGraphs(): GraphListItem[] {
     const latest = runStore.latestByGraph();
+    const home = resolveHome();
     return graphStore.list().map((g) => {
+      const withHome = { ...g, home: home(g.id) };
       const run = latest.get(g.id);
-      return run ? { ...g, lastRun: { status: run.status, startedAt: run.startedAt } } : g;
+      return run ? { ...withHome, lastRun: { status: run.status, startedAt: run.startedAt } } : withHome;
     });
   }
   const broadcastGraphs = () => {
@@ -360,8 +369,9 @@ export function createApp(d: AppDeps) {
     refreshSubgraphs();
   };
 
-  function createGraph(name: string): Graph {
+  function createGraph(name: string, home?: string): Graph {
     const graph = graphStore.create(name);
+    homes.move(graph.id, home ?? homeDefault(), homeDefault());
     broadcastGraphs();
     return graph;
   }
@@ -370,13 +380,22 @@ export function createApp(d: AppDeps) {
     if (r.ok) broadcastGraphs();
     return r;
   }
-  function duplicateGraph(id: string): GraphResult {
+  function duplicateGraph(id: string, home?: string): GraphResult {
     const r = graphStore.duplicate(id);
     if (r.ok) {
       values.copyGraph(id, r.graph.id);
+      homes.move(r.graph.id, home ?? resolveHome()(id), homeDefault());
       broadcastGraphs();
     }
     return r;
+  }
+  function moveGraph(id: string, home: string): { ok: true } | { ok: false; error: string } {
+    if (!graphStore.load(id).ok) return { ok: false, error: `graph "${id}" not found` };
+    const known = sessions.list().map((s) => s.id);
+    if (!isSharedHome(home) && !known.includes(home)) return { ok: false, error: `session "${home}" not found` };
+    homes.move(id, home, homeDefault());
+    broadcastGraphs();
+    return { ok: true };
   }
   function deleteGraph(id: string): { ok: true } | { ok: false; error: string } {
     if (runner.activeFor(id)) return { ok: false, error: 'Stop the run first.' };
@@ -392,6 +411,7 @@ export function createApp(d: AppDeps) {
     values.deleteGraph(id);
     agentChangeCounts.delete(id);
     markdownSent.delete(id);
+    homes.forget(id);
     try {
       sessions.removeGraph(id);
     } catch (e) {
@@ -463,7 +483,12 @@ export function createApp(d: AppDeps) {
   }
   function deleteSession(id: string): { ok: true } | { ok: false; error: string } {
     if (planner.isBusyInSession(id)) return { ok: false, error: "The planner is still working in this session. Try again when it's done." };
-    return sessions.delete(id);
+    const r = sessions.delete(id);
+    if (r.ok) {
+      homes.releaseSession(id);
+      broadcastGraphs();
+    }
+    return r;
   }
   function saveSessionTabs(id: string, tabs: SessionTab[], activeGraphId?: string): void {
     sessions.saveTabs(id, tabs, activeGraphId);
@@ -1165,6 +1190,8 @@ export function createApp(d: AppDeps) {
     values,
     listGraphs,
     createGraph,
+    moveGraph,
+    homeDefault,
     renameGraph,
     duplicateGraph,
     deleteGraph,
