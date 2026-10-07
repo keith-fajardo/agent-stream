@@ -12,7 +12,7 @@ Today graphs belong to the project folder, and a session is only a set of open t
 
 ## Decisions (agreed with the user)
 
-1. A graph belongs to **exactly one home**: a session id, or `shared`.
+1. A graph belongs to **exactly one home**: a session id, or Shared.
 2. A graph with no recorded home, or whose home session no longer exists, is in **Default**. No migration step. "Default" means the session `SessionStore.ensureDefault()` returns: the session with id `default`, or, if that one is unreadable, the newest readable session, else a fresh one.
 3. **Shared** behaves like a special session that every session can see. Sharing a graph moves it into Shared; moving it back out puts it in a session. It is a group in the Graphs list, not a session you switch into (no tabs or chats of its own).
 4. Homes are **personal**: stored in the git-ignored sessions folder, not in the committed graph files. A teammate's pulled graphs land in your Default.
@@ -32,29 +32,31 @@ Today graphs belong to the project folder, and a session is only a set of open t
 New file `.agent-stream/sessions/graph-homes.json`:
 
 ```json
-{ "<graphId>": "<sessionId> | shared" }
+{ "<graphId>": "<sessionId> | @shared" }
 ```
+
+Shared is stored as `@shared`, not `shared`: session ids are slugs (`GRAPH_ID_RE`) that cannot contain `@`, so a session someone names "Shared" (id `shared`) can never collide with it. The code calls it `SHARED_HOME` (in `shared/src/graphHome.ts`).
 
 - One map for the whole folder. A graph id appears at most once, so two homes are impossible by construction, and no two files need to agree.
 - New engine module `engine/src/graphHomes.ts`, beside `sessionStore.ts`, built on the existing atomic-write helper (`writeFileAtomic`).
-  - `homeOf(graphId, knownSessionIds, defaultId): string` returns the recorded home, or `defaultId` (the id `ensureDefault()` gives) when absent or pointing at an unknown session.
+  - `resolver(knownSessionIds, defaultId)` reads the file once and returns a function from graph id to home: the recorded home, or `defaultId` (the id `ensureDefault()` gives) when absent or pointing at an unknown session.
   - `move(graphId, home)` sets the home. Moving to the Default session removes the entry.
   - `forget(graphId)` removes the entry (graph deleted).
-  - `reassign(fromSessionId, toSessionId)` moves every graph homed in one session to another (session deleted).
+  - `releaseSession(sessionId)` drops every entry homed in that session (session deleted), so those graphs read as Default.
 - The file is read tolerantly. Missing, empty or unparsable means "no homes" (everything in Default), and the problem is logged to the Agent Stream output channel. It is never fatal.
-- `GraphListItem` (`shared/src/types.ts`) gains `home: string` (a session id, or `shared`), filled in by `listGraphs()` in `engine/src/app.ts`.
-- `homeOf` needs the list of existing session ids, taken from `SessionStore.list()`. A session with a problem still counts as existing, so a damaged `session.json` does not silently re-home its graphs.
+- `GraphListItem` (`shared/src/types.ts`) gains an optional `home` (a session id, or `@shared`; always set by the engine, so it is only missing in tests), filled in by `listGraphs()` in `engine/src/app.ts`.
+- The resolver needs the list of existing session ids, taken from `SessionStore.list()`. A session with a problem still counts as existing, so a damaged `session.json` does not silently re-home its graphs.
 
 ## Engine API (`engine/src/app.ts`)
 
-- `moveGraph(id, home)`: validates that the graph exists and that `home` is `shared` or an existing session. Returns the usual `{ ok } | { ok: false, error }`. Broadcasts the graphs list.
+- `moveGraph(id, home)`: validates that the graph exists and that `home` is `@shared` or an existing session. Returns the usual `{ ok } | { ok: false, error }`. Broadcasts the graphs list.
 - `createGraph`, `duplicateGraph` and the import / template / planner creation paths take an optional `home`. The extension passes the active session. The web client omits it, so those graphs land in Default.
 - `deleteGraph` also calls `forget`.
-- `deleteSession` also calls `reassign(id, <default id>)` after a successful delete, so graphs are never left pointing at a missing session. Deleting the Default session is allowed today (`ensureDefault()` then picks another readable session or makes a fresh one); its graphs follow whichever session that turns out to be, because an entry that points at a missing session already reads as Default.
+- `deleteSession` also calls `releaseSession(id)` after a successful delete, so no entry is left pointing at a missing session. Deleting the Default session is allowed today (`ensureDefault()` then picks another readable session or makes a fresh one); its graphs follow whichever session that turns out to be, because an entry that points at a missing session already reads as Default.
 
 ## Behaviour
 
-- **Graphs list:** `GraphsView` shows the active session's graphs, then a collapsible **Shared** group. A graph row shows its home only where it is not obvious: rows in the Shared group say "Shared". The Shared group is hidden when empty.
+- **Graphs list:** `GraphsView` shows the active session's graphs, then a collapsible **Shared** group. Rows need no home label: the group header says Shared. The Shared group is hidden when empty.
 - **Switching session** refreshes the list. Tabs, splits and chats switch as today.
 - **Moving:** the context menu of a graph row has **Move to Session…**, a quick-pick of the folder's sessions plus **Shared**, with the current home marked. Choosing the current home does nothing.
 - **Open tabs:** a move closes nothing. Tabs reference a graph id, so a graph opened in session A and moved elsewhere keeps its tab in A, and restores in A on the next switch.
@@ -115,8 +117,8 @@ Moved without rewording, except where noted. In the Marketplace README, links to
 
 ## Testing
 
-- Engine (`graphHomes`): Default fallback for absent and unknown sessions; `move` to a session and to `shared`; moving back to Default removes the entry; `forget`; `reassign`; unreadable file reads as "no homes"; a session with a problem still counts as existing.
-- Engine (`app`): `moveGraph` validation errors; `createGraph` / `duplicateGraph` with and without `home`; `deleteGraph` forgets; `deleteSession` reassigns to Default; `listGraphs` fills `home`.
+- Engine (`graphHomes`): Default fallback for absent and unknown sessions; `move` to a session and to Shared; moving back to Default removes the entry; `forget`; `releaseSession`; unreadable file reads as "no homes"; a session with a problem still counts as existing.
+- Engine (`app`): `moveGraph` validation errors; `createGraph` / `duplicateGraph` with and without `home`; `deleteGraph` forgets; `deleteSession` releases its graphs to Default; `listGraphs` fills `home`.
 - Extension: `GraphsView` shows the active session's graphs plus the Shared group, hides an empty Shared group, and refreshes on a session switch; Move to Session quick-pick lists sessions plus Shared and marks the current home; the delete-session confirmation names the graph count.
 - `package.json`: a test that the view order is Sessions, Graphs, Approvals.
 - README: a test that every `docs/...` link in `README.md` and `extension/README.md` points at a file that exists, and that both READMEs have the same headings apart from the Install and Development differences.
