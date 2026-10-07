@@ -173,9 +173,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     setBase({ draft, at: node.updatedAt });
   };
   // ⌘S saves this draft exactly as the Save button does (spec §6a.1).
-  const draftRef = useRef({ canSave, save });
-  draftRef.current = { canSave, save };
-  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [graphId, node.id]);
+  const draftRef = useRef({ canSave, blocked: dirty && !canSave, save });
+  draftRef.current = { canSave, blocked: dirty && !canSave, save };
+  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, blocked: () => draftRef.current.blocked, save: () => draftRef.current.save() }), [graphId, node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
   const subgraphs = useStore((s) => s.subgraphs);

@@ -46,6 +46,21 @@ describe('GraphStore.lookup: the inner graph of a sub-graph step', () => {
   });
 });
 
+describe('GraphStore.list: a graph whose file has errors now', () => {
+  it('carries the error, keeps its last good name, and is clear again once the file reads', () => {
+    const { store, id, file } = storeWithResearch();
+    const good = readFileSync(file, 'utf8');
+    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
+    writeFileSync(file, good.replace('- kind: agent', '- kind: robot'));
+    // load() still gives the last good version, but the list must not offer the graph as a sub-graph (spec §6.2).
+    expect(store.load(id).ok).toBe(true);
+    expect(store.list().find((g) => g.id === id)).toMatchObject({ id, name: 'Company research', error: expect.stringMatching(/kind is "robot"; use agent or command\./) });
+    writeFileSync(file, good);
+    store.load(id);
+    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
+  });
+});
+
 describe('GraphListItem.usedBy', () => {
   it('lists the graphs with a sub-graph step pointing at each graph', () => {
     const paths = tmpProject();

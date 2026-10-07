@@ -8,6 +8,7 @@ import { StepNode, type StepFlowNode } from '../src/components/StepNode';
 import { buildFlowNodes } from '../src/flowNodes';
 import { initialState, reduce, type Action } from '../src/state';
 import { liveExpansion, scopeProblem, shownGraph } from '../src/scope';
+import { changedSinceRun } from '../src/retry';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,12 +21,30 @@ const approval = (nodeId: string): ApprovalRequest => ({ id: 'a1', runId: 'r1', 
 
 describe('the web keeps the inner graphs (spec §6.3)', () => {
   const open = (g: Graph): Action => ({ kind: 'server', msg: { type: 'graphOpened', changes: [], graph: g, runs: [], variableValues: {} } });
-  it('stores the subgraphs message for the tab’s graph only, and forgets them when the graph opens again', () => {
+  it('stores the subgraphs message for the tab’s graph only, keeps them when the same graph opens again, and forgets them for another graph', () => {
     let s = [open(hunting), { kind: 'server', msg: { type: 'subgraphs', graphId: 'job-hunting', graphs: { 'company-research': research }, reviews: {} } } as Action].reduce(reduce, initialState);
     expect(s.subgraphs).toEqual({ 'company-research': research });
     expect(reduce(s, { kind: 'server', msg: { type: 'subgraphs', graphId: 'other', graphs: {}, reviews: {} } }).subgraphs).toEqual({ 'company-research': research });
+    // The same graph opening again (a reload of its file, a reopen) must not flash its steps as missing graphs until the engine sends them again.
     s = reduce(s, open(hunting));
-    expect(s.subgraphs).toEqual({});
+    expect(s.subgraphs).toEqual({ 'company-research': research });
+    expect(reduce(s, open({ ...emptyGraph('other', 'Other', 't') })).subgraphs).toEqual({});
+  });
+
+  it('treats an inner graph the engine has not sent yet as pending, not as missing, and still reports one it says is missing', () => {
+    const opened = reduce(initialState, { kind: 'server', msg: { type: 'graphOpened', changes: [], graph: hunting, runs: [], variableValues: {} } });
+    // Nothing received yet: no problem on the card, none in the scope bar, and no "changed since run".
+    expect(liveExpansion(opened)).toBeUndefined();
+    expect(scopeProblem({ ...opened, scope: ['n4'] })).toBeUndefined();
+    const [, card] = buildFlowNodes({ ...base, graph: hunting, approvals: [], subgraphs: opened.subgraphs, problems: [] });
+    expect(card.data.subgraph).toEqual({ graphName: 'company-research' });
+    const finished: RunMeta = { ...run({}), status: 'succeeded', snapshot: { ...hunting, nodes: [...hunting.nodes, step('n4/n1'), step('n4/n2')] } };
+    expect(changedSinceRun({ run: finished, graph: hunting, subgraphs: opened.subgraphs })).toBe(false);
+    // The engine sends every reachable id, the missing ones with a reason: that is a problem.
+    const gone = reduce(opened, { kind: 'server', msg: { type: 'subgraphs', graphId: 'job-hunting', graphs: { 'company-research': { error: 'graph "company-research" not found', reason: 'missing' } }, reviews: {} } });
+    const r = liveExpansion(gone);
+    expect(r && !r.ok && r.problems[0].message).toBe('Step n4 uses graph "company-research", which isn\'t in this folder.');
+    expect(scopeProblem({ ...gone, scope: ['n4'] })).toBe('This step uses graph "company-research", which isn\'t in this folder.');
   });
 
   it('expands the live graph with them, the same object while nothing changes', () => {

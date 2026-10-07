@@ -101,6 +101,18 @@ describe('the Node panel for a sub-graph step (spec §6.2)', () => {
     await r.done();
   });
 
+  it('says under the value boxes that the values are saved in the graph file', async () => {
+    open();
+    dispatch({ kind: 'selectNode', id: 'n4' });
+    const r = await render(createElement(NodePanel));
+    const note = r.container.querySelector('.subgraph-values-note');
+    expect(note?.textContent).toBe("Saved in this graph's file. Leave a value empty to be asked when the run starts (kept on this machine), or use {{ variable }} to pass one of this graph's variables.");
+    expect(note?.querySelector('code')?.textContent).toBe('{{ variable }}');
+    // It follows the value boxes.
+    expect(r.container.querySelector('textarea#node-value-depth')?.closest('.field')?.nextElementSibling).toBe(note);
+    await r.done();
+  });
+
   it('making an agent step a sub-graph step needs a graph before it can be saved', async () => {
     open();
     dispatch({ kind: 'selectNode', id: 'n1' });
@@ -122,8 +134,11 @@ describe('the Node panel for a sub-graph step (spec §6.2)', () => {
     const r = await render(createElement(NodePanel));
     await act(async () => type([...r.container.querySelectorAll('select')][0] as HTMLSelectElement, 'graph'));
     vi.mocked(send).mockClear();
+    dispatch({ kind: 'dismissToast' });
     await act(async () => actions.save());
     expect(vi.mocked(send).mock.calls.filter(([m]) => m.type === 'op')).toEqual([]);
+    // It says what is missing, not that the graph was saved.
+    expect(getState().toast).toBe('Choose a graph first.');
     const save = [...r.container.querySelectorAll('button')].find((b) => b.textContent === 'Save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     // Choosing a graph makes ⌘S save it.

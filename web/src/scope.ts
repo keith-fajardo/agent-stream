@@ -21,7 +21,8 @@ export function scopeProblem(s: ScopeState): string | undefined {
     const step = g?.nodes.find((n) => n.id === id && n.kind === 'graph');
     if (!g || !step?.graph) return `Step ${id} is no longer a sub-graph step.`;
     const entry: SubgraphEntry | undefined = s.subgraphs[step.graph];
-    if (!entry) return `This step uses graph "${step.graph}", which isn't in this folder.`;
+    // The engine sends every inner graph, the missing ones too: none yet means the message hasn't arrived.
+    if (!entry) return undefined;
     if ('error' in entry) return entry.reason === 'missing' ? `This step uses graph "${step.graph}", which isn't in this folder.` : `This step uses graph "${entry.name ?? step.graph}", whose file has errors: ${entry.error}`;
     g = entry;
   }
@@ -46,14 +47,36 @@ export function shownUndoLabel(s: Pick<State, 'graph' | 'scope' | 'subgraphs' | 
   return g ? s.subUndo[g.id] : undefined;
 }
 
+/**
+ * Whether a sub-graph step the graph reaches has no entry yet. The engine sends every reachable id, a missing graph or one
+ * with errors as an error entry, so an absent id means its `subgraphs` message hasn't arrived (not that the graph is missing).
+ */
+export function subgraphsPending(graph: Graph, entries: Record<string, SubgraphEntry>): boolean {
+  const seen = new Set<string>();
+  const queue = [graph];
+  while (queue.length) {
+    for (const n of queue.shift()!.nodes) {
+      if (n.kind !== 'graph' || !n.graph || n.graph === graph.id || seen.has(n.graph)) continue;
+      seen.add(n.graph);
+      if (!Object.hasOwn(entries, n.graph)) return true;
+      const entry = entries[n.graph];
+      if (!('error' in entry)) queue.push(entry);
+    }
+  }
+  return false;
+}
+
 let memo: { graph?: Graph; subgraphs?: Record<string, SubgraphEntry>; result?: ExpandResult } = {};
 /**
  * The tab's graph expanded with the inner graphs it has (spec §6.3), as the engine would expand it: the same object while
- * neither changes, so React can compare it. Undefined before the graph loads.
+ * neither changes, so React can compare it. Undefined before the graph loads, and while its inner graphs haven't arrived.
  */
 export function liveExpansion(s: Pick<State, 'graph' | 'subgraphs'>): ExpandResult | undefined {
   if (!s.graph) return undefined;
-  if (memo.graph !== s.graph || memo.subgraphs !== s.subgraphs) memo = { graph: s.graph, subgraphs: s.subgraphs, result: expandGraph(s.graph, lookupFromEntries(s.subgraphs, s.graph)) };
+  if (memo.graph !== s.graph || memo.subgraphs !== s.subgraphs) {
+    const result = subgraphsPending(s.graph, s.subgraphs) ? undefined : expandGraph(s.graph, lookupFromEntries(s.subgraphs, s.graph));
+    memo = { graph: s.graph, subgraphs: s.subgraphs, result };
+  }
   return memo.result;
 }
 

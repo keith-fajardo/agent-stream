@@ -31,6 +31,19 @@ describe('graph ids', () => {
   });
 });
 
+describe('line breaks in values', () => {
+  it('are stored as \\n however they were typed, so a value equals its file form after a reload', () => {
+    const added = build('J', [sub({ values: { company: 'Acme\r\nCorp\rInc' } })]);
+    expect(added.nodes[0].values).toEqual({ company: 'Acme\nCorp\nInc' });
+    const updated = apply(added, { type: 'updateNode', id: 'n1', patch: { values: { company: 'A\r\nB' } } });
+    expect(updated.nodes[0].values).toEqual({ company: 'A\nB' });
+    // The file's own canonical form agrees with what applyOp stored.
+    const crlf: Graph = { ...updated, nodes: [{ ...updated.nodes[0], values: { company: 'A\r\nB' } }] };
+    expect(canonicalGraph(crlf).nodes[0].values).toEqual(updated.nodes[0].values);
+    expect(contentSignature(canonicalGraph(crlf))).toBe(contentSignature(updated));
+  });
+});
+
 describe('applyOp: sub-graph steps', () => {
   it('adds one with its graph and values, values in name order, and no other fields', () => {
     const g = build('Job hunting', [sub({ description: 'Researches the company.', values: { depth: 'quick', company: '{{ target_company }}' } })]);

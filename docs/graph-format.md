@@ -103,7 +103,7 @@ A step heading is `## <id> · <title>`: the separator is a space, a middle dot (
 A step section holds, in this order:
 
 1. **Fields**, one bullet each, `- key: value`:
-   - `kind`: `agent` or `command`. Agent Stream always writes it. When it's missing, a ```` ```prompt ```` block means an agent step and a ```` ```sh ```` block a command step.
+   - `kind`: `agent`, `command` or `graph` (a [sub-graph step](#sub-graph-steps)). Agent Stream always writes it. When it's missing, a ```` ```prompt ```` block means an agent step and a ```` ```sh ```` block a command step. A `- graph:` line with no `kind` line and no code block also means a sub-graph step.
    - `access`: `read` for an agent step that only reads and reports. Missing (or `write`) means it can change files. Command steps can always change files, so `access: read` on a command step is an error.
    - `workspace`: a variant workspace name (lowercase letters, digits, `-` and `_`, starting with a letter, at most 40 characters). Steps with the same workspace share one worktree per run. Missing means this checkout.
    - `timeout`: a whole number of seconds, from 1 to 2147483.
@@ -114,9 +114,9 @@ A step section holds, in this order:
    - `attach`: a file the agent step gets every time it runs, by name. Repeat the line for each file; the order is kept.
    - `graph`: a sub-graph step's inner graph, by id (see [Sub-graph steps](#sub-graph-steps)).
 
-   Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`.
+   Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `graph`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
-3. **Exactly one code block:**
+3. **Exactly one code block** (an agent or command step; a sub-graph step has no code block: it has `value` blocks instead, see [Sub-graph steps](#sub-graph-steps)):
    - ```` ```prompt ```` (or `text`, `md`) for an agent step's prompt;
    - ```` ```sh ```` (or `bash`, `shell`) for a command step's command.
 

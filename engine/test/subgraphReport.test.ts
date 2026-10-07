@@ -56,4 +56,15 @@ describe('the Run Report of a run with a sub-graph step (spec §5)', () => {
   it('lists an inner step’s attachments from its scope graph', () => {
     expect(report).toContain('#### n1/n1 · Find site (Company research) — Succeeded\n\n**Attachments**\n\n- brief.md · sha256 abc123');
   });
+
+  it('indents inner steps by the width of their sub-graph step’s list number, so they nest from item 10 on', () => {
+    // Nine agent steps, then the sub-graph step as item 10, whose inner steps are items 11 and 12.
+    const agents = Array.from({ length: 9 }, (_, i): Op => ({ type: 'addNode', node: { title: `Step ${i + 1}`, kind: 'agent', prompt: 'p' } }));
+    const big = graphOf('big', 'Big', [...agents, { type: 'addNode', node: { title: 'Research', kind: 'graph', graph: 'company-research' } }]);
+    const r = expandGraph(big, lookup);
+    if (!r.ok) throw new Error('expected an expansion');
+    const text = buildRunReport({ graphName: 'Big', run: { ...run, graphId: 'big', snapshot: r.graph, scopes: r.scopes, nodes: {}, rendered: undefined, attachments: undefined }, steps: {}, now: 't' });
+    const plan = text.slice(text.indexOf('## Plan'), text.indexOf('\n## ', text.indexOf('## Plan') + 1)).split('\n');
+    expect(plan.filter((l) => /^ *1[0-2]\./.test(l))).toEqual(['10. n10 · Research (sub-graph "Company research") — after n10/n2', '    11. n10/n1 · Find site (agent)', '    12. n10/n2 · Read news (agent) — after n10/n1']);
+  });
 });

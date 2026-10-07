@@ -6,7 +6,7 @@ import { onlyAvailability, retryTarget } from './retry';
 import { expandedIdOf, shownGraph } from './scope';
 import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
-import { cantSaveToast, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
+import { cantSaveToast, CHOOSE_GRAPH_FIRST, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
 type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize>; flushMoves(): void; viewCenter(): Position | undefined };
@@ -16,7 +16,8 @@ export function registerCanvas(c: CanvasActions | undefined): void {
 }
 
 /** The Node panel's open step and its unsaved edits, for ⌘S (step model spec §6a.1); the panel registers it while it shows a step. */
-export type NodeDraft = { nodeId: string; dirty(): boolean; save(): void };
+/** `blocked`: there are unsaved edits that can't be saved yet (a sub-graph step with no graph chosen). */
+export type NodeDraft = { nodeId: string; dirty(): boolean; blocked(): boolean; save(): void };
 let nodeDraft: NodeDraft | undefined;
 /** Registers the open step's draft; the returned function unregisters it (if it is still the one registered). */
 export function registerNodeDraft(d: NodeDraft): () => void {
@@ -99,6 +100,8 @@ export const actions = {
     const s = getState();
     if (!s.graph) return;
     if (s.canvasMode === 'markdown') return actions.saveMarkdown();
+    // Edits that can't be saved yet: say so, rather than that the graph was saved.
+    if (nodeDraft?.blocked()) return dispatch({ kind: 'showToast', message: CHOOSE_GRAPH_FIRST });
     // Whichever open panel has unsaved edits (only one is shown at a time) saves them as its own Save button does.
     const open = nodeDraft?.dirty() ? { draft: nodeDraft, toast: stepSavedToast(nodeDraft.nodeId) } : graphDraft?.dirty() ? { draft: graphDraft, toast: GRAPH_PANEL_SAVED } : undefined;
     if (open) {

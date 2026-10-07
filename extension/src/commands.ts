@@ -132,7 +132,9 @@ export function graphCommands(d: CommandDeps) {
         return found.ok ? found.graph.name : (found.name ?? id);
       });
       const subgraphs = names.length ? ` ${subgraphsNotExported(names)}` : '';
-      d.ui.info(`Exported ${r.fileName}. Variable values were left out.${files}${subgraphs}`);
+      // What was typed on a sub-graph step is part of the graph file, so it goes out with it (unlike a variable's value).
+      const stepValues = g.ok && g.graph.nodes.some((n) => n.kind === 'graph' && Object.keys(n.values ?? {}).length > 0) ? ' Values set on sub-graph steps are part of the graph and were included.' : '';
+      d.ui.info(`Exported ${r.fileName}. Variable values were left out.${stepValues}${files}${subgraphs}`);
     },
 
     /**

@@ -83,6 +83,25 @@ describe('going inside a sub-graph step (spec §6.1)', () => {
 });
 
 describe('editing inside (spec §6.1)', () => {
+  it('an edit of the outer graph keeps the inner step selected, as long as the shown graph still has it', () => {
+    open();
+    actions.openStep('n4');
+    dispatch({ kind: 'selectNode', id: 'n2' });
+    // The outer graph has no n2; the inner graph does.
+    dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...hunting, goal: 'Get a better job.', updatedAt: 't2' } } });
+    expect(getState()).toMatchObject({ scope: ['n4'], selectedNodeId: 'n2' });
+    // Its step is gone from the outer graph: nothing is shown inside any more, so nothing stays selected.
+    dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...hunting, nodes: [hunting.nodes[0]], updatedAt: 't3' } } });
+    expect(getState().selectedNodeId).toBeUndefined();
+  });
+
+  it('at the top, an edit that removes the selected step still clears the selection', () => {
+    open();
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    dispatch({ kind: 'server', msg: { type: 'graph', changes: [], graph: { ...hunting, nodes: [hunting.nodes[1]], updatedAt: 't2' } } });
+    expect(getState().selectedNodeId).toBeUndefined();
+  });
+
   it('sends edits and undo with the inner graph’s id, and the menu names this tab’s undo step there', async () => {
     open();
     actions.openStep('n4');

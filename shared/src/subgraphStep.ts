@@ -22,9 +22,16 @@ export function subgraphValuesProblem(values: Record<string, string>): string | 
   return null;
 }
 
-/** The values in name order: the order the Markdown file writes them, so comparisons and signatures don't depend on how they were set. */
+/**
+ * The values in name order, with `\n` line breaks: the order and text the Markdown file has, so comparisons and signatures
+ * don't depend on how they were set (a value typed with CRLF equals its file form after a reload).
+ */
 export function sortedValues(values: Record<string, string> | undefined): Record<string, string> {
-  return Object.fromEntries(Object.entries(values ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return Object.fromEntries(
+    Object.entries(values ?? {})
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([name, value]) => [name, value.replace(/\r\n?/g, '\n')]),
+  );
 }
 
 /** A step's values as one line per value (`name: value`), for comparing and for the Changes tab. */

@@ -189,7 +189,17 @@ export class GraphStore extends EventEmitter {
       const agentChanges = this.agentChanges(id).length;
       const users = usedBy.get(id);
       const steps = r.graph.nodes.length;
-      return { id, name: r.graph.name, updatedAt: r.graph.updatedAt, ...(agentChanges > 0 && { agentChanges }), ...(users && { usedBy: users }), ...(steps > 0 && { steps }) };
+      // A file that broke after it was read still loads its last good version, but is listed as broken: not offered as a sub-graph (spec §6.2).
+      const errors = this.fileErrors(id);
+      return {
+        id,
+        name: r.graph.name,
+        ...(errors.length > 0 && { error: formatFileErrors(errors) }),
+        updatedAt: r.graph.updatedAt,
+        ...(agentChanges > 0 && { agentChanges }),
+        ...(users && { usedBy: users }),
+        ...(steps > 0 && { steps }),
+      };
     });
     return items.sort(
       (a, b) => Number(!!a.error) - Number(!!b.error) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || a.id.localeCompare(b.id),

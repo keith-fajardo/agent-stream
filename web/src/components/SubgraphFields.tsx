@@ -52,6 +52,11 @@ export function SubgraphFields(p: { ownerId: string; graph: string; values: Reco
           <textarea id={`node-value-${v.name}`} aria-label={v.name} rows={2} className="mono" value={p.values[v.name] ?? ''} placeholder={VALUE_PLACEHOLDER} onChange={(e) => setValue(v.name, e.target.value)} />
         </div>
       ))}
+      {!!inner?.variables.length && (
+        <p className="static-note subgraph-values-note">
+          Saved in this graph's file. Leave a value empty to be asked when the run starts (kept on this machine), or use <code>{'{{ variable }}'}</code> to pass one of this graph's variables.
+        </p>
+      )}
       {unused.length > 0 && (
         <div className="field subgraph-unused">
           <label>Unused</label>

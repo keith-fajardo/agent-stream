@@ -3,9 +3,13 @@ import { liveExpansion } from './scope';
 import type { State } from './state';
 
 const NO_SUBGRAPHS: Record<string, SubgraphEntry> = {};
-/** The live graph as a run would execute it: its sub-graph steps expanded with the inner graphs the tab has (sub-graphs spec §6.3). */
+/**
+ * The live graph as a run would execute it: its sub-graph steps expanded with the inner graphs the tab has (sub-graphs spec §6.3).
+ * While those haven't arrived there is nothing to compare or plan with yet: no graph, so nothing reads as changed.
+ */
 function liveRunGraph(s: Pick<State, 'graph'> & Partial<Pick<State, 'subgraphs'>>) {
   const r = liveExpansion({ graph: s.graph, subgraphs: s.subgraphs ?? NO_SUBGRAPHS });
+  if (s.graph && !r) return { graph: undefined, scopes: undefined };
   return r?.ok ? { graph: r.graph, scopes: r.scopes } : { graph: s.graph, scopes: undefined };
 }
 

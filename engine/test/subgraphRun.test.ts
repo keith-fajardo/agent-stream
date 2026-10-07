@@ -222,4 +222,32 @@ describe('the runner on an expanded graph', () => {
     expect(seen[0].prompt).toContain('# Workflow goal\nInner goal.');
     expect(seen[0].scopeName).toBe('Inner');
   });
+
+  it('fails the sub-graph step and finishes the run when completing it throws unexpectedly', { timeout: 2000 }, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const inner = graphOf('inner', 'Inner', [{ type: 'addNode', node: { title: 'Build', kind: 'agent', prompt: 'Build it.' } }]);
+    const outer = graphOf('o', 'O', [{ type: 'addNode', node: { title: 'Sub', kind: 'graph', graph: 'inner' } }]);
+    const r = expandGraph(outer, lookupOf(inner));
+    if (!r.ok) throw new Error('expected an expansion');
+    // The first time the sub-graph step is cleaned up, the broker throws, as a bug in completing a step would.
+    let thrown = false;
+    class FlakyBroker extends ApprovalBroker {
+      override endStep(runId: string, nodeId: string): void {
+        if (nodeId === 'n1' && !thrown) {
+          thrown = true;
+          throw new Error('broker bug');
+        }
+        super.endStep(runId, nodeId);
+      }
+    }
+    const paths = tmpProject();
+    const exec: NodeExecutor = async () => ({ ok: true, output: 'built' });
+    const runner = new Runner({ runStore: new RunStore(paths), broker: new FlakyBroker(), executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 2, leases: testLeases() });
+    const started = runner.start({ graph: r.graph, rendered: { goal: '', instructions: '', nodes: { n1: '', 'n1/n1': 'Build it.' }, scopes: { n1: { goal: '', instructions: '' } } }, scopes: r.scopes });
+    if (!started.ok) throw new Error(started.error);
+    const meta = await started.done;
+    expect(meta.status).toBe('failed');
+    expect(meta.nodes.n1.status).toBe('failed');
+    expect(meta.nodes.n1.error).toBe('Agent Stream internal error: broker bug');
+  });
 });

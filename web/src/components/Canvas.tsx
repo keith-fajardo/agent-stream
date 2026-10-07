@@ -56,6 +56,15 @@ export function Canvas() {
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [picking, setPicking] = useState(false);
+  // React Flow fits the view only when it mounts, and it remounts with each graph shown. Drop the steps of the graph we are
+  // leaving as the view changes, so the new one mounts empty and fits to the steps that arrive, not to the old ones.
+  const view = `${graph?.id ?? ''}@${scope.join('/')}`;
+  const [shownView, setShownView] = useState(view);
+  if (shownView !== view) {
+    setShownView(view);
+    setNodes([]);
+    setEdges([]);
+  }
   // A run belongs to the tab's graph; inside a sub-graph its steps are under their expanded ids.
   const runForGraph = run && tabGraph && run.graphId === tabGraph.id ? run : undefined;
 
@@ -181,7 +190,7 @@ export function Canvas() {
         {stale && <span className="stale">Graph changed since this run started</span>}
       </div>
       <ReactFlow
-        key={graphId}
+        key={view}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}

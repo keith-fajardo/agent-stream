@@ -59,10 +59,24 @@ describe('sub-graphs in the graph commands (spec §8)', () => {
   });
 });
 
+describe('the export notice and values set on sub-graph steps', () => {
+  it('says nothing about them when no sub-graph step has values, and that they were included when one has', async () => {
+    const s = setup();
+    s.ui.saveFile.mockResolvedValue({ write: async () => {} });
+    await s.commands.exportGraph({ folder: s.folder, graphId: 'job-hunting' });
+    expect(s.ui.info.mock.calls.at(-1)?.[0]).not.toContain('sub-graph steps are part of');
+    const node = s.app.graphStore.load('weekly-report');
+    if (!node.ok) throw new Error('expected the graph');
+    s.app.graphStore.apply('weekly-report', { type: 'updateNode', id: node.graph.nodes[0].id, patch: { values: { company: 'Acme' } } }, 'user');
+    await s.commands.exportGraph({ folder: s.folder, graphId: 'weekly-report' });
+    expect(s.ui.info.mock.calls.at(-1)?.[0]).toBe("Exported weekly-report.md. Variable values were left out. Values set on sub-graph steps are part of the graph and were included. Sub-graphs aren't included: Company research. Export them too.");
+  });
+});
+
 describe('the READMEs', () => {
-  it('have the same Sub-graphs section', () => {
-    const section = (file: string) => /## Sub-graphs\n\n[^\n]+\n/.exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[0];
-    expect(section('../../README.md')).toBeDefined();
+  it('have the same Sub-graphs section, up to the next heading', () => {
+    const section = (file: string) => /## Sub-graphs\n[\s\S]*?(?=\n## |$)/.exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[0];
+    expect(section('../../README.md')).toContain('saved in the graph file');
     expect(section('../../README.md')).toBe(section('../README.md'));
   });
 });

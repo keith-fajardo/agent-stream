@@ -517,7 +517,8 @@ export class Runner extends EventEmitter {
         return { ok: true, output: sections.join('\n\n') };
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
-      .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt));
+      .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
   }
 
   private launch(run: ActiveRun, nodeId: string): void {
@@ -595,22 +596,24 @@ export class Runner extends EventEmitter {
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
       .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
-      .catch((e: unknown) => {
-        // Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection.
-        console.error('[agent-stream] internal error in run', meta.id, 'node', nodeId, e);
-        const status = meta.nodes[nodeId]?.status;
-        if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
-          run.running.delete(nodeId);
-          run.waiting.delete(nodeId);
-          this.deps.broker.endStep(run.meta.id, nodeId);
-          this.setNode(run, nodeId, {
-            status: 'failed',
-            endedAt: this.clock(),
-            error: `Agent Stream internal error: ${e instanceof Error ? e.message : String(e)}`,
-          });
-        }
-        this.schedule(run);
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
+  }
+
+  /** Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection. */
+  private failInternally(run: ActiveRun, nodeId: string, e: unknown): void {
+    console.error('[agent-stream] internal error in run', run.meta.id, 'node', nodeId, e);
+    const status = run.meta.nodes[nodeId]?.status;
+    if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
+      run.running.delete(nodeId);
+      run.waiting.delete(nodeId);
+      this.deps.broker.endStep(run.meta.id, nodeId);
+      this.setNode(run, nodeId, {
+        status: 'failed',
+        endedAt: this.clock(),
+        error: `Agent Stream internal error: ${e instanceof Error ? e.message : String(e)}`,
       });
+    }
+    this.schedule(run);
   }
 
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {

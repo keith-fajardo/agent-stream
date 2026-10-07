@@ -301,16 +301,17 @@ function reduceServer(state: State, msg: HostMessage): State {
         preview: undefined,
         previewRequestId: undefined,
         selectedNodeId: current === msg.graph.id ? state.selectedNodeId : undefined,
-        // The engine sends the inner graphs again right after; another graph starts at its own top.
-        subgraphs: {},
-        subReviews: {},
+        // The engine sends the inner graphs again right after. The same graph keeps the ones it has until then, so its
+        // sub-graph steps don't flash as missing; another graph starts with none, and at its own top.
+        ...(current !== msg.graph.id && { subgraphs: {}, subReviews: {} }),
         ...(current !== msg.graph.id && { scope: [], subUndo: {} }),
       };
     case 'subgraphs':
       return msg.graphId === current ? { ...state, subgraphs: msg.graphs, subReviews: msg.reviews } : state;
     case 'graph': {
       if (msg.graph.id !== current) return state;
-      const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);
+      // Inside a sub-graph the selected step belongs to the shown (inner) graph, not to the one that changed.
+      const stillThere = !!shownGraph({ graph: msg.graph, scope: state.scope, subgraphs: state.subgraphs })?.nodes.some((n) => n.id === state.selectedNodeId);
       return { ...state, ...reviewing(state, msg.changes), graph: msg.graph, baseline: msg.baseline, changes: msg.changes, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
     }
     case 'graphMarkdown': {

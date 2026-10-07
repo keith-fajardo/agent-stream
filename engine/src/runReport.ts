@@ -134,13 +134,18 @@ function textSection(title: string, text: string): string[] {
 }
 
 function plan(run: RunMeta, order: GraphNode[]): string[] {
+  // Under CommonMark an item nests only when indented to its parent's content: the width of its number and ". ".
+  const indents = [0];
   const lines = order.map((n, i) => {
+    const depth = depthOf(run, n.id);
+    const indent = indents[depth] ?? 0;
+    indents[depth + 1] = indent + `${i + 1}`.length + 2;
+    indents.length = depth + 2;
     const sub = run.scopes?.[n.id];
     const kind = n.kind === 'graph' ? `sub-graph "${inline(sub?.graphName ?? n.graph ?? '')}"` : n.kind;
     const traits = [kind, ...(n.access === 'read' ? ['read-only'] : []), ...(n.workspace ? [`workspace ${inline(n.workspace)}`] : [])];
     const after = run.snapshot.edges.filter((e) => e.to === n.id).map((e) => e.from);
-    // Inner steps are indented under their sub-graph step.
-    return `${'   '.repeat(depthOf(run, n.id))}${i + 1}. ${n.id} · ${inline(n.title)} (${traits.join(', ')})${after.length ? ` — after ${after.join(', ')}` : ''}`;
+    return `${' '.repeat(indent)}${i + 1}. ${n.id} · ${inline(n.title)} (${traits.join(', ')})${after.length ? ` — after ${after.join(', ')}` : ''}`;
   });
   return ['## Plan', '', ...lines];
 }
