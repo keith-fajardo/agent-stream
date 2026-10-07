@@ -112,6 +112,7 @@ A step section holds, in this order:
    - `browser`: `on` lets the agent step use the Agent Stream browser, with your logins; clicking and typing ask you first. `off` is the same as no line, and Agent Stream writes the line only when it is on. Any other value is an error. A command step can't use the browser: the line is removed from it, with a warning in the Agent Stream output channel. Graphs from before this setting have no line and load unchanged.
 
    - `attach`: a file the agent step gets every time it runs, by name. Repeat the line for each file; the order is kept.
+   - `graph`: a sub-graph step's inner graph, by id (see [Sub-graph steps](#sub-graph-steps)).
 
    Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
@@ -124,6 +125,46 @@ A step section holds, in this order:
    The content is kept exactly, including `{{ variables }}`, dbt's `{% raw %}` blocks and inner code fences: use a longer fence outside (```` ```` ````) when the content has ```` ``` ```` lines. An empty block is an empty prompt or command. The block must match `kind`.
 
 Anything else in a step section (a paragraph, a second code block, a sub-heading) is an error: nothing you write is ever dropped silently.
+
+## Sub-graph steps
+
+A sub-graph step runs another graph of the same folder as one step: `- kind: graph` and `- graph: <graph id>`, the inner graph's file name in `.agent-stream/graphs/` without `.md`. It has no prompt or sh block. Instead, it has one ```` ```value <name> ```` block per inner variable it sets, in name order, after the description:
+
+````markdown
+# Job hunting
+
+## Variables
+
+- `target_company`: The company we're applying to
+
+## Flow
+
+```mermaid
+flowchart LR
+  n4["Research the target company"]
+```
+
+## n4 · Research the target company
+
+- kind: graph
+- graph: company-research
+
+> Researches the company we're applying to.
+
+```value company
+{{ target_company }}
+```
+
+```value depth
+quick
+```
+````
+
+- A value is a template: it may use this graph's variables, as `{{ target_company }}` does. It may span lines. An empty block is an empty value; an empty value, or no block, is asked for when a run starts.
+- The step references the inner graph: editing that graph changes every graph that uses it. A run runs its steps in place of this step, and the steps after this step get the results of the inner graph's final steps.
+- Problems, each reported on its line: a sub-graph step without a `graph` line, a graph id that isn't one (lowercase letters, digits and `-`), a value block whose name isn't a variable name or appears twice, a value over 10,000 characters, a ```` ```prompt ```` or ```` ```sh ```` block on a sub-graph step, and a `graph` line or value block on an agent or command step.
+- A sub-graph step has no `access`, `workspace`, `timeout`, `model`, `effort`, `browser` or `attach`: such a line is removed from it, with a warning in the Agent Stream output channel.
+- Graphs without sub-graph steps load as before. A graph file with one needs a version of Agent Stream that has sub-graph steps: earlier versions report `kind: graph` as a problem.
 
 ## Attachments
 

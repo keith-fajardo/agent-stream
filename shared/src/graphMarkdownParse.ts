@@ -9,7 +9,8 @@ import type { EffortLevel, GraphFileError, NodeKind, StepModel } from './types';
 import { isEffortLevel } from './format';
 import { parseStepModel } from './stepModels';
 import { commandBrowserWarning } from './browser';
-import { variableNameProblem } from './variables';
+import { graphIdProblem, sortedValues, subgraphFieldWarning } from './subgraphStep';
+import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 
 type TextItem = { kind: 'text'; line: number; text: string };
 type CodeItem = { kind: 'code'; line: number; info: string; fence: Fence; content: string[]; raw: string[] };
@@ -23,7 +24,9 @@ const STEP_HEADING_RE = new RegExp(`^([A-Za-z0-9_-]+)${STEP_SEPARATOR.trimEnd()}
 const FIELD_RE = /^[-*][ \t]+([A-Za-z]+)[ \t]*:[ \t]*(.*?)[ \t]*$/;
 const VARIABLE_RE = /^[-*][ \t]+`([^`]*)`(?:[ \t]*:[ \t]*(.*?))?[ \t]*$/;
 const QUOTE_RE = /^>[ \t]?(.*)$/;
-const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach'];
+const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach', 'graph'];
+/** The fields a sub-graph step can't have: dropped from it with a warning (spec §2.1). */
+const AGENT_AND_COMMAND_FIELDS = ['access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach'];
 /** A field a step may repeat: one line per attachment, in order (spec §6b.3). */
 const LIST_FIELDS = new Set(['attach']);
 const ATTACHMENT_RE = /^[-*][ \t]+`([^`]*)`[ \t]*$/;
@@ -176,10 +179,13 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
   const lists = new Map<string, { value: string; line: number }[]>();
   const quote: string[] = [];
   let code: CodeItem | undefined;
+  /** A sub-graph step's ```value <name>``` blocks (spec §2.2); any number, after the description. */
+  const valueBlocks: CodeItem[] = [];
   let phase: 'fields' | 'description' | 'code' = 'fields';
   for (const item of section.items) {
     if (item.kind === 'code') {
-      if (code) fail(item.line, `step ${label} has a second code block. A step has exactly one: move this text into the first block, or into a step of its own.`);
+      if (infoWord(item) === 'value') valueBlocks.push(item);
+      else if (code) fail(item.line, `step ${label} has a second code block. A step has exactly one: move this text into the first block, or into a step of its own.`);
       else code = item;
       phase = 'code';
       continue;
@@ -189,7 +195,7 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     if (field) {
       const key = field[1].toLowerCase();
       if (phase !== 'fields') fail(item.line, `fields go at the top of step ${label}, before the description and the code block.`);
-      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort, browser and attach.`);
+      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort, browser, attach and graph.`);
       else if (LIST_FIELDS.has(key)) lists.set(key, [...(lists.get(key) ?? []), { value: field[2], line: item.line }]);
       else if (fields.has(key)) fail(item.line, `the field ${key} appears twice in step ${label}. Keep one.`);
       else fields.set(key, { value: field[2], line: item.line });
@@ -210,11 +216,16 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
   let kind: NodeKind | undefined;
   const k = fields.get('kind');
   if (k) {
-    if (k.value === 'agent' || k.value === 'command') kind = k.value;
+    if (k.value === 'agent' || k.value === 'command' || k.value === 'graph') kind = k.value;
     else fail(k.line, `kind is "${k.value}"; use agent or command.`);
   }
+  const graphLine = fields.get('graph');
+  // A sub-graph step: `- kind: graph`, or a graph line on a step with no prompt or sh block (spec §2.2).
+  const isGraph = kind === 'graph' || (!k && !code && !!graphLine);
   let blockKind: NodeKind | undefined;
-  if (!code) fail(section.line, `step ${label} has no code block. Add a \`\`\`prompt block for an agent step or a \`\`\`sh block for a command step.`);
+  if (isGraph) {
+    if (code) fail(code.line, `step ${label} is a sub-graph step, so it can't have a \`\`\`${infoWord(code) || 'code'} block. Remove the block, or make it an agent or command step.`);
+  } else if (!code) fail(section.line, `step ${label} has no code block. Add a \`\`\`prompt block for an agent step or a \`\`\`sh block for a command step.`);
   else if (AGENT_INFOS.has(infoWord(code))) blockKind = 'agent';
   else if (COMMAND_INFOS.has(infoWord(code))) blockKind = 'command';
   else fail(code.line, `the code block of step ${label} needs the info string prompt (agent step) or sh (command step), as in \`\`\`prompt.`);
@@ -222,7 +233,58 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
   if (code && kind && blockKind && kind !== blockKind) {
     fail(code.line, `step ${label} is kind ${kind}, but its block is ${blockKind === 'agent' ? 'a prompt' : 'a command (sh)'}. Use a \`\`\`${kind === 'agent' ? 'prompt' : 'sh'} block, or change kind to ${blockKind}.`);
   }
-  const finalKind = kind ?? blockKind;
+  const finalKind: NodeKind | undefined = isGraph ? 'graph' : (kind ?? blockKind);
+
+  // A sub-graph step has only its graph and values: its agent and command fields are dropped with a warning, in line order.
+  if (finalKind === 'graph') {
+    const dropped = [
+      ...AGENT_AND_COMMAND_FIELDS.flatMap((key) => {
+        const f = fields.get(key);
+        fields.delete(key);
+        return f ? [{ key, line: f.line }] : [];
+      }),
+      ...(lists.get('attach') ?? []).map((a) => ({ key: 'attach', line: a.line })),
+    ];
+    lists.delete('attach');
+    for (const d of dropped.sort((a, b) => a.line - b.line)) warnings.push({ line: d.line, message: subgraphFieldWarning(label, d.key) });
+  }
+  let graph: string | undefined;
+  const values: Record<string, string> = {};
+  if (finalKind === 'graph') {
+    if (!graphLine) fail(section.line, `step ${label} is a sub-graph step, so it needs a "- graph: <graph id>" line.`);
+    else {
+      const problem = graphIdProblem(graphLine.value);
+      if (problem) fail(graphLine.line, problem);
+      else graph = graphLine.value;
+    }
+    const seenAt = new Map<string, number>();
+    for (const v of valueBlocks) {
+      const words = v.info.trim().split(/\s+/);
+      const name = words[1] ?? '';
+      if (words.length !== 2) {
+        fail(v.line, 'a value block\'s first line is "value" and the variable\'s name, as in ```value company.');
+        continue;
+      }
+      const problem = variableNameProblem(name);
+      if (problem) {
+        fail(v.line, `value "${name}": ${problem}`);
+        continue;
+      }
+      const earlier = seenAt.get(name);
+      if (earlier !== undefined) {
+        fail(v.line, `step ${label} sets the value ${name} twice (also on line ${earlier}). Keep one.`);
+        continue;
+      }
+      seenAt.set(name, v.line);
+      const value = v.content.join('\n');
+      if (value.length > MAX_VARIABLE_VALUE_CHARS) fail(v.line, `The value of ${name} can be at most ${MAX_VARIABLE_VALUE_CHARS} characters.`);
+      else values[name] = value;
+    }
+  } else if (finalKind) {
+    const which = finalKind === 'agent' ? 'an agent' : 'a command';
+    if (graphLine) fail(graphLine.line, `step ${label} is ${which} step, so it can't have a graph. Remove this line, or make it a sub-graph step (kind: graph).`);
+    for (const v of valueBlocks) fail(v.line, `step ${label} is ${which} step, so it can't have a value block. Remove the block, or make it a sub-graph step (kind: graph).`);
+  }
 
   let access: 'read' | undefined;
   const a = fields.get('access');
@@ -277,12 +339,12 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     else if (finalKind === 'command') warnings.push({ line: b.line, message: commandBrowserWarning(label) });
     else if (b.value === 'on') browser = true;
   }
-  if (errors.length > before || !code || !finalKind) return null;
+  if (errors.length > before || !finalKind || (finalKind !== 'graph' && !code)) return null;
   const description = quote
     .map((q) => q.trim())
     .filter(Boolean)
     .join(' ');
-  const text = code.content.join('\n');
+  const text = code?.content.join('\n') ?? '';
   return {
     ...(id && { id }),
     title,
@@ -294,6 +356,8 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     ...(effort && { effort }),
     ...(browser && { browser }),
     ...(attachments.length > 0 && { attachments }),
+    ...(graph && { graph }),
+    ...(Object.keys(values).length > 0 && { values: sortedValues(values) }),
     ...(description && { description }),
     ...(text && (finalKind === 'agent' ? { prompt: text } : { command: text })),
     line: section.line,

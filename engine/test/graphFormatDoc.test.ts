@@ -11,4 +11,14 @@ describe('docs/graph-format.md', () => {
     if (!r.ok) throw new Error(JSON.stringify(r.errors));
     expect(serializeGraphMarkdown(graphFromDoc(r.doc, undefined, 'scd2-tests', '2026-10-04T00:00:00.000Z'))).toBe(`${example}\n`);
   });
+
+  it('has a sub-graph step example that reads without errors and is in Agent Stream’s own layout', () => {
+    const doc = readFileSync(new URL('../../docs/graph-format.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const example = /````markdown\n(# Job hunting\n[\s\S]*?)\n````\n/.exec(doc)?.[1];
+    if (!example) throw new Error('no sub-graph example in docs/graph-format.md');
+    const r = parseGraphMarkdown(example);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.doc.steps[0]).toMatchObject({ kind: 'graph', graph: 'company-research', values: { company: '{{ target_company }}', depth: 'quick' } });
+    expect(serializeGraphMarkdown(graphFromDoc(r.doc, undefined, 'job-hunting', '2026-10-04T00:00:00.000Z'))).toBe(`${example}\n`);
+  });
 });

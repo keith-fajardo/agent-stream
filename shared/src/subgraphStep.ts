@@ -33,6 +33,9 @@ export const valuesText = (values: Record<string, string> | undefined): string =
     .map(([name, value]) => `${name}: ${value}`)
     .join('\n');
 
+/** The warning for an agent or command field on a sub-graph step in a graph file: the line is dropped and the file still reads (spec §2.1). */
+export const subgraphFieldWarning = (label: string, field: string): string => `step ${label} is a sub-graph step, so it can't have ${field}. Agent Stream removed this line.`;
+
 /** Whether a new step or a patch sets a field a sub-graph step can't have. Clearing one (null, '', [], 0, false, write) doesn't. */
 export function setsStepField(f: { prompt?: string; command?: string; timeoutSec?: number; access?: string; workspace?: string; model?: unknown; effort?: unknown; attachments?: string[]; browser?: boolean }): boolean {
   return !!f.prompt || !!f.command || (f.timeoutSec ?? 0) > 0 || f.access === 'read' || !!f.workspace?.trim() || !!f.model || !!f.effort || !!f.attachments?.length || f.browser === true;
