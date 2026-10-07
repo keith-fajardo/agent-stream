@@ -73,10 +73,12 @@ describe('the export notice and values set on sub-graph steps', () => {
   });
 });
 
-describe('the READMEs', () => {
-  it('have the same Sub-graphs section, up to the next heading', () => {
-    const section = (file: string) => /## Sub-graphs\n[\s\S]*?(?=\n## |$)/.exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[0];
-    expect(section('../../README.md')).toContain('saved in the graph file');
-    expect(section('../../README.md')).toBe(section('../README.md'));
+describe('the docs', () => {
+  it('describe sub-graph step values in docs/using.md, and the READMEs leave that detail there', () => {
+    const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+    const section = /## Sub-graphs\n[\s\S]*?(?=\n## |$)/.exec(read('../../docs/using.md'))?.[0];
+    expect(section).toContain('saved in the graph file');
+    expect(read('../../README.md')).not.toContain('## Sub-graphs');
+    expect(read('../README.md')).not.toContain('## Sub-graphs');
   });
 });
