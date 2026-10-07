@@ -420,7 +420,8 @@ export type ProviderStatus = {
   error?: string;
 };
 
-export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number };
+/** `usedBy`: the ids of the graphs with a sub-graph step pointing at this one, sorted (sub-graphs spec §4.7); absent when none. */
+export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[] };
 
 export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
