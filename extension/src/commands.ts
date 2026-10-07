@@ -110,7 +110,7 @@ export function graphCommands(d: CommandDeps) {
       const file = await d.ui.openFile();
       if (!file) return;
       if (file.size > MAX_IMPORT_CHARS) return d.ui.error("Couldn't import: The file is larger than 1 MB.");
-      const r = app(folder).importGraph(await file.read());
+      const r = app(folder).importGraph(await file.read(), d.activeSession(folder));
       if (!r.ok) return d.ui.error(`Couldn't import: ${r.error}`);
       await d.open({ folder, graphId: r.graph.id });
     },

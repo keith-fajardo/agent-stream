@@ -748,6 +748,17 @@ describe('app', () => {
       expect(copy.ok && app.listGraphs().find((x) => x.id === copy.graph.id)?.home).toBe('work');
     });
 
+    it('imports a graph into the given home, or into Default when none is given', () => {
+      const { app, graphId } = setupWithGraph();
+      const exported = app.exportGraph(graphId);
+      if (!exported.ok) throw new Error(exported.error);
+      app.createSession('Work');
+      const into = app.importGraph(exported.content, 'work');
+      expect(into.ok && app.listGraphs().find((x) => x.id === into.graph.id)?.home).toBe('work');
+      const plain = app.importGraph(exported.content);
+      expect(plain.ok && app.listGraphs().find((x) => x.id === plain.graph.id)?.home).toBe('default');
+    });
+
     it("forgets a deleted graph, and sends a deleted session's graphs to Default", () => {
       const { app, graphId } = setupWithGraph();
       app.createSession('Work');

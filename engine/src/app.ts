@@ -422,9 +422,12 @@ export function createApp(d: AppDeps) {
     broadcastGraphs();
     return r;
   }
-  function importGraph(content: string): GraphResult {
+  function importGraph(content: string, home?: string): GraphResult {
     const r = graphStore.importGraph(content);
-    if (r.ok) broadcastGraphs();
+    if (r.ok) {
+      homes.move(r.graph.id, home ?? homeDefault(), homeDefault());
+      broadcastGraphs();
+    }
     return r;
   }
 

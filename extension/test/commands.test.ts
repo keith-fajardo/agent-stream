@@ -50,6 +50,7 @@ function setup(folders: Folder[] = [folder('a')]) {
   const opened: GraphTarget[] = [];
   const texts: GraphTarget[] = [];
   let active: GraphTarget | undefined;
+  let activeSessionId = 'default';
   const { commands, pickGraph } = graphCommands({
     engines: manager,
     folders: () => folders,
@@ -58,9 +59,9 @@ function setup(folders: Folder[] = [folder('a')]) {
     openText: async (t) => void texts.push(t),
     activeTarget: () => active,
     sessions: (f) => manager.get(f).listSessions(),
-    activeSession: () => 'default',
+    activeSession: () => activeSessionId,
   });
-  return { manager, ui, opened, texts, commands, pickGraph, folders, gate, setActive: (t: GraphTarget) => (active = t) };
+  return { manager, ui, opened, texts, commands, pickGraph, folders, gate, setActive: (t: GraphTarget) => (active = t), setActiveSession: (id: string) => (activeSessionId = id) };
 }
 
 describe('graph commands', () => {
@@ -145,6 +146,19 @@ describe('graph commands', () => {
     s.ui.openFile.mockResolvedValueOnce({ size: exported.content.length, read: async () => exported.content });
     await s.commands.importGraph();
     expect(s.opened).toEqual([{ folder: s.folders[0], graphId: 'parity' }]);
+  });
+
+  it('imports into the active session', async () => {
+    const s = setup();
+    const engine = s.manager.get(s.folders[0]);
+    const work = engine.createSession('Work');
+    s.setActiveSession(work.id);
+    const source = s.manager.get(folder('x'));
+    const exported = source.exportGraph(source.createGraph('Parity').id);
+    if (!exported.ok) throw new Error(exported.error);
+    s.ui.openFile.mockResolvedValueOnce({ size: exported.content.length, read: async () => exported.content });
+    await s.commands.importGraph();
+    expect(engine.listGraphs().find((x) => x.id === 'parity')?.home).toBe(work.id);
   });
 
   it('exports without variable values', async () => {
