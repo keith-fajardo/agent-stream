@@ -115,7 +115,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 
 ```ts
 // engine/test/graphHomes.test.ts
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SHARED_HOME } from '@agent-stream/shared';
@@ -173,7 +173,7 @@ describe('GraphHomes', () => {
     const paths = tmpProject();
     new GraphHomes(paths).move('g1', 'work', 'default');
     expect(JSON.parse(readFileSync(file(paths), 'utf8'))).toEqual({ g1: 'work' });
-    expect(existsSync(file(paths) + '.tmp')).toBe(false);
+    expect(readdirSync(paths.sessionsDir).filter((f) => f.startsWith('graph-homes.json.tmp-'))).toEqual([]);
   });
 });
 ```
@@ -310,7 +310,7 @@ it('creates a graph in the given home, and duplicates keep the source home unles
   const g = app.createGraph('Fresh', 'work');
   expect(app.listGraphs().find((x) => x.id === g.id)?.home).toBe('work');
   const copy = app.duplicateGraph(g.id);
-  expect(copy.ok && app.listGraphs().find((x) => x.id === copy.graph.id)?.home).toBe('default');
+  expect(copy.ok && app.listGraphs().find((x) => x.id === copy.graph.id)?.home).toBe('work');
 });
 
 it('forgets a deleted graph, and sends a deleted session's graphs to Default', () => {
@@ -448,6 +448,8 @@ Replace the `view` helper and add tests in `extension/test/graphsView.test.ts`:
 import { SHARED_HOME } from '@agent-stream/shared';
 import { FolderItem, GraphItem, GraphsView, RetryItem, SharedItem } from '../src/graphsView';
 
+// Fixture rule: every graph in the existing tests in this file gets `home: 'default'` (the list now shows only the active session's graphs, so a graph without a home is hidden). Test-only change.
+
 const view = (folders: Folder[], graphs: Record<string, GraphListItem[]>, status: ProviderStatus = { provider: 'claude', ok: true, label: 'Claude Max' }, active = 'default') =>
   new GraphsView({ folders: () => folders, graphs: (f) => graphs[f.key] ?? [], status: () => status, now: () => now, active: () => active });
 
@@ -459,7 +461,7 @@ it("shows the active session's graphs, then a Shared group", () => {
       { id: 'shared', name: 'Common', home: SHARED_HOME },
     ],
   });
-  const top = v.getChildren() as GraphsTreeItem[];
+  const top = v.getChildren() as (GraphItem | SharedItem)[];
   expect(top.map((i) => i.label)).toEqual(['Mine', 'Shared']);
   expect(v.getChildren(top[1]).map((i) => i.label)).toEqual(['Common']);
 });
@@ -709,6 +711,8 @@ it('says how many graphs move to Default when a session is deleted', async () =>
   await w.sessions.delete(f, work.id);
   expect(w.deps.confirm).toHaveBeenCalledWith(expect.stringContaining('2 graphs move to Default'), 'Delete');
   expect(app.listGraphs().every((g) => g.home === 'default')).toBe(true);
+  // Deleting a session that is not the active one never closes tabs (review focus 4).
+  expect(w.deps.closeGraphTabs).not.toHaveBeenCalled();
 });
 ```
 
