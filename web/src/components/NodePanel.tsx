@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BROWSER_HINT, TURN_ON_BROWSER, browserMention, browserMentionHint, parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions, registerNodeDraft } from '../actions';
 import { AttachmentList } from './AttachmentList';
+import { SubgraphFields } from './SubgraphFields';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
@@ -10,7 +11,7 @@ import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModel
 import { dispatch, useStore } from '../store';
 
 /** `model`: `<provider>/<id>`, '' for Default; `effort`: a level, '' for Default. */
-type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string };
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string; graph: string; values: Record<string, string> };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
@@ -24,6 +25,8 @@ const toDraft = (n: GraphNode): Draft => ({
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
+  graph: n.graph ?? '',
+  values: { ...(n.values ?? {}) },
 });
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -113,7 +116,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const dirty = !sameDraft(draft, base.draft);
   // Judged on the draft, so the hint follows what the user types and goes once Browser is on.
   const mention = browserMention({ kind: draft.kind, browser: draft.browser, title: draft.title, description: draft.description, prompt: draft.prompt });
-  const canRefine = refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
+  // The planner refines prompts and commands: a sub-graph step has neither.
+  const canRefine = draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
+  const isGraph = draft.kind === 'graph';
   useEffect(() => {
     reportDraft('node', dirty);
   }, [dirty]);
@@ -154,6 +159,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
     if (draft.timeoutSec !== base.draft.timeoutSec && timeout > 0) patch.timeoutSec = timeout;
+    // A sub-graph step's graph and its whole values map (sub-graphs spec §2.1); becoming one sends its graph with the kind.
+    if (draft.kind === 'graph' && (draft.graph !== base.draft.graph || draft.kind !== base.draft.kind)) patch.graph = draft.graph;
+    if (draft.kind === 'graph' && JSON.stringify(draft.values) !== JSON.stringify(base.draft.values)) patch.values = draft.values;
     send({ type: 'op', graphId, op: { type: 'updateNode', id: node.id, patch } });
     setBase({ draft, at: node.updatedAt });
   };
@@ -195,9 +203,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as NodeKind })}>
           <option value="agent">Agent: an AI agent run</option>
           <option value="command">Command: an exact shell command</option>
+          <option value="graph">Sub-graph: another graph as one step</option>
         </select>
       </div>
-      {draft.kind === 'agent' ? (
+      {isGraph && <SubgraphFields ownerId={graphId} graph={draft.graph} values={draft.values} onChange={(next) => setDraft({ ...draft, ...next })} />}
+      {isGraph ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label htmlFor="node-access">Access</label>
           <select id="node-access" value={draft.access} onChange={(e) => setDraft({ ...draft, access: e.target.value as Draft['access'] })}>
@@ -211,6 +221,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           <p className="static-note">Command steps can change files</p>
         </div>
       )}
+      {!isGraph && (
       <div className="field">
         <label htmlFor="node-workspace">Workspace</label>
         <input id="node-workspace" list="workspace-names" value={draft.workspace} placeholder="This checkout" onChange={(e) => setDraft({ ...draft, workspace: e.target.value })} />
@@ -220,6 +231,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           ))}
         </datalist>
       </div>
+      )}
       {draft.kind === 'agent' && <StepModelFields model={draft.model} effort={draft.effort} onChange={(next) => setDraft({ ...draft, ...next })} />}
       {draft.kind === 'agent' && (
         <div className="field">
@@ -239,7 +251,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
       {node.kind === 'agent' && (
         <AttachmentList graphId={graphId} target={{ kind: 'step', nodeId: node.id }} names={node.attachments ?? []} hint="Drop or paste files here. This step's agent gets them every time it runs." />
       )}
-      {draft.kind === 'agent' ? (
+      {isGraph ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label>Prompt</label>
           <textarea
@@ -265,7 +277,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         {node.id} · created by {node.createdBy} · last edited by {node.updatedBy}
       </p>
       <div className="actions">
-        <button className="primary" disabled={!dirty} onClick={save}>
+        <button className="primary" disabled={!dirty || (isGraph && !draft.graph)} onClick={save}>
           Save
         </button>
         <button

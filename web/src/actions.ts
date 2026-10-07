@@ -1,14 +1,15 @@
-import { MAX_IMPORT_CHARS, TIDY_LABEL, type ApprovalRequest, type ChangeTarget, type HostCommand, type Op } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, nextNodeId, TIDY_LABEL, type ApprovalRequest, type ChangeTarget, type HostCommand, type Op, type Position } from '@agent-stream/shared';
 import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
 import { onlyAvailability, retryTarget } from './retry';
+import { shownGraph } from './scope';
 import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
 import { cantSaveToast, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
 
 /** Actions that need the canvas viewport; the Canvas registers them while it is mounted. */
-type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize>; flushMoves(): void };
+type CanvasActions = { addStepInView(): void; measuredSizes(): Map<string, NodeSize>; flushMoves(): void; viewCenter(): Position | undefined };
 let canvas: CanvasActions | undefined;
 export function registerCanvas(c: CanvasActions | undefined): void {
   canvas = c;
@@ -58,6 +59,17 @@ export function approvableApprovals(s: State): ApprovalRequest[] {
 export const actions = {
   addStep(): void {
     canvas?.addStepInView();
+  },
+  /** + Sub-graph: a sub-graph step using `graphId`, titled with its name, in the middle of the view (sub-graphs spec §6.2). */
+  addSubgraph(graphId: string): void {
+    const s = getState();
+    const g = shownGraph(s);
+    if (!g) return;
+    const id = nextNodeId(g);
+    const position = canvas?.viewCenter();
+    const title = s.graphs.find((x) => x.id === graphId)?.name ?? graphId;
+    send({ type: 'op', graphId: g.id, op: { type: 'addNode', node: { id, title, kind: 'graph', graph: graphId, ...(position && { position }) } } });
+    dispatch({ kind: 'selectNode', id });
   },
   deleteSelectedStep(): void {
     const { graph, selectedNodeId } = getState();

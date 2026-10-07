@@ -27,6 +27,7 @@ import { dropMoves, settleMoves } from '../pendingMoves';
 import { dispatch, useStore } from '../store';
 import { CanvasModeToggle } from './CanvasModeToggle';
 import { StepNode, type StepFlowNode } from './StepNode';
+import { SubgraphPicker } from './SubgraphPicker';
 
 const nodeTypes = { step: StepNode };
 const MULTI_KEY = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -49,6 +50,7 @@ export function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
+  const [picking, setPicking] = useState(false);
   const runForGraph = run && graph && run.graphId === graph.id ? run : undefined;
 
   const dragging = useRef(new Set<string>());
@@ -103,8 +105,9 @@ export function Canvas() {
   });
   // ⌘S sends again any move the engine hasn't confirmed yet (spec §6a.1); a move that already landed changes nothing.
   const flushMoves = useRef(() => {});
+  const viewCenter = useRef((): Position | undefined => undefined);
   useEffect(() => {
-    registerCanvas({ addStepInView: () => addInView.current(), measuredSizes: () => measuredSizes.current(), flushMoves: () => flushMoves.current() });
+    registerCanvas({ addStepInView: () => addInView.current(), measuredSizes: () => measuredSizes.current(), flushMoves: () => flushMoves.current(), viewCenter: () => viewCenter.current() });
     return () => registerCanvas(undefined);
   }, []);
 
@@ -117,11 +120,18 @@ export function Canvas() {
     op({ type: 'addNode', node: { id, title: 'New step', kind: 'agent', prompt: '', position: { x: Math.round(position.x), y: Math.round(position.y) } } });
     dispatch({ kind: 'selectNode', id });
   };
-  const addInCenter = () => {
+  const centerOfView = (): Position | undefined => {
     const r = wrapper.current?.getBoundingClientRect();
-    if (r) addAt(screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }));
+    if (!r) return undefined;
+    const p = screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    return { x: Math.round(p.x), y: Math.round(p.y) };
+  };
+  const addInCenter = () => {
+    const p = centerOfView();
+    if (p) addAt(p);
   };
   addInView.current = addInCenter;
+  viewCenter.current = centerOfView;
   const moves = (list: [string, Position][]) => sendEdit(graphId, list.map(([id, position]): Op => ({ type: 'moveNode', id, position })), movedLabel(list.map(([id]) => id)));
   flushMoves.current = () => {
     if (graph) settleMoves(pendingMoves.current, graph);
@@ -148,6 +158,10 @@ export function Canvas() {
       <div className="canvas-toolbar">
         <CanvasModeToggle />
         <button onClick={actions.addStep}>+ Step</button>
+        <button aria-expanded={picking} onClick={() => setPicking(!picking)}>
+          + Sub-graph
+        </button>
+        {picking && <SubgraphPicker onClose={() => setPicking(false)} />}
         <button onClick={actions.tidy}>Tidy</button>
         {selection.count > 0 && (
           <button className="danger" onClick={deleteSelection} title="Delete the selected steps and connections (Delete or Backspace)">
