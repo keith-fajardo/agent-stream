@@ -20,6 +20,7 @@ import type {
   RunMode,
   RunPreview,
   RunSummary,
+  SubgraphEntry,
 } from '@agent-stream/shared';
 import { changeKey } from './changeLabels';
 
@@ -107,6 +108,14 @@ export type State = {
   undoLabel?: string;
   /** How many edits the engine has refused: the canvas forgets its unconfirmed moves on each. */
   rejections: number;
+  /** Every graph the tab's graph reaches through sub-graph steps, or why one can't be used (sub-graphs spec §6.3). */
+  subgraphs: Record<string, SubgraphEntry>;
+  /** Each inner graph's agent-change review, for editing inside it. */
+  subReviews: Record<string, { baseline?: Graph; changes: AgentChange[] }>;
+  /** The sub-graph steps the canvas is inside, from the tab's graph down (`['n4', 'n2']`); [] shows the tab's graph. */
+  scope: string[];
+  /** What Edit › Undo would undo in each inner graph this tab edited (the engine keeps a stack per tab and graph). */
+  subUndo: Record<string, string>;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
@@ -115,7 +124,7 @@ function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
 
 const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };
 
-export const initialState: State = { rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { subgraphs: {}, subReviews: {}, scope: [], subUndo: {}, rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -268,7 +277,13 @@ function reduceServer(state: State, msg: HostMessage): State {
         preview: undefined,
         previewRequestId: undefined,
         selectedNodeId: current === msg.graph.id ? state.selectedNodeId : undefined,
+        // The engine sends the inner graphs again right after; another graph starts at its own top.
+        subgraphs: {},
+        subReviews: {},
+        ...(current !== msg.graph.id && { scope: [], subUndo: {} }),
       };
+    case 'subgraphs':
+      return msg.graphId === current ? { ...state, subgraphs: msg.graphs, subReviews: msg.reviews } : state;
     case 'graph': {
       if (msg.graph.id !== current) return state;
       const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);

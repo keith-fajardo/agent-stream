@@ -22,6 +22,7 @@ import { addsToSelection, deletionEdit, MULTI_SELECT_KEYS, selectedForDelete } f
 import { actions, registerCanvas, sendEdit } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
+import { liveExpansion } from '../scope';
 import { dropMoves, settleMoves } from '../pendingMoves';
 import { dispatch, useStore } from '../store';
 import { CanvasModeToggle } from './CanvasModeToggle';
@@ -41,6 +42,8 @@ export function Canvas() {
   const statusProvider = useStore((s) => s.status?.provider);
   const listProvider = useStore((s) => s.modelsProvider);
   const models = useStore((s) => s.models);
+  const subgraphs = useStore((s) => s.subgraphs);
+  const expansion = useStore(liveExpansion);
   const provider = listProvider ?? statusProvider;
   const { screenToFlowPosition, getNodes } = useReactFlow<StepFlowNode, FlowEdge>();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -73,11 +76,13 @@ export function Canvas() {
             changes: agentChanges,
             provider,
             models: listProvider === provider ? models : [],
+            subgraphs,
+            problems: expansion && !expansion.ok ? expansion.problems : [],
           })
         : [],
     );
     setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current, agentChanges) : []));
-  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId, provider, listProvider, models]);
+  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId, provider, listProvider, models, subgraphs, expansion]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<StepFlowNode>[]) => setNodes((current) => applyNodeChanges(changes.filter((c) => c.type !== 'remove'), current)),

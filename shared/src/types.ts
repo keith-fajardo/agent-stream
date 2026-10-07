@@ -1,4 +1,4 @@
-import type { Scope } from './subgraphs';
+import type { Scope, SubgraphEntry } from './subgraphs';
 
 export type Actor = 'user' | 'agent';
 export type NodeKind = 'agent' | 'command' | 'graph';
@@ -432,7 +432,7 @@ export type ProviderStatus = {
 };
 
 /** `usedBy`: the ids of the graphs with a sub-graph step pointing at this one, sorted (sub-graphs spec §4.7); absent when none. */
-export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[] };
+export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[]; steps?: number };
 
 export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
@@ -445,6 +445,11 @@ export type ServerMessage =
   /** The graph's Markdown file has these problems, so the graph shown is the last good version; [] when they are fixed. */
   | { type: 'graphFileErrors'; graphId: string; errors: GraphFileError[] }
   | { type: 'graph'; graph: Graph; baseline?: Graph; changes: AgentChange[] }
+  /**
+   * Every graph the tab's graph reaches through sub-graph steps, transitively, or why one can't be used; with each readable
+   * one's agent-change review (sub-graphs spec §6.3). Sent after graphOpened when there are any, and whenever they change.
+   */
+  | { type: 'subgraphs'; graphId: string; graphs: Record<string, SubgraphEntry>; reviews: Record<string, { baseline?: Graph; changes: AgentChange[] }> }
   /** The graph's Markdown file exactly as it is on disk, even with errors: the answer to getGraphMarkdown, then again whenever the text changes. */
   | { type: 'graphMarkdown'; graphId: string; text: string }
   /**

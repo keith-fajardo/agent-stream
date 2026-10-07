@@ -276,7 +276,7 @@ describe('agent changes against the baseline', () => {
     expect(base.ok).toBe(false);
     expect(!base.ok && base.error).toMatch(/baseline/);
     expect(store.agentChanges(id)).toEqual([]);
-    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String) }]);
+    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String), steps: 1 }]);
     expect(store.apply(id, { type: 'revertChange', target: { kind: 'node', id: 'n1' } }, 'user')).toEqual({ ok: false, error: 'There are no agent changes to review.' });
     expect(store.apply(id, { type: 'acceptChange', target: { kind: 'all' } }, 'user').ok).toBe(true);
     expect(existsSync(baselineFile)).toBe(false);
@@ -298,7 +298,7 @@ describe('agent changes against the baseline', () => {
   it('lists the number of agent changes, and never lists a baseline as a graph', () => {
     const { store, id } = withGraph([step('n1')]);
     store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Agent title' } }, 'agent', { kind: 'planner' });
-    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String), agentChanges: 1 }]);
+    expect(store.list()).toEqual([{ id, name: 'G', updatedAt: expect.any(String), agentChanges: 1, steps: 1 }]);
   });
 
   it('has no baseline and no changes when nothing an agent did differs', () => {

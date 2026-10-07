@@ -11,6 +11,7 @@ import {
   workspaceOf,
   expandGraph,
   parentScopeId,
+  collectSubgraphs,
   type AgentChange,
   type ApprovalRequest,
   type CheckoutInfo,
@@ -304,6 +305,38 @@ export function createApp(d: AppDeps) {
   const broadcast = (msg: ServerMessage) => {
     for (const c of clients) c.send(msg);
   };
+  /** The graph each tab shows, and the subgraphs message it last got (sub-graphs spec §6.3). */
+  const subgraphTabs = new Map<Client, { graphId: string; sent?: string }>();
+  let refreshingSubgraphs = false;
+  /** The graphs a tab's graph reaches through sub-graph steps, as the lookup finds them, with each readable one's review. */
+  function subgraphsMessage(graphId: string): Extract<ServerMessage, { type: 'subgraphs' }> | undefined {
+    if (graphStore.markdownText(graphId) === undefined) return undefined;
+    const g = graphStore.load(graphId);
+    if (!g.ok) return undefined;
+    const graphs = collectSubgraphs(g.graph, (id) => graphStore.lookup(id));
+    const reviews = Object.fromEntries(Object.entries(graphs).flatMap(([id, e]) => ('error' in e ? [] : [[id, review(id)]])));
+    return { type: 'subgraphs', graphId, graphs, reviews };
+  }
+  /** Sends a tab its subgraphs when they differ from what it last got; a graph that never had any gets nothing. */
+  function sendSubgraphs(client: Client): void {
+    const tab = subgraphTabs.get(client);
+    const msg = tab && subgraphsMessage(tab.graphId);
+    if (!tab || !msg) return;
+    const text = JSON.stringify(msg);
+    if (text === tab.sent || (tab.sent === undefined && Object.keys(msg.graphs).length === 0)) return;
+    tab.sent = text;
+    client.send(msg);
+  }
+  /** Any graph changed, appeared, broke or went: each tab whose subgraphs changed hears it. */
+  function refreshSubgraphs(): void {
+    if (refreshingSubgraphs) return;
+    refreshingSubgraphs = true;
+    try {
+      for (const c of subgraphTabs.keys()) sendSubgraphs(c);
+    } finally {
+      refreshingSubgraphs = false;
+    }
+  }
   /** The one planner conversation each client shows (openChat). */
   const chatSubscriptions = new Map<Client, { graphId: string; sessionId: string }>();
   /** Clients that opened a graph: their Node panel's Model menu needs the provider's models too (step model spec §4.1). */
@@ -322,7 +355,10 @@ export function createApp(d: AppDeps) {
       return run ? { ...g, lastRun: { status: run.status, startedAt: run.startedAt } } : g;
     });
   }
-  const broadcastGraphs = () => broadcast({ type: 'graphs', graphs: listGraphs() });
+  const broadcastGraphs = () => {
+    broadcast({ type: 'graphs', graphs: listGraphs() });
+    refreshSubgraphs();
+  };
 
   function createGraph(name: string): Graph {
     const graph = graphStore.create(name);
@@ -459,10 +495,12 @@ export function createApp(d: AppDeps) {
       broadcastGraphs();
     }
     sendMarkdownIfChanged(graph.id);
+    refreshSubgraphs();
   });
   graphStore.on('fileErrors', (graphId: string, errors: GraphFileError[]) => {
     broadcast({ type: 'graphFileErrors', graphId, errors });
     sendMarkdownIfChanged(graphId);
+    refreshSubgraphs();
   });
   graphStore.on('fileDeleted', (graphId: string) => {
     agentChangeCounts.delete(graphId);
@@ -758,6 +796,7 @@ export function createApp(d: AppDeps) {
       clients.delete(client);
       chatSubscriptions.delete(client);
       graphClients.delete(client);
+      subgraphTabs.delete(client);
     };
   }
 
@@ -768,6 +807,8 @@ export function createApp(d: AppDeps) {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
         client.send(opened(r.graph));
+        subgraphTabs.set(client, { graphId: r.graph.id });
+        sendSubgraphs(client);
         openedGraph(client);
         sendUndoState(client, r.graph.id);
         return;
@@ -775,6 +816,7 @@ export function createApp(d: AppDeps) {
       case 'createGraph': {
         const graph = createGraph(msg.name);
         client.send(opened(graph));
+        subgraphTabs.set(client, { graphId: graph.id });
         openedGraph(client);
         return;
       }

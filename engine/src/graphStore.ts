@@ -188,7 +188,8 @@ export class GraphStore extends EventEmitter {
       if (!r.ok) return { id, name: id, error: r.error };
       const agentChanges = this.agentChanges(id).length;
       const users = usedBy.get(id);
-      return { id, name: r.graph.name, updatedAt: r.graph.updatedAt, ...(agentChanges > 0 && { agentChanges }), ...(users && { usedBy: users }) };
+      const steps = r.graph.nodes.length;
+      return { id, name: r.graph.name, updatedAt: r.graph.updatedAt, ...(agentChanges > 0 && { agentChanges }), ...(users && { usedBy: users }), ...(steps > 0 && { steps }) };
     });
     return items.sort(
       (a, b) => Number(!!a.error) - Number(!!b.error) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || a.id.localeCompare(b.id),
