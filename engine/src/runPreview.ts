@@ -263,8 +263,8 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     const text = render({ label: n.id, src: (isCommand ? n.command : n.prompt) ?? '', mode: isCommand ? 'command' : 'text', agentIds: isCommand ? [] : [n.id], scope: scopeKeyOf(n.id) });
     if (text !== undefined) nodes[n.id] = text;
   }
-  // A value set on a sub-graph step that waits for a variable around it needs that variable too.
-  for (const key of [...usedVariables]) for (const k of needs.get(key) ?? []) usedVariables.add(k);
+  // A value set on a sub-graph step that waits for a variable around it needs that variable too, however deep (a Set iteration visits what it adds).
+  for (const key of usedVariables) for (const k of needs.get(key) ?? []) usedVariables.add(k);
   const hasValue = (key: string) => {
     const at = key.lastIndexOf('/');
     return Object.hasOwn(contexts.get(at < 0 ? '' : key.slice(0, at))?.context ?? {}, at < 0 ? key : key.slice(at + 1));
@@ -365,6 +365,8 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     .update(
       JSON.stringify({
         content: contentSignature(graph),
+        // An inner graph's own attachment list isn't in the expanded graph; absent without sub-graphs, so other signatures are unchanged.
+        ...(scopeList.length > 0 && { scopes: scopeList.map((s) => [s.stepId, s.graphId, s.attachments ?? []]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))) }),
         rendered: rendered ?? null,
         reused: [...reused].sort(),
         // Only `Run only` leaves steps unrun or marks any stale; absent otherwise, so other runs keep their signature.

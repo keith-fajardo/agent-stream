@@ -107,6 +107,16 @@ describe('previewRun on a graph with a sub-graph step', () => {
     expect(previewRun({ graph: outer, values: {}, env: env() }).preview.problems).toEqual(['Step n2 uses graph "company-research", which isn\'t in this folder.']);
   });
 
+  it('follows a chain of sub-graph values back to the outer variable it needs', () => {
+    const b = graphOf('b', 'B', [{ type: 'addVariable', name: 'b' }, agent('Do', 'Do {{ b }}.')]);
+    const a = graphOf('a', 'A', [{ type: 'addVariable', name: 'a' }, sub('Use B', 'b', { b: '{{ a }}' })]);
+    const o = graphOf('o', 'O', [{ type: 'addVariable', name: 't' }, sub('Use A', 'a', { a: '{{ t }}' })]);
+    const empty = preview(o, {}, a, b);
+    expect(empty.preview.problems).toEqual(['Set a value for t (Variables menu).']);
+    expect(empty.rendered).toBeUndefined();
+    expect(preview(o, { t: 'X' }, a, b).rendered?.nodes['n1/n1/n1']).toBe('Do X.');
+  });
+
   it('warns about a missing attachment of an inner graph, naming its own folder', () => {
     const withFile = { ...research, attachments: ['brief.md'] };
     const outer = hunting({ company: 'Acme', depth: 'quick' });
@@ -157,6 +167,17 @@ describe('the App previews and starts the expanded graph', () => {
     await s.app.handle(s.c, { type: 'previewRun', graphId: s.outer });
     const reviewed = s.last('runPreview').preview.signature;
     s.store.apply(s.inner, { type: 'updateNode', id: 'n1', patch: { prompt: 'Find it all.' } }, 'user');
+    await s.app.handle(s.c, { type: 'startRun', graphId: s.outer, reviewed });
+    expect(s.last('error').message).toBe(CHANGED_SINCE_REVIEW);
+    expect(s.app.runStore.list(s.outer)).toEqual([]);
+  });
+
+  it('refuses Start when an attachment was added to the inner graph since the review', async () => {
+    const s = setup();
+    await s.app.handle(s.c, { type: 'setVariableValue', graphId: s.outer, name: 'n1/depth', value: 'quick' });
+    await s.app.handle(s.c, { type: 'previewRun', graphId: s.outer });
+    const reviewed = s.last('runPreview').preview.signature;
+    s.store.apply(s.inner, { type: 'setGraphAttachments', names: ['brief.md'] }, 'user');
     await s.app.handle(s.c, { type: 'startRun', graphId: s.outer, reviewed });
     expect(s.last('error').message).toBe(CHANGED_SINCE_REVIEW);
     expect(s.app.runStore.list(s.outer)).toEqual([]);
