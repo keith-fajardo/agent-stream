@@ -1,8 +1,8 @@
 # Using Agent Stream
 
 - **Agent Stream sidebar:**
-  - **Graphs:** New, Import, and right-click for Open, Open Graph as Markdown, Rename, Duplicate, Export, Delete. A graph whose file has errors shows **Can't be read**: click it to open the file, with its problems in the Problems panel.
   - **Sessions:** New Session, click to switch, right-click for Rename, Duplicate, Delete.
+  - **Graphs:** the selected session's graphs, followed by a collapsible **Shared** group (hidden when empty). New, Import, and right-click for Open, Open Graph as Markdown, Rename, Duplicate, Export, Move to Session…, Delete. A graph whose file has errors shows **Can't be read**: click it to open the file, with its problems in the Problems panel.
   - **Approvals:** Approve, Deny, Approve all. On a step's approval card, **Allow all for this step** stops that step asking for the rest of its run (other steps and later runs still ask).
 - **Chat view:** the **Agent Stream Chat** view on the right, next to VS Code's own Chat. It shows the planner conversation for the graph tab you're on, in the current session. Describe a goal; the planner reads your repo (read-only) and draws the plan. **New chat** starts over; the session button switches session.
 - **Stop:** while the planner works, **■ Stop** takes the place of Send; it, or Esc in the chat, stops the planner's turn. The chat shows `Stopped.`, graph edits it already made stay, and you can type continue to pick up where it stopped.
