@@ -433,7 +433,7 @@ export type ProviderStatus = {
 
 /** `usedBy`: the ids of the graphs with a sub-graph step pointing at this one, sorted (sub-graphs spec §4.7); absent when none. */
 /** `error`: the file has never been readable. `broken`: it read before and loads its last good version, but its file has errors now. */
-export type GraphListItem = { id: string; name: string; error?: string; broken?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[]; steps?: number };
+export type GraphListItem = { id: string; name: string; error?: string; broken?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[]; steps?: number; home?: string };
 
 export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
