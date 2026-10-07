@@ -9,6 +9,8 @@ import {
   runStepModels,
   validateRunnable,
   workspaceOf,
+  expandGraph,
+  parentScopeId,
   type AgentChange,
   type ApprovalRequest,
   type CheckoutInfo,
@@ -52,7 +54,7 @@ import {
   RUN_STOPPED,
 } from '@agent-stream/shared';
 import { ApprovalBroker } from './approvals';
-import { runAttachments } from './attachedFiles';
+import { runAttachments, runAttachmentsOf } from './attachedFiles';
 import { createBrowserAsk } from './browser/approval';
 import type { BrowserService, ServiceStep } from './browser/service';
 import { BROWSER_TOOL_PREFIX, createBrowserTools, type BrowserTool } from './browser/tools';
@@ -549,8 +551,19 @@ export function createApp(d: AppDeps) {
       if (!source || source.graphId !== graph.id) return { ok: false, error: `run ${sourceRunId} not found` };
     }
     const checkout = await inspect();
-    const files = runAttachments(graph, (name) => attachments.hash(graph.id, name));
-    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, mode, fromNodeId, commandShellProblem, checkout, attachments: files }) };
+    // Sub-graph steps run their inner graphs as the files have them now (sub-graphs spec §3); a broken file blocks the run.
+    const expansion = graph.nodes.some((n) => n.kind === 'graph') ? expandGraph(graph, (id) => graphStore.lookup(id)) : undefined;
+    const files = expansion?.ok ? runAttachmentsOf(expansion.graph, expansion.scopes, (graphId, name) => attachments.hash(graphId, name)) : runAttachments(graph, (name) => attachments.hash(graph.id, name));
+    return { ok: true, checkout, outcome: previewRun({ graph, values: values.get(graph.id), env, source, mode, fromNodeId, commandShellProblem, checkout, attachments: files, ...(expansion && { expansion }) }) };
+  }
+
+  /** Whether `key` is `<sub-graph step>/<name>`: an inner variable of a sub-graph step of `graph`, at any depth (spec §3.3). */
+  function innerVariableExists(graph: Graph, key: string): boolean {
+    const stepId = parentScopeId(key);
+    if (stepId === undefined) return false;
+    const r = expandGraph(graph, (id) => graphStore.lookup(id));
+    const scope = r.ok ? r.scopes[stepId] : undefined;
+    return !!scope && !!r.ok && r.graphs[scope.graphId].variables.some((v) => v.name === key.slice(stepId.length + 1));
   }
 
   /** The pending agent changes and the baseline they are against, for graphOpened and graph. */
@@ -896,10 +909,11 @@ export function createApp(d: AppDeps) {
         // Copilot ignores effort, so a configured level isn't previewed as if it applied.
         const shownEffort = supportsEffort(provider.id) ? effort : undefined;
         // Each agent step's own model and effort, as the run would resolve them now (step model spec §3.3).
-        const steps = withStepModelLines(p.outcome.preview.steps, r.graph, { provider: provider.id, model, effort }, knownModels());
+        const runGraph = p.outcome.expanded ?? r.graph;
+        const steps = withStepModelLines(p.outcome.preview.steps, runGraph, { provider: provider.id, model, effort }, knownModels());
         // A Browser step that will run needs a browser on this machine (browser spec §5.4): a warning, never a problem.
         const willRun = new Set(p.outcome.preview.steps.filter((s) => !s.reused && !s.notRun).map((s) => s.id));
-        const needsBrowser = !!d.browser && r.graph.nodes.some((n) => n.kind === 'agent' && n.browser && willRun.has(n.id));
+        const needsBrowser = !!d.browser && runGraph.nodes.some((n) => n.kind === 'agent' && n.browser && willRun.has(n.id));
         const found = needsBrowser ? d.browser!.find() : undefined;
         const warnings = found && !found.ok ? [...p.outcome.preview.warnings, found.error] : p.outcome.preview.warnings;
         const shown = { ...p.outcome.preview, warnings, steps, provider: provider.id, ...(shownModel && { model: shownModel }), ...(shownEffort && { effort: shownEffort }), ...(cap !== undefined && { copilotRequestsPerStep: cap }) };
@@ -917,11 +931,14 @@ export function createApp(d: AppDeps) {
         if (!p.outcome.rendered) return error(p.outcome.preview.problems.join('\n'));
         if (runner.activeFor(r.graph.id)) return error('A run is already in progress for this graph.');
         const { checkout } = p;
+        // What runs is the expanded graph (sub-graphs spec §3): workspaces, the lease and step models are its real steps'.
+        const runGraph = p.outcome.expanded ?? r.graph;
+        const scopes = p.outcome.scopes;
         const runId = runner.newRunId();
         // Steps with a workspace never reuse (spec §4.3a): every workspace a step that runs names gets a fresh worktree, before start.
         // `Run only` reuses the others, workspace or not, and leaves steps that didn't succeed unrun: those need none.
         const skipped = new Set(p.outcome.preview.steps.filter((s) => s.reused || s.notRun).map((s) => s.id));
-        const names = [...new Set(r.graph.nodes.filter((n) => !skipped.has(n.id)).map(workspaceOf).filter((w): w is string => w !== null))];
+        const names = [...new Set(runGraph.nodes.filter((n) => !skipped.has(n.id)).map(workspaceOf).filter((w): w is string => w !== null))];
         let workspaces: Record<string, { path: string; head: string }> | undefined;
         const sendBlocked = ({ holder, otherWindow, lockFile }: LeaseBlock) =>
           client.send({
@@ -937,7 +954,7 @@ export function createApp(d: AppDeps) {
           // The preview already refused this; kept so `head` is known here.
           if (!checkout.git || !checkout.head) return error(p.outcome.preview.problems.join('\n'));
           // Blocked now: refuse before making any worktree (spec §4.3, "nothing is created"). The runner checks again.
-          const block = !msg.sequential && needsCheckoutLease(r.graph, skipped) ? d.leases.blockedBy(checkout.root) : undefined;
+          const block = !msg.sequential && needsCheckoutLease(runGraph, skipped) ? d.leases.blockedBy(checkout.root) : undefined;
           if (block) return sendBlocked(block);
           const made = await createVariantWorkspaces({ checkoutRoot: checkout.root, runId, names, head: checkout.head, git: d.git, home: d.home });
           if (!made.ok) return error(made.error);
@@ -955,12 +972,13 @@ export function createApp(d: AppDeps) {
         // Each agent step's own model and effort, resolved once against the list known now (never waiting for it); a
         // reused step keeps what it ran with (step model spec §3.1).
         const source = msg.sourceRunId ? runStore.get(msg.sourceRunId) : undefined;
-        const stepModels = runStepModels(r.graph, { provider: provider.id, ...defaults }, knownModels(), skipped, source);
+        const stepModels = runStepModels(runGraph, { provider: provider.id, ...defaults }, knownModels(), skipped, source);
         let started: ReturnType<typeof runner.start>;
         try {
           started = runner.start({
-            graph: r.graph,
+            graph: runGraph,
             rendered: p.outcome.rendered,
+            ...(scopes && { scopes }),
             sourceRunId: msg.sourceRunId,
             fromNodeId: msg.fromNodeId,
             ...(msg.mode && { mode: msg.mode }),
@@ -968,7 +986,7 @@ export function createApp(d: AppDeps) {
             ...defaults,
             stepModels,
             // What each attachment holds as the run starts: recorded in the run, and what reuse compares (spec §6b.5).
-            attachments: runAttachments(r.graph, (name) => attachments.hash(r.graph.id, name)),
+            attachments: scopes ? runAttachmentsOf(runGraph, scopes, (graphId, name) => attachments.hash(graphId, name)) : runAttachments(r.graph, (name) => attachments.hash(r.graph.id, name)),
             runId,
             checkout,
             sequential: msg.sequential,
@@ -993,7 +1011,7 @@ export function createApp(d: AppDeps) {
       case 'setVariableValue': {
         const r = graphStore.load(msg.graphId);
         if (!r.ok) return error(r.error);
-        if (!r.graph.variables.some((v) => v.name === msg.name)) return error(`variable ${msg.name} does not exist`);
+        if (!r.graph.variables.some((v) => v.name === msg.name) && !innerVariableExists(r.graph, msg.name)) return error(`variable ${msg.name} does not exist`);
         try {
           values.set(msg.graphId, msg.name, msg.value);
         } catch (e) {

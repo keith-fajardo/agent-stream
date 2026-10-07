@@ -30,6 +30,7 @@ import {
   type RenderedRun,
   type RunMeta,
   type RunMode,
+  type Scope,
   type StaleReason,
   type StepModelUse,
   type WaitingFor,
@@ -95,6 +96,8 @@ export type StartRunInput = {
   checkout?: CheckoutInfo;
   /** The variant workspaces the app created for this run, by name (spec §4.3a). */
   workspaces?: Record<string, { path: string; head: string }>;
+  /** The sub-graph steps of `graph`, which is expanded (sub-graphs spec §3.1): recorded in the run. */
+  scopes?: Record<string, Scope>;
 };
 /** An approved change a step agent makes to its run: a new step with its connections, or new text for a step that hasn't started. */
 export type RunChange =

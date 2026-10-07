@@ -196,8 +196,12 @@ export type NodeRunState = {
   browserPages?: string[];
 };
 
-/** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
-export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
+/**
+ * What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. `nodes` is
+ * keyed by expanded id (a sub-graph step's entry is ''); `scopes`: each sub-graph's own goal and instructions, rendered
+ * with its values (sub-graphs spec §3.3), absent without sub-graphs.
+ */
+export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string>; scopes?: Record<string, { goal: string; instructions: string }> };
 
 /**
  * `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no
@@ -218,6 +222,10 @@ export type PreviewStep = {
   notRun?: boolean;
   modelLine?: string;
   modelNote?: string;
+  /** A step inside a sub-graph: how deep (1 inside a sub-graph step of the graph being run); absent for the graph's own steps. */
+  depth?: number;
+  /** A sub-graph step: its inner graph's name and how many steps that graph has (sub-graphs spec §5). */
+  subgraph?: { graphName: string; steps: number };
 };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
@@ -231,7 +239,8 @@ export type RunPreview = {
   /** Shown, don't block. */
   warnings: string[];
   steps: PreviewStep[];
-  variables: { name: string; value: string }[];
+  /** `name`: a variable of the graph, or `<sub-graph step>/<inner variable>` asked at run start, shown as `label` (`n4 · company`). */
+  variables: { name: string; value: string; label?: string }[];
   /** Start must send this back; the engine refuses if a re-render differs. */
   signature: string;
   /** Shown, never block (spec §4.7): writers that take turns, uncommitted changes left out of workspaces. */
