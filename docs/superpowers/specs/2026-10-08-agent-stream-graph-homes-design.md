@@ -51,6 +51,7 @@ Shared is stored as `@shared`, not `shared`: session ids are slugs (`GRAPH_ID_RE
 
 - `moveGraph(id, home)`: validates that the graph exists and that `home` is `@shared` or an existing session. Returns the usual `{ ok } | { ok: false, error }`. Broadcasts the graphs list.
 - `createGraph`, `duplicateGraph` and the import / template / planner creation paths take an optional `home`. The extension passes the active session. The web client omits it, so those graphs land in Default.
+- `duplicateGraph` inherits the source graph's home unless a home is given, so the web client's duplicates stay where their source is.
 - `deleteGraph` also calls `forget`.
 - `deleteSession` also calls `releaseSession(id)` after a successful delete, so no entry is left pointing at a missing session. Deleting the Default session is allowed today (`ensureDefault()` then picks another readable session or makes a fresh one); its graphs follow whichever session that turns out to be, because an entry that points at a missing session already reads as Default.
 
