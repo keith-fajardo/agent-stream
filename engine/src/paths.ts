@@ -1,5 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { GRAPH_ID_RE, isGraphId } from '@agent-stream/shared';
+
+/** Graph ids become file names, so they are restricted to a safe slug alphabet (the rule lives in shared/src/subgraphStep.ts). */
+export { isGraphId };
 
 /** `attachmentsDir`: each graph's attachments, in a folder per graph id; not ignored by Git (step model spec §6b.2). */
 export type ProjectPaths = { root: string; dataDir: string; graphsDir: string; runsDir: string; sessionsDir: string; attachmentsDir: string };
@@ -26,13 +30,6 @@ export function ensureDataDirs(paths: ProjectPaths): void {
   if (missing.length === 0) return;
   const sep = existing && !existing.endsWith('\n') ? '\n' : '';
   writeFileSync(gitignore, `${existing}${sep}${missing.join('\n')}\n`);
-}
-
-const GRAPH_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
-
-/** Graph ids become file names, so they are restricted to a safe slug alphabet. */
-export function isGraphId(id: string): boolean {
-  return GRAPH_ID_RE.test(id);
 }
 
 export function isSessionId(id: string): boolean {

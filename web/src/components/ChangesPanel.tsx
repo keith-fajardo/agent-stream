@@ -5,7 +5,7 @@ import { lineDiff } from '../lineDiff';
 import { dispatch, useStore } from '../store';
 
 const ICONS: Record<AgentChange['change'], string> = { added: '＋', changed: '✎', removed: '✕' };
-const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace', model: 'Model', effort: 'Effort', attachments: 'Attachments', browser: 'Browser' };
+const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace', model: 'Model', effort: 'Effort', attachments: 'Attachments', browser: 'Browser', graph: 'Graph', values: 'Values' };
 
 const target = (c: AgentChange) => ({ kind: c.kind, id: c.id });
 const name = (c: AgentChange) => (c.kind === 'edge' ? `${c.from} → ${c.to}` : c.title);

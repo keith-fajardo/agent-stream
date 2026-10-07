@@ -2,6 +2,7 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem, workspaceOf } from './acce
 import { attachmentListProblem, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { ONLY_AGENT_STEPS_BROWSER } from './browser';
 import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
+import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, setsStepField, sortedValues, SUBGRAPH_FIELDS_ONLY, SUBGRAPH_NEEDS_GRAPH, subgraphValuesProblem } from './subgraphStep';
 import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
 
@@ -84,7 +85,16 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (attachProblem) return fail(attachProblem);
       if (op.node.attachments?.length && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       if (op.node.browser && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_BROWSER);
-      const workspace = op.node.workspace?.trim() || undefined;
+      const isGraph = op.node.kind === 'graph';
+      if (isGraph) {
+        if (setsStepField(op.node)) return fail(SUBGRAPH_FIELDS_ONLY);
+        if (!op.node.graph) return fail(SUBGRAPH_NEEDS_GRAPH);
+        const graphProblem = graphIdProblem(op.node.graph);
+        if (graphProblem) return fail(graphProblem);
+        const valuesProblem = op.node.values ? subgraphValuesProblem(op.node.values) : null;
+        if (valuesProblem) return fail(valuesProblem);
+      } else if (op.node.graph !== undefined || op.node.values !== undefined) return fail(ONLY_SUBGRAPH_STEPS_GRAPH);
+      const workspace = isGraph ? undefined : op.node.workspace?.trim() || undefined;
       const workspaceProblem = workspace === undefined ? null : workspaceNameProblem(workspace);
       if (workspaceProblem) return fail(workspaceProblem);
       const node = definedOnly<GraphNode>({
@@ -92,9 +102,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         title,
         kind: op.node.kind,
         description: op.node.description,
-        prompt: op.node.prompt,
-        command: op.node.command,
-        timeoutSec: op.node.timeoutSec,
+        prompt: isGraph ? undefined : op.node.prompt,
+        command: isGraph ? undefined : op.node.command,
+        timeoutSec: isGraph ? undefined : op.node.timeoutSec,
         access: op.node.access === 'read' ? 'read' : undefined,
         workspace,
         model: op.node.model && { provider: op.node.model.provider, id: op.node.model.id },
@@ -102,6 +112,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         attachments: op.node.attachments?.length ? [...op.node.attachments] : undefined,
         // Only `true` is stored: off is no field (spec §2.1).
         browser: op.node.browser === true ? true : undefined,
+        graph: isGraph ? op.node.graph : undefined,
+        // An empty map is no field; the values are kept in name order.
+        values: isGraph && op.node.values && Object.keys(op.node.values).length > 0 ? sortedValues(op.node.values) : undefined,
         position: op.node.position,
         createdBy: by,
         updatedBy: by,
@@ -112,7 +125,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
     case 'updateNode': {
       const node = graph.nodes.find((n) => n.id === op.id);
       if (!node) return fail(`node ${op.id} does not exist`);
-      const { access, workspace, timeoutSec, model, effort, attachments, browser, ...patch } = definedOnly<NodePatch>(op.patch);
+      const { access, workspace, timeoutSec, model, effort, attachments, browser, graph: innerGraph, values, ...patch } = definedOnly<NodePatch>(op.patch);
       if (patch.title !== undefined) {
         patch.title = patch.title.trim();
         if (!patch.title) return fail('a node needs a title');
@@ -127,28 +140,42 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (attachProblem) return fail(attachProblem);
       if (attachments?.length && kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       if (browser && kind === 'command') return fail(ONLY_AGENT_STEPS_BROWSER);
-      let nextWorkspace = node.workspace;
-      if (workspace !== undefined) {
+      // A sub-graph step has only its graph and values (spec §2.1); becoming one needs a graph, becoming anything else drops both.
+      const isGraph = kind === 'graph';
+      if (isGraph && setsStepField({ prompt: patch.prompt, command: patch.command, timeoutSec, access, workspace, model, effort, attachments, browser })) return fail(SUBGRAPH_FIELDS_ONLY);
+      if (!isGraph && (innerGraph !== undefined || values !== undefined)) return fail(ONLY_SUBGRAPH_STEPS_GRAPH);
+      const nextGraph = isGraph ? (innerGraph ?? node.graph) : undefined;
+      if (isGraph && !nextGraph) return fail(SUBGRAPH_NEEDS_GRAPH);
+      const graphProblem = nextGraph ? graphIdProblem(nextGraph) : null;
+      if (graphProblem) return fail(graphProblem);
+      const valuesProblem = values ? subgraphValuesProblem(values) : null;
+      if (valuesProblem) return fail(valuesProblem);
+      const nextValues = isGraph ? (values ?? node.values) : undefined;
+      let nextWorkspace = isGraph ? undefined : node.workspace;
+      if (workspace !== undefined && !isGraph) {
         const trimmed = workspace.trim();
         const problem = trimmed === '' ? null : workspaceNameProblem(trimmed);
         if (problem) return fail(problem);
         nextWorkspace = trimmed || undefined;
       }
       // A command step can always change files, so becoming one drops `access` (spec §3.1).
-      const nextAccess = kind === 'command' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
+      const nextAccess = kind !== 'agent' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
       // 0 clears the timeout; a missing one keeps it.
-      const nextTimeout = timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
+      const nextTimeout = isGraph ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
       // Only agent steps have a model or effort, so becoming a command step drops both (spec §2.1); null clears one.
-      const nextModel = kind === 'command' || model === null ? undefined : (model ?? node.model);
-      const nextEffort = kind === 'command' || effort === null ? undefined : (effort ?? node.effort);
+      const nextModel = kind !== 'agent' || model === null ? undefined : (model ?? node.model);
+      const nextEffort = kind !== 'agent' || effort === null ? undefined : (effort ?? node.effort);
       // So do its attachments; [] clears them (spec §6b.3).
-      const nextAttachments = kind === 'command' ? undefined : (attachments ?? node.attachments);
+      const nextAttachments = kind !== 'agent' ? undefined : (attachments ?? node.attachments);
       // And the browser (browser spec §2.1); false turns it off.
-      const nextBrowser = kind === 'command' ? false : (browser ?? node.browser === true);
-      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, ...base } = node;
+      const nextBrowser = kind !== 'agent' ? false : (browser ?? node.browser === true);
+      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, graph: _graph, values: _values, ...kept } = node;
+      // A sub-graph step has no prompt or command: neither the old one nor one the patch clears.
+      const { prompt: _prompt, command: _command, ...keptBase } = kept;
+      const { prompt: _patchPrompt, command: _patchCommand, ...patchBase } = patch;
       const updated: GraphNode = {
-        ...base,
-        ...patch,
+        ...(isGraph ? keptBase : kept),
+        ...(isGraph ? patchBase : patch),
         ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),
@@ -156,6 +183,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         ...(nextEffort && { effort: nextEffort }),
         ...(nextAttachments?.length && { attachments: [...nextAttachments] }),
         ...(nextBrowser && { browser: true }),
+        ...(nextGraph && { graph: nextGraph }),
+        ...(nextValues && Object.keys(nextValues).length > 0 && { values: sortedValues(nextValues) }),
         updatedBy: by,
         updatedAt: now,
       };
@@ -199,8 +228,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       const nodes = graph.nodes.map((n) => {
         const prompt = text(n.prompt);
         const command = text(n.command);
-        if (prompt === n.prompt && command === n.command) return n;
-        return definedOnly<GraphNode>({ ...n, prompt, command, updatedBy: by, updatedAt: now }) as GraphNode;
+        const values = n.values && Object.fromEntries(Object.entries(n.values).map(([k, v]) => [k, text(v) ?? v]));
+        if (prompt === n.prompt && command === n.command && JSON.stringify(values) === JSON.stringify(n.values)) return n;
+        return definedOnly<GraphNode>({ ...n, prompt, command, values, updatedBy: by, updatedAt: now }) as GraphNode;
       });
       return done({
         variables: graph.variables.map((v) => (v.name === op.name ? { ...v, name: op.newName } : v)),
@@ -291,7 +321,8 @@ export function contentSignature(g: Graph): string {
     goal: g.goal,
     instructions: g.instructions,
     attachments: g.attachments ?? [],
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true]),
+    // A sub-graph step's graph and values are added only for it, so graphs without one keep their signature.
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : [])]),
     edges: g.edges.map((e) => e.id).sort(),
   });
 }
@@ -302,6 +333,7 @@ export function validateRunnable(graph: Graph): string[] {
   for (const n of graph.nodes) {
     if (n.kind === 'agent' && !n.prompt?.trim()) problems.push(`${n.id} "${n.title}": an agent node needs a prompt.`);
     if (n.kind === 'command' && !n.command?.trim()) problems.push(`${n.id} "${n.title}": a command node needs a command.`);
+    if (n.kind === 'graph' && !n.graph) problems.push(`${n.id} "${n.title}": a sub-graph step needs a graph.`);
   }
   if (topoOrder(graph).length !== graph.nodes.length) problems.push('The graph has a cycle.');
   return problems;

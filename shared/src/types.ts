@@ -1,5 +1,5 @@
 export type Actor = 'user' | 'agent';
-export type NodeKind = 'agent' | 'command';
+export type NodeKind = 'agent' | 'command' | 'graph';
 export type Position = { x: number; y: number };
 
 export type NodeAccess = 'read' | 'write';
@@ -25,6 +25,10 @@ export type GraphNode = {
   attachments?: string[];
   /** Agent steps: the step may use the Agent Stream browser (browser spec §2.1). Missing means off; only `true` is stored. */
   browser?: boolean;
+  /** Sub-graph steps: the inner graph's id, its file name in .agent-stream/graphs/ (sub-graphs spec §2.1). */
+  graph?: string;
+  /** Sub-graph steps: inner variable name → value template, in name order; absent means none. An empty value is asked for when the run starts. */
+  values?: Record<string, string>;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -67,6 +71,8 @@ export type NewNodeInput = {
   effort?: EffortLevel;
   attachments?: string[];
   browser?: boolean;
+  graph?: string;
+  values?: Record<string, string>;
   position?: Position;
 };
 
@@ -90,6 +96,10 @@ export type NodePatch = {
   attachments?: string[];
   /** true turns the browser on for an agent step; false turns it off. */
   browser?: boolean;
+  /** A sub-graph step's inner graph id. */
+  graph?: string;
+  /** A sub-graph step's whole values map, like `attachments`; {} clears it. */
+  values?: Record<string, string>;
 };
 
 export type Op =
@@ -128,7 +138,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser' | 'graph' | 'values';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =

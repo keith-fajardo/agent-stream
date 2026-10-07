@@ -9,9 +9,9 @@ export function workspaceNameProblem(name: string): string | null {
   return WORKSPACE_NAME_RE.test(name) ? null : WORKSPACE_NAME_PROBLEM;
 }
 
-/** Command steps always; agent steps unless marked read-only (spec §3.1). */
+/** Command steps always; agent steps unless marked read-only (spec §3.1); sub-graph steps never (sub-graphs spec §4.1). */
 export function isWriteCapable(node: Pick<GraphNode, 'kind' | 'access'>): boolean {
-  return node.kind === 'command' || node.access !== 'read';
+  return node.kind === 'command' || (node.kind === 'agent' && node.access !== 'read');
 }
 
 /** The step's variant workspace, or null for the folder's own checkout. */

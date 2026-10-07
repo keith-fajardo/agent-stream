@@ -491,7 +491,7 @@ export class Runner extends EventEmitter {
     this.deps.broker.beginStep(run.meta.id, nodeId);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
-    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
+    const executor: NodeExecutor | undefined = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : node.kind === 'command' ? this.deps.executors.command : undefined;
     // What the run resolved for this step when it started; a step added during the run gets the run's own (spec §3.1).
     const use: StepModelUse | undefined = node.kind === 'agent' ? (meta.stepModels?.[nodeId] ?? { model: meta.model, effort: meta.effort }) : undefined;
     let noted = false;
@@ -506,6 +506,7 @@ export class Runner extends EventEmitter {
     };
     Promise.resolve()
       .then(() => {
+        if (!executor) throw new Error(`Step ${nodeId} is a sub-graph step, which only runs in a run that expanded it.`);
         const workspace = workspaceOf(node);
         const worktree = workspace === null ? undefined : run.workspaces[workspace];
         if (workspace !== null && !worktree) throw new Error(`Step ${nodeId} uses workspace "${workspace}", but this run has no worktree for it.`);
