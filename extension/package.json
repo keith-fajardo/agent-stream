@@ -136,12 +136,12 @@
     "views": {
       "agentStream": [
         {
-          "id": "agentStream.graphs",
-          "name": "Graphs"
-        },
-        {
           "id": "agentStream.sessions",
           "name": "Sessions"
+        },
+        {
+          "id": "agentStream.graphs",
+          "name": "Graphs"
         },
         {
           "id": "agentStream.approvals",

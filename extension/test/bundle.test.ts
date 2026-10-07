@@ -48,4 +48,9 @@ describe('extension bundle', () => {
     for (const gone of ['bin', join('lib', 'vite'), join('lib', 'tools')]) expect(existsSync(join(vendor, gone))).toBe(false);
     for (const kept of ['browsers.json', 'LICENSE', 'index.js', 'index.mjs']) expect(existsSync(join(vendor, kept))).toBe(true);
   }, 60_000);
+
+  it('lists Sessions above Graphs, then Approvals', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(pkg.contributes.views.agentStream.map((v: { id: string }) => v.id)).toEqual(['agentStream.sessions', 'agentStream.graphs', 'agentStream.approvals']);
+  });
 });
