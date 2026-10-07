@@ -7,6 +7,7 @@ import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
 import { onlyAvailability } from '../retry';
+import { expandedIdOf, shownGraph, shownReview } from '../scope';
 import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModelMenus';
 import { dispatch, useStore } from '../store';
 
@@ -31,9 +32,9 @@ const toDraft = (n: GraphNode): Draft => ({
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
 export function NodePanel() {
-  const graph = useStore((s) => s.graph);
+  const graph = useStore(shownGraph);
   const selectedId = useStore((s) => s.selectedNodeId);
-  const changes = useStore((s) => s.changes);
+  const changes = useStore((s) => shownReview(s).changes);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   if (!graph || !node) return <p className="muted pad">Select a step on the canvas, or double-click empty canvas to add one.</p>;
   const workspaces = [...new Set(graph.nodes.flatMap((n) => (n.workspace ? [n.workspace] : [])))].sort();
@@ -58,6 +59,8 @@ export function NodePanel() {
 }
 
 const NO_MODELS: ModelChoice[] = [];
+/** Refine and Split inside a sub-graph: the planner chat belongs to the tab's graph (sub-graphs spec §7). */
+export const PLANNER_OUTER_ONLY = "The planner works on this tab's own graph. Open this graph in its own tab to refine its steps.";
 const options = (list: MenuOption[]) =>
   list.map((o) => (
     <option key={o.value} value={o.value} disabled={o.disabled}>
@@ -110,14 +113,16 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const run = useStore((s) => s.run);
   const runs = useStore((s) => s.runs);
   const openGraph = useStore((s) => s.graph);
+  const scope = useStore((s) => s.scope);
   const status = useStore((s) => s.status);
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
   // Judged on the draft, so the hint follows what the user types and goes once Browser is on.
   const mention = browserMention({ kind: draft.kind, browser: draft.browser, title: draft.title, description: draft.description, prompt: draft.prompt });
-  // The planner refines prompts and commands: a sub-graph step has neither.
-  const canRefine = draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
+  // The planner refines prompts and commands: a sub-graph step has neither, and the planner works on the tab's own graph only (sub-graphs spec §7).
+  const inside = scope.length > 0;
+  const canRefine = !inside && draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   const isGraph = draft.kind === 'graph';
   // A sub-graph step needs its graph (spec §2.1): neither the Save button nor ⌘S saves it without one.
   const canSave = dirty && !(isGraph && !draft.graph);
@@ -173,7 +178,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
-  const only = onlyAvailability({ run, runs, graph: openGraph }, node.id);
+  const only = onlyAvailability({ run, runs, graph: openGraph }, expandedIdOf({ scope }, node.id));
 
   return (
     <>
@@ -287,9 +292,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           title={
             !status?.ok
               ? status?.error
-              : canRefine
-                ? 'Ask the planner to turn this step into a precise prompt or command, with a plain-language description'
-                : 'Write what the step should do first.'
+              : inside
+                ? PLANNER_OUTER_ONLY
+                : canRefine
+                  ? 'Ask the planner to turn this step into a precise prompt or command, with a plain-language description'
+                  : 'Write what the step should do first.'
           }
           onClick={() => {
             if (dirty) save();
@@ -303,9 +310,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           title={
             !status?.ok
               ? status?.error
-              : canRefine
-                ? 'Ask the planner to break this step into several connected steps'
-                : 'Write what the step should do first.'
+              : inside
+                ? PLANNER_OUTER_ONLY
+                : canRefine
+                  ? 'Ask the planner to break this step into several connected steps'
+                  : 'Write what the step should do first.'
           }
           onClick={() => {
             if (dirty) save();
@@ -324,6 +333,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         <button disabled={!only.enabled} title={only.title} onClick={actions.runOnlySelected}>
           Run only this step
         </button>
+        {isGraph && node.kind === 'graph' && <button onClick={() => actions.openStep(node.id)}>Go inside</button>}
         <button className="danger" onClick={actions.deleteSelectedStep}>
           Delete
         </button>

@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { PROVIDER_NAMES, fmtDuration, staleNote, statusLabel, waitingText } from '@agent-stream/shared';
+import { PROVIDER_NAMES, derivedStatus, fmtDuration, staleNote, statusLabel, waitingText } from '@agent-stream/shared';
 import { actions } from '../actions';
 import { send } from '../bridge';
 import { logKey } from '../state';
+import { expandedIdOf, shownGraph } from '../scope';
 import { dispatch, useStore } from '../store';
 import { ApprovalCard } from './ApprovalCard';
 import { LogView } from './LogView';
@@ -10,46 +11,49 @@ import { ResizeHandle } from './ResizeHandle';
 
 /** Logs of the selected step in the selected run, shown below the canvas while a step is selected. */
 export function LogsPanel() {
-  const graph = useStore((s) => s.graph);
+  const graph = useStore(shownGraph);
+  const scope = useStore((s) => s.scope);
   const selectedId = useStore((s) => s.selectedNodeId);
   const run = useStore((s) => s.run);
   const approvals = useStore((s) => s.approvals);
   const graphs = useStore((s) => s.graphs);
   const { logsHeight, logsCollapsed } = useStore((s) => s.layout);
   const node = graph?.nodes.find((n) => n.id === selectedId);
-  const state = node && run ? run.nodes[node.id] : undefined;
-  const key = run && node ? logKey(run.id, node.id) : '';
+  // In the run, a step inside a sub-graph is its expanded id (`n4/n2`); a sub-graph step shows its derived status.
+  const runId = node && expandedIdOf({ scope }, node.id);
+  const state = node && run && runId ? (node.kind === 'graph' ? derivedStatus(run, runId) : run.nodes[runId]) : undefined;
+  const key = run && runId ? logKey(run.id, runId) : '';
   const events = useStore((s) => (key ? s.logs[key] : undefined));
   const body = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
-  const runId = run?.id;
-  const nodeId = node?.id;
+  const shownRunId = run?.id;
+  const nodeId = runId;
   const hasState = state !== undefined;
   const loaded = events !== undefined;
   useEffect(() => {
-    if (runId && nodeId && hasState && !loaded) send({ type: 'getNodeLogs', runId, nodeId });
-  }, [runId, nodeId, hasState, loaded]);
+    if (shownRunId && nodeId && hasState && !loaded) send({ type: 'getNodeLogs', runId: shownRunId, nodeId });
+  }, [shownRunId, nodeId, hasState, loaded]);
 
   // Follow new lines while the step runs, unless the user scrolled up to read.
   const eventCount = events?.length ?? 0;
   useEffect(() => {
     atBottom.current = true;
-  }, [runId, nodeId]);
+  }, [shownRunId, nodeId]);
   useEffect(() => {
     const el = body.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [eventCount, runId, nodeId]);
+  }, [eventCount, shownRunId, nodeId]);
 
   if (!graph || !node) return null;
   const sourceRunId = run?.sourceRunId;
-  const waiting = run ? approvals.filter((a) => a.nodeId === node.id && a.runId === run.id) : [];
-  const changedBy = [...new Set((run?.amendments ?? []).filter((a) => a.nodeId === node.id).map((a) => a.byNodeId))];
+  const waiting = run ? approvals.filter((a) => a.nodeId === runId && a.runId === run.id) : [];
+  const changedBy = [...new Set((run?.amendments ?? []).filter((a) => a.nodeId === runId).map((a) => a.byNodeId))];
   // The step as it ran: its workspace and that run's worktree (spec §7).
-  const ranAs = run?.snapshot.nodes.find((n) => n.id === node.id);
+  const ranAs = run?.snapshot.nodes.find((n) => n.id === runId);
   const place = ranAs?.workspace ? run?.workspaces?.[ranAs.workspace] : undefined;
   const waitingFor = run?.waitingFor;
-  const title = `Logs · ${node.id} ${node.title}`;
+  const title = `Logs · ${runId} ${node.title}`;
   if (logsCollapsed)
     return (
       <section className="logs-panel collapsed" aria-label="Step logs (collapsed)">

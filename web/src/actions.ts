@@ -3,7 +3,7 @@ import { post, send, sendHost } from './bridge';
 import { layoutPositions, type NodeSize } from './layout';
 import { persistLayout } from './panelLayout';
 import { onlyAvailability, retryTarget } from './retry';
-import { shownGraph } from './scope';
+import { expandedIdOf, shownGraph } from './scope';
 import type { CanvasMode, State, Tab } from './state';
 import { dispatch, getState } from './store';
 import { cantSaveToast, GRAPH_PANEL_SAVED, GRAPH_SAVED, stepSavedToast } from './toasts';
@@ -72,11 +72,20 @@ export const actions = {
     dispatch({ kind: 'selectNode', id });
   },
   deleteSelectedStep(): void {
-    const { graph, selectedNodeId } = getState();
-    if (graph && selectedNodeId) send({ type: 'op', graphId: graph.id, op: { type: 'deleteNode', id: selectedNodeId } });
+    const s = getState();
+    const graph = shownGraph(s);
+    if (graph && s.selectedNodeId) send({ type: 'op', graphId: graph.id, op: { type: 'deleteNode', id: s.selectedNodeId } });
+  },
+  /** Double-click on a step's card: a sub-graph step goes inside (sub-graphs spec §6.1); any other step is left as it is. */
+  openStep(id: string): void {
+    dispatch({ kind: 'enterScope', stepId: id });
+  },
+  /** ↑ Back: one level up. */
+  climb(depth: number): void {
+    dispatch({ kind: 'climbScope', depth });
   },
   tidy(): void {
-    const { graph } = getState();
+    const graph = shownGraph(getState());
     if (!graph) return;
     const ops: Op[] = [...layoutPositions(graph, false, canvas?.measuredSizes())].map(([id, position]) => ({ type: 'moveNode', id, position }));
     // One undo step for the whole layout, even for a single step.
@@ -94,7 +103,7 @@ export const actions = {
     const open = nodeDraft?.dirty() ? { draft: nodeDraft, toast: stepSavedToast(nodeDraft.nodeId) } : graphDraft?.dirty() ? { draft: graphDraft, toast: GRAPH_PANEL_SAVED } : undefined;
     if (open) {
       // The file has errors: the edit would be refused (R6), so the draft stays as it is.
-      if (s.fileErrors.length) return dispatch({ kind: 'showToast', message: cantSaveToast(s.graph.id) });
+      if (s.fileErrors.length && s.scope.length === 0) return dispatch({ kind: 'showToast', message: cantSaveToast(s.graph.id) });
       open.draft.save();
       return dispatch({ kind: 'showToast', message: open.toast });
     }
@@ -103,16 +112,16 @@ export const actions = {
   },
   /** Edit › Undo and ⌘Z: the engine undoes this tab's newest graph edit and answers with a toast. */
   undo(): void {
-    const { graph } = getState();
+    const graph = shownGraph(getState());
     if (graph) send({ type: 'undo', graphId: graph.id });
   },
   run(): void {
     dispatch({ kind: 'openConfirm', request: {} });
   },
   rerunFromSelected(): void {
-    const { selectedNodeId, runs } = getState();
-    const latest = runs[0];
-    if (selectedNodeId && latest) dispatch({ kind: 'openConfirm', request: { mode: 'from', fromNodeId: selectedNodeId, sourceRunId: latest.id } });
+    const s = getState();
+    const latest = s.runs[0];
+    if (s.selectedNodeId && latest) dispatch({ kind: 'openConfirm', request: { mode: 'from', fromNodeId: expandedIdOf(s, s.selectedNodeId), sourceRunId: latest.id } });
   },
   /** Retry from where it stopped: the steps that didn't finish in the newest run, and everything after them. */
   retryFromStop(): void {
@@ -123,7 +132,8 @@ export const actions = {
   runOnlySelected(): void {
     const s = getState();
     const latest = s.runs[0];
-    if (s.selectedNodeId && latest && onlyAvailability(s, s.selectedNodeId).enabled) dispatch({ kind: 'openConfirm', request: { mode: 'only', fromNodeId: s.selectedNodeId, sourceRunId: latest.id } });
+    const id = s.selectedNodeId && expandedIdOf(s, s.selectedNodeId);
+    if (id && latest && onlyAvailability(s, id).enabled) dispatch({ kind: 'openConfirm', request: { mode: 'only', fromNodeId: id, sourceRunId: latest.id } });
   },
   stop(): void {
     const { run } = getState();
@@ -142,11 +152,11 @@ export const actions = {
     persistLayout();
   },
   acceptChange(target: ChangeTarget): void {
-    const { graph } = getState();
+    const graph = shownGraph(getState());
     if (graph) send({ type: 'op', graphId: graph.id, op: { type: 'acceptChange', target } });
   },
   revertChange(target: ChangeTarget): void {
-    const { graph } = getState();
+    const graph = shownGraph(getState());
     if (graph) send({ type: 'op', graphId: graph.id, op: { type: 'revertChange', target } });
   },
   /** Accept all / Revert all ask first (the dialog calls acceptChange or revertChange with the `all` target on Confirm). */

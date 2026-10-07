@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Graph, Op } from '@agent-stream/shared';
 import { registerGraphDraft, sendEdit } from '../actions';
+import { shownGraph } from '../scope';
 import { useStore } from '../store';
 import { AttachmentList } from './AttachmentList';
 
@@ -9,7 +10,8 @@ const draftOf = (g: Graph): Draft => ({ goal: g.goal, instructions: g.instructio
 const same = (a: Draft, b: Draft) => a.goal === b.goal && a.instructions === b.instructions;
 
 export function GraphPanel() {
-  const graph = useStore((s) => s.graph);
+  // Inside a sub-graph, its own goal and instructions (sub-graphs spec §6.1).
+  const graph = useStore(shownGraph);
   if (!graph) return null;
   return <GraphEditor key={graph.id} graph={graph} />;
 }

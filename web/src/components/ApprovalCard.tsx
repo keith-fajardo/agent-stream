@@ -38,7 +38,7 @@ export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
   const allowAll = () => send({ type: 'decide', approvalId: a.id, decision: 'approve', scope: 'step' });
   const deny = () => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined });
   const who = (
-    <button className="link" onClick={() => dispatch({ kind: 'selectNode', id: a.nodeId })}>
+    <button className="link" onClick={() => dispatch(a.nodeId.includes('/') ? { kind: 'reveal', nodeId: a.nodeId } : { kind: 'selectNode', id: a.nodeId })}>
       {approvalStepLabel(a)}
     </button>
   );

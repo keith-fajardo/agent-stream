@@ -22,7 +22,8 @@ import { addsToSelection, deletionEdit, MULTI_SELECT_KEYS, selectedForDelete } f
 import { actions, registerCanvas, sendEdit } from '../actions';
 import { send } from '../bridge';
 import { contentSignature } from '../state';
-import { liveExpansion } from '../scope';
+import { liveExpansion, shownGraph, shownReview } from '../scope';
+import { ScopeBar } from './ScopeBar';
 import { dropMoves, settleMoves } from '../pendingMoves';
 import { dispatch, useStore } from '../store';
 import { CanvasModeToggle } from './CanvasModeToggle';
@@ -33,10 +34,14 @@ const nodeTypes = { step: StepNode };
 const MULTI_KEY = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 export function Canvas() {
-  const graph = useStore((s) => s.graph);
+  // The graph shown: the tab's, or the inner graph of the sub-graph step the canvas is inside (sub-graphs spec §6.1).
+  const graph = useStore(shownGraph);
+  const tabGraph = useStore((s) => s.graph);
+  const scope = useStore((s) => s.scope);
+  const prefix = scope.length ? `${scope.join('/')}/` : '';
   const run = useStore((s) => s.run);
-  const baseline = useStore((s) => s.baseline);
-  const agentChanges = useStore((s) => s.changes);
+  const baseline = useStore((s) => shownReview(s).baseline);
+  const agentChanges = useStore((s) => shownReview(s).changes);
   const approvals = useStore((s) => s.approvals);
   const selectedId = useStore((s) => s.selectedNodeId);
   const minimap = useStore((s) => s.minimap);
@@ -51,7 +56,8 @@ export function Canvas() {
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [picking, setPicking] = useState(false);
-  const runForGraph = run && graph && run.graphId === graph.id ? run : undefined;
+  // A run belongs to the tab's graph; inside a sub-graph its steps are under their expanded ids.
+  const runForGraph = run && tabGraph && run.graphId === tabGraph.id ? run : undefined;
 
   const dragging = useRef(new Set<string>());
   const pendingMoves = useRef(new Map<string, Position>());
@@ -80,11 +86,12 @@ export function Canvas() {
             models: listProvider === provider ? models : [],
             subgraphs,
             problems: expansion && !expansion.ok ? expansion.problems : [],
+            prefix,
           })
         : [],
     );
-    setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current, agentChanges) : []));
-  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId, provider, listProvider, models, subgraphs, expansion]);
+    setEdges((current) => (graph ? buildFlowEdges(graph, runForGraph, current, agentChanges, prefix) : []));
+  }, [graph, baseline, agentChanges, runForGraph, approvals, selectedId, provider, listProvider, models, subgraphs, expansion, prefix]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<StepFlowNode>[]) => setNodes((current) => applyNodeChanges(changes.filter((c) => c.type !== 'remove'), current)),
@@ -111,6 +118,7 @@ export function Canvas() {
     return () => registerCanvas(undefined);
   }, []);
 
+  if (!graph && scope.length > 0) return <ScopeBar />;
   if (!graph) return <div className="empty">Loading the graph…</div>;
 
   const graphId = graph.id;
@@ -155,6 +163,7 @@ export function Canvas() {
         if ((e.target as HTMLElement).classList.contains('react-flow__pane')) addAt(screenToFlowPosition({ x: e.clientX, y: e.clientY }));
       }}
     >
+      <ScopeBar />
       <div className="canvas-toolbar">
         <CanvasModeToggle />
         <button onClick={actions.addStep}>+ Step</button>
@@ -196,6 +205,10 @@ export function Canvas() {
           if (edge.id.startsWith(GHOST_PREFIX)) actions.selectChange(changeKey({ kind: 'edge', id: edge.id.slice(GHOST_PREFIX.length) }));
         }}
         onPaneClick={() => dispatch({ kind: 'selectNode' })}
+        // Double-click on a sub-graph step's card goes inside it; on empty canvas it still adds a step (spec §6.1).
+        onNodeDoubleClick={(_e, n) => {
+          if (!n.data.ghost) actions.openStep(n.id);
+        }}
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}
         multiSelectionKeyCode={MULTI_SELECT_KEYS}
