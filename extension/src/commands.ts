@@ -5,6 +5,11 @@ import type { EngineManager, Folder } from './engines';
 
 export type GraphTarget = { folder: Folder; graphId: string };
 
+/** The delete confirmation's detail for a graph other graphs use as a sub-graph (sub-graphs spec §4.7). */
+export const usedBySubgraphs = (names: readonly string[]) => `Used as a sub-graph in: ${names.join(', ')}. Those steps will show "missing graph" until you change them.`;
+/** The export toast's note for a graph with sub-graph steps (sub-graphs spec §8). */
+export const subgraphsNotExported = (names: readonly string[]) => `Sub-graphs aren't included: ${names.join(', ')}. Export them too.`;
+
 /** One quick pick item carrying its value. */
 export type PickItem<T> = { label: string; description?: string; detail?: string; value: T };
 
@@ -120,7 +125,14 @@ export function graphCommands(d: CommandDeps) {
       const g = engine.graphStore.load(t.graphId);
       const named = g.ok && (!!g.graph.attachments?.length || g.graph.nodes.some((n) => !!n.attachments?.length));
       const files = named ? ` Attachment files aren't included: send them with it (from .agent-stream/attachments/${t.graphId}/).` : '';
-      d.ui.info(`Exported ${r.fileName}. Variable values were left out.${files}`);
+      // Sub-graph steps refer to other graphs by id: those graphs aren't in the file (spec §8).
+      const inner = g.ok ? [...new Set(g.graph.nodes.flatMap((n) => (n.kind === 'graph' && n.graph ? [n.graph] : [])))] : [];
+      const names = inner.map((id) => {
+        const found = engine.graphStore.lookup(id);
+        return found.ok ? found.graph.name : (found.name ?? id);
+      });
+      const subgraphs = names.length ? ` ${subgraphsNotExported(names)}` : '';
+      d.ui.info(`Exported ${r.fileName}. Variable values were left out.${files}${subgraphs}`);
     },
 
     /**
@@ -174,7 +186,10 @@ export function graphCommands(d: CommandDeps) {
       const t = await targetFor(target);
       if (!t) return;
       const message = `Delete ${nameOf(t)}? This removes the graph, its chat, its edit history and its variable values on this machine. Past run logs stay.`;
-      if (!(await d.ui.confirm(message, 'Delete'))) return;
+      const graphs = app(t.folder).listGraphs();
+      const users = (graphs.find((g) => g.id === t.graphId)?.usedBy ?? []).map((id) => graphs.find((g) => g.id === id)?.name ?? id);
+      const confirmed = users.length ? await d.ui.confirm(message, 'Delete', usedBySubgraphs(users)) : await d.ui.confirm(message, 'Delete');
+      if (!confirmed) return;
       const r = app(t.folder).deleteGraph(t.graphId);
       if (!r.ok) d.ui.error(r.error);
     },
