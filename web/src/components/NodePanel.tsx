@@ -178,7 +178,8 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [graphId, node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
-  const only = onlyAvailability({ run, runs, graph: openGraph }, expandedIdOf({ scope }, node.id));
+  const subgraphs = useStore((s) => s.subgraphs);
+  const only = onlyAvailability({ run, runs, graph: openGraph, subgraphs }, expandedIdOf({ scope }, node.id));
 
   return (
     <>

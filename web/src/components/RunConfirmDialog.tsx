@@ -1,4 +1,4 @@
-import { checkoutChip, modelLine } from '@agent-stream/shared';
+import { checkoutChip, modelLine, type PreviewStep } from '@agent-stream/shared';
 import { useEffect } from 'react';
 import { post, send } from '../bridge';
 import { dispatch, useStore } from '../store';
@@ -13,6 +13,12 @@ function StepText({ text, className }: { text?: string; className?: string }) {
 
 function StepBrief({ text }: { text?: string }) {
   return text ? <p className="muted step-brief">In short: {text}</p> : null;
+}
+
+/** A step in the run's outline: `n4 · Research (sub-graph "Company research", 3 steps)`, or `n4/n1 · Find site` with its kind. */
+export function outlineLabel(s: PreviewStep): string {
+  if (s.subgraph) return `${s.id} · ${s.title} (sub-graph "${s.subgraph.graphName}", ${s.subgraph.steps} step${s.subgraph.steps === 1 ? '' : 's'})`;
+  return `${s.id} · ${s.title}`;
 }
 
 /** Shows exactly what will run, as the engine rendered it (spec §7.6); Start sends the preview's signature. */
@@ -125,6 +131,16 @@ export function RunConfirmDialog() {
                 ⚠ {w}
               </p>
             ))}
+            {preview.steps.some((s) => s.subgraph) && (
+              <ul className="run-steps" aria-label="Steps">
+                {preview.steps.map((s) => (
+                  <li key={s.id} className={`run-step kind-${s.kind}${s.reused ? ' reused' : ''}${s.notRun ? ' not-run' : ''}`} style={{ paddingLeft: `${(s.depth ?? 0) * 16}px` }}>
+                    {outlineLabel(s)}
+                    {!s.subgraph && <span className="muted"> {s.kind}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
             {agents.length > 0 && <p className="model-line">{modelLine({ model: preview.model?.value, label: preview.model?.label, effort: preview.effort, provider: preview.provider })}</p>}
             {agents.length > 0 && preview.copilotRequestsPerStep !== undefined && <p className="cap-line">Copilot requests per step: up to {preview.copilotRequestsPerStep}</p>}
             <p>
@@ -175,7 +191,7 @@ export function RunConfirmDialog() {
                 <tbody>
                   {preview.variables.map((v) => (
                     <tr key={v.name}>
-                      <td className="mono">{v.name}</td>
+                      <td className="mono">{v.label ?? v.name}</td>
                       <td className="mono">{v.value}</td>
                     </tr>
                   ))}

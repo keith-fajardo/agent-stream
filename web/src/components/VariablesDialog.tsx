@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { variableNameProblem, type Op, type VariableDef } from '@agent-stream/shared';
+import { subgraphValueKey, subgraphValueLabel, variableNameProblem, type Op, type VariableDef } from '@agent-stream/shared';
+import { liveExpansion } from '../scope';
 import { sendEdit } from '../actions';
 import { send } from '../bridge';
 import { dispatch, useStore } from '../store';
@@ -19,12 +20,25 @@ export function VariablesDialog() {
   const request = useStore((s) => s.variablesDialog);
   const graph = useStore((s) => s.graph);
   const values = useStore((s) => s.variableValues);
+  const expansion = useStore(liveExpansion);
   if (!request || !graph) return null;
-  return <VariablesEditor graphId={graph.id} variables={graph.variables} values={values} focus={request.focus} addRow={request.addRow} />;
+  return <VariablesEditor graphId={graph.id} variables={graph.variables} values={values} focus={request.focus} addRow={request.addRow} inner={innerRows(expansion)} />;
+}
+
+/** An inner variable a sub-graph step leaves empty: asked here, under `<step>/<name>` (sub-graphs spec §3.3). */
+type InnerRow = { key: string; label: string; description: string };
+function innerRows(expansion: ReturnType<typeof liveExpansion>): InnerRow[] {
+  if (!expansion?.ok) return [];
+  return Object.values(expansion.scopes).flatMap((scope) =>
+    (expansion.graphs[scope.graphId]?.variables ?? [])
+      .filter((v) => (scope.values[v.name] ?? '') === '')
+      .map((v) => ({ key: subgraphValueKey(scope.stepId, v.name), label: subgraphValueLabel(scope.stepId, v.name), description: v.description })),
+  );
 }
 
 /** Edits every variable at once; Save sends only what changed (spec §7.3). Values never leave this machine. */
-function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values: Record<string, string>; focus?: string; addRow?: boolean }) {
+function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values: Record<string, string>; focus?: string; addRow?: boolean; inner: InnerRow[] }) {
+  const [innerValues, setInnerValues] = useState<Record<string, string>>(() => Object.fromEntries(p.inner.map((r) => [r.key, p.values[r.key] ?? ''])));
   const nextKey = useRef(0);
   const blank = (): Row => ({ key: nextKey.current++, originalValue: '', originalDescription: '', name: '', value: '', description: '', deleted: false });
   const seed = (): Row[] =>
@@ -79,6 +93,7 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
     }
     sendEdit(p.graphId, ops, 'edited the variables');
     for (const v of values) send({ type: 'setVariableValue', graphId: p.graphId, name: v.name, value: v.value });
+    for (const r of p.inner) if ((innerValues[r.key] ?? '') !== (p.values[r.key] ?? '')) send({ type: 'setVariableValue', graphId: p.graphId, name: r.key, value: innerValues[r.key] ?? '' });
     close();
   };
   const lastNew = [...live].reverse().find((r) => !r.original);
@@ -147,6 +162,25 @@ function VariablesEditor(p: { graphId: string; variables: VariableDef[]; values:
           </tbody>
         </table>
         <button onClick={() => setRows((rs) => [...rs, blank()])}>Add variable</button>
+        {p.inner.length > 0 && (
+          <>
+            <h3>Sub-graph values</h3>
+            <p className="muted">Values the sub-graph steps leave empty, asked when the run starts.</p>
+            <table className="inner-values">
+              <tbody>
+                {p.inner.map((r) => (
+                  <tr key={r.key}>
+                    <td className="mono">{r.label}</td>
+                    <td>
+                      <input aria-label={`Value of ${r.label}`} className="mono" value={innerValues[r.key] ?? ''} placeholder="not set" onChange={(e) => setInnerValues({ ...innerValues, [r.key]: e.target.value })} />
+                    </td>
+                    <td className="muted">{r.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
         <div className="modal-actions">
           <button onClick={close}>Cancel</button>
           <button className="primary" disabled={errors.size > 0} onClick={save}>

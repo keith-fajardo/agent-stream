@@ -21,7 +21,7 @@ import type { NodeSize } from '../layout';
 import { addsToSelection, deletionEdit, MULTI_SELECT_KEYS, selectedForDelete } from '../selection';
 import { actions, registerCanvas, sendEdit } from '../actions';
 import { send } from '../bridge';
-import { contentSignature } from '../state';
+import { changedSinceRun } from '../retry';
 import { liveExpansion, shownGraph, shownReview } from '../scope';
 import { ScopeBar } from './ScopeBar';
 import { dropMoves, settleMoves } from '../pendingMoves';
@@ -153,7 +153,7 @@ export function Canvas() {
   const onDelete: OnDelete<StepFlowNode, FlowEdge> = ({ nodes: deleted, edges: removed }) => remove(deleted.map((n) => n.id), removed);
   const selection = selectedForDelete(nodes, edges);
   const deleteSelection = () => remove(selection.nodeIds, selection.edges);
-  const stale = runForGraph !== undefined && contentSignature(runForGraph.snapshot) !== contentSignature(graph);
+  const stale = changedSinceRun({ run: runForGraph, graph: tabGraph, subgraphs });
 
   return (
     <div
