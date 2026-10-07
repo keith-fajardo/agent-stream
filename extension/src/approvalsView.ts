@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { approvalSummary, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
+import { approvalStepLabel, approvalSummary, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
 import type { Folder, FolderApproval } from './engines';
 
 const TOOLTIP_CHARS = 2000;
@@ -15,7 +15,7 @@ export class ApprovalItem extends vscode.TreeItem {
     readonly folder: Folder,
     readonly request: ApprovalRequest,
   ) {
-    super(`${request.nodeId} · ${request.nodeTitle}`, vscode.TreeItemCollapsibleState.None);
+    super(approvalStepLabel(request), vscode.TreeItemCollapsibleState.None);
     this.id = `approval:${request.id}`;
     this.description = approvalSummary(request.toolName, request.input, request.graphChange, request.browserAction);
     const full = JSON.stringify(request.input, null, 2) ?? '';

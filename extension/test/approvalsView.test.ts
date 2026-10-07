@@ -27,6 +27,11 @@ describe('ApprovalsView', () => {
     expect(items[0].command).toEqual({ command: 'agentStream.revealApproval', title: 'Show step', arguments: [items[0]] });
   });
 
+  it('names the sub-graph a step is inside', () => {
+    const item = new ApprovalItem(a, { ...request('s', 't'), nodeId: 'n4/n2', nodeTitle: 'Read news', inGraph: 'Company research' });
+    expect(item.label).toBe('n4/n2 · Read news (in Company research)');
+  });
+
   it('caps the tooltip at 2,000 characters', () => {
     const item = new ApprovalItem(a, request('x', 't', { command: 'y'.repeat(3000) }));
     expect(String(item.tooltip).length).toBe(2001);

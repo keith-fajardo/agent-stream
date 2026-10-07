@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ALLOW_ALL_FOR_STEP, ALLOW_ALL_HINT, ALLOW_ON_SITE, ALLOW_ONCE, browserActionText, DENY, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
+import { ALLOW_ALL_FOR_STEP, ALLOW_ALL_HINT, ALLOW_ON_SITE, ALLOW_ONCE, approvalStepLabel, browserActionText, DENY, THEN_PRESSES_ENTER, type ApprovalRequest, type BrowserActionRequest } from '@agent-stream/shared';
 import { describeApprovalInput, patchLineClass } from '../approvalView';
 import { send } from '../bridge';
 import { dispatch } from '../store';
@@ -39,7 +39,7 @@ export function ApprovalCard({ request: a }: { request: ApprovalRequest }) {
   const deny = () => send({ type: 'decide', approvalId: a.id, decision: 'deny', note: note.trim() || undefined });
   const who = (
     <button className="link" onClick={() => dispatch({ kind: 'selectNode', id: a.nodeId })}>
-      {a.nodeId} · {a.nodeTitle}
+      {approvalStepLabel(a)}
     </button>
   );
   if (a.browserAction) {

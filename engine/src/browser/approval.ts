@@ -15,7 +15,7 @@ export type AskBrowserAction = ((o: { toolName: string; input: unknown; action: 
  * cancels it (the broker's cancelRun and the step's signal), the canvas shows the step waiting, and Approve all approves
  * it once. A denial says `The user denied this action.` (with the user's note when there is one).
  */
-export function createBrowserAsk(d: { broker: ApprovalBroker; ctx: Pick<NodeContext, 'runId' | 'graph' | 'node' | 'emit' | 'signal'> }): AskBrowserAction {
+export function createBrowserAsk(d: { broker: ApprovalBroker; ctx: Pick<NodeContext, 'runId' | 'graph' | 'node' | 'emit' | 'signal' | 'scopeName'> }): AskBrowserAction {
   const { broker, ctx } = d;
   const ask: AskBrowserAction = async ({ toolName, input, action, signal }) => {
     let decided: Decision;

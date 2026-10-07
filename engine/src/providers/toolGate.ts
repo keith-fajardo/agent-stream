@@ -36,6 +36,8 @@ export type StepGateOptions = {
   graphId: string;
   nodeId: string;
   nodeTitle: string;
+  /** A step inside a sub-graph: the inner graph's name, for the approval card (sub-graphs spec §4.3). */
+  inGraph?: string;
   projectDir: string;
   /** Files no agent may read, wherever they are (the variable values files). */
   privateFiles: readonly string[];
@@ -109,7 +111,7 @@ export function createStepGate(o: StepGateOptions): ToolGate {
       // The one approval path of every step (requestApproval): Allow all for this step, the log lines and Stop work the same here as for the graph tools and the browser.
       return await requestApproval({
         broker: o.broker,
-        ctx: { runId: o.runId, graph: { id: o.graphId }, node: { id: o.nodeId, title: o.nodeTitle }, emit: o.emit },
+        ctx: { runId: o.runId, graph: { id: o.graphId }, node: { id: o.nodeId, title: o.nodeTitle }, emit: o.emit, ...(o.inGraph && { scopeName: o.inGraph }) },
         toolName,
         input,
         card: {},

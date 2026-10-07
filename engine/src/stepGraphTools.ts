@@ -20,6 +20,10 @@ export type StepGraphToolDeps = {
 };
 
 const APPROVAL = "Every change waits for the user's approval; only steps that haven't started can be changed.";
+/** A step inside a sub-graph asked to change a graph (it gets no graph tools, so this is only a safety net). */
+export const INNER_STEP_NO_GRAPH_CHANGES = "Steps inside a sub-graph can't change graphs.";
+/** A change that connects to, adds next to, or changes a sub-graph step (sub-graphs spec §4.6). */
+export const touchesSubgraphStep = (id: string) => `Changes that touch sub-graph step ${id} can't be made during a run; change the graph after it finishes.`;
 const TOOL_NAME = 'Change graph';
 const started = (id: string) => `${id} already started; the change was not applied.`;
 /** A title is part of what runs (`# Your step: <title>`): one line (no Unicode line break either), so it can't smuggle in instructions. */
@@ -64,8 +68,9 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     const r = d.graphStore.load(run.graphId);
     return r.ok ? { graph: r.graph, run } : r.error;
   }
-  /** In the graph and in this run. */
-  const known = (s: { graph: Graph; run: RunMeta }, id: string) => s.graph.nodes.some((n) => n.id === id) && s.run.snapshot.nodes.some((n) => n.id === id);
+  /** In the graph and in this run; a step inside a sub-graph is never one an agent can wire to (sub-graphs spec §4.6). */
+  const known = (s: { graph: Graph; run: RunMeta }, id: string) => !id.includes('/') && s.graph.nodes.some((n) => n.id === id) && s.run.snapshot.nodes.some((n) => n.id === id);
+  const isSubgraphStep = (s: { graph: Graph }, id: string) => s.graph.nodes.some((n) => n.id === id && n.kind === 'graph');
   /** Only steps still queued can be changed or run before a new one; never the calling step. */
   const notStarted = (s: { run: RunMeta }, id: string) => id !== ctx.node.id && s.run.nodes[id]?.status === 'queued';
 
@@ -79,6 +84,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     const after = unique(a.after);
     const before = unique(a.before);
     for (const ref of [...after, ...before]) if (!known(s, ref)) return `node ${ref} does not exist`;
+    for (const ref of [...after, ...before]) if (isSubgraphStep(s, ref)) return touchesSubgraphStep(ref);
     for (const ref of before) if (!notStarted(s, ref)) return started(ref);
     if (a.kind === 'command' && !a.command?.trim()) return 'a command step needs a command';
     if (a.kind === 'agent' && !a.prompt?.trim()) return 'an agent step needs a prompt';
@@ -113,6 +119,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
     if (typeof s === 'string') return s;
     const { id, ...patch } = a;
     if (!known(s, id)) return `node ${id} does not exist`;
+    if (isSubgraphStep(s, id)) return touchesSubgraphStep(id);
     if (!notStarted(s, id)) return started(id);
     const badTitle = titleProblem(patch.title);
     if (badTitle) return badTitle;
@@ -135,6 +142,7 @@ export function createStepGraphTools(d: StepGraphToolDeps): GraphTool[] {
 
   /** Check, fill in, ask; on approval check again, then change the run and the graph. Nothing changes otherwise. */
   async function propose(input: unknown, make: () => Proposal | string): Promise<ToolReply> {
+    if (ctx.node.id.includes('/')) return reply(INNER_STEP_NO_GRAPH_CHANGES, true);
     const p = make();
     if (typeof p === 'string') return reply(p, true);
     const r = d.render(p.graph, p.node);

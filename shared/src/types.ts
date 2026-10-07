@@ -372,6 +372,8 @@ export type ApprovalRequest = {
   graphChange?: GraphChangeRequest;
   /** A browser step's click, typing, choice or key press (browser spec §4.2): what the card shows. */
   browserAction?: BrowserActionRequest;
+  /** A step inside a sub-graph: the inner graph's name, so cards say `n4/n2 · Read news (in Company research)` (sub-graphs spec §4.3). */
+  inGraph?: string;
 };
 
 /**

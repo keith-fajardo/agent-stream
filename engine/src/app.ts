@@ -239,7 +239,8 @@ export function createApp(d: AppDeps) {
           // One tool set (and so one site allowance) per start of a step: never shared with another step or another run.
           browserTools = createBrowserTools({ step, ask: createBrowserAsk({ broker, ctx }) });
         }
-        const graphTools = readOnly ? [] : createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
+        // Steps inside a sub-graph never change graphs during a run (sub-graphs spec §4.6).
+        const graphTools = readOnly || ctx.node.id.includes('/') ? [] : createStepGraphTools({ ctx, graphStore, runner, broker, render: renderNode, signal: ctx.signal });
         outcome = await p.runStep(
           { ...ctx, graphTools, ...(browserTools.length > 0 && { browserTools }) },
           createStepGate({
@@ -248,6 +249,7 @@ export function createApp(d: AppDeps) {
             graphId: ctx.graph.id,
             nodeId: ctx.node.id,
             nodeTitle: ctx.node.title,
+            ...(ctx.scopeName && { inGraph: ctx.scopeName }),
             projectDir: ctx.cwd,
             runsRoot: d.projectDir,
             privateFiles: privateFiles(),

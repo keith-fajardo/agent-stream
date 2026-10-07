@@ -23,6 +23,14 @@ describe('ApprovalCard', () => {
     await act(async () => root.unmount());
   });
 
+  it('names the sub-graph a step is inside', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => root.render(createElement(ApprovalCard, { request: { ...request('a3', 'ls'), nodeId: 'n4/n2', nodeTitle: 'Read news', inGraph: 'Company research' } })));
+    expect(container.textContent).toContain('n4/n2 · Read news (in Company research)');
+    await act(async () => root.unmount());
+  });
+
   it('shows a graph change as its summary, with the exact text that would run', async () => {
     const container = document.createElement('div');
     const root = createRoot(container);
