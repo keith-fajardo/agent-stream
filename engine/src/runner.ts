@@ -6,8 +6,10 @@ import {
   MAX_BROWSER_PAGES,
   MAX_BROWSER_URL_CHARS,
   edgeId,
+  folderId,
   isWriteCapable,
   loggedUrl,
+  scopeOf,
   onlyRunPlan,
   reusableNodeIds,
   runModeProblem,
@@ -30,6 +32,7 @@ import {
   type RenderedRun,
   type RunMeta,
   type RunMode,
+  type Scope,
   type StaleReason,
   type StepModelUse,
   type WaitingFor,
@@ -95,6 +98,8 @@ export type StartRunInput = {
   checkout?: CheckoutInfo;
   /** The variant workspaces the app created for this run, by name (spec §4.3a). */
   workspaces?: Record<string, { path: string; head: string }>;
+  /** The sub-graph steps of `graph`, which is expanded (sub-graphs spec §3.1): recorded in the run. */
+  scopes?: Record<string, Scope>;
 };
 /** An approved change a step agent makes to its run: a new step with its connections, or new text for a step that hasn't started. */
 export type RunChange =
@@ -159,6 +164,11 @@ export class Runner extends EventEmitter {
     return undefined;
   }
 
+  /** Every run in progress in this folder. */
+  activeRuns(): RunMeta[] {
+    return [...this.runs.values()].map((r) => r.meta);
+  }
+
   start(input: StartRunInput): StartRunResult {
     const graph = structuredClone(input.graph);
     const problems = validateRunnable(graph);
@@ -185,10 +195,10 @@ export class Runner extends EventEmitter {
     let notRun = new Set<string>();
     let stale = new Map<string, StaleReason>();
     if (source && mode === 'only') {
-      const plan = onlyRunPlan(graph, source, input.fromNodeId!, input.rendered, input.attachments);
+      const plan = onlyRunPlan(graph, source, input.fromNodeId!, input.rendered, input.attachments, input.scopes);
       if (!plan.ok) return { ok: false, error: plan.error };
       ({ reuse, notRun, stale } = plan);
-    } else if (source) reuse = reusableNodeIds(graph, source, mode === 'resume' ? undefined : input.fromNodeId, input.rendered, input.attachments);
+    } else if (source) reuse = reusableNodeIds(graph, source, mode === 'resume' ? undefined : input.fromNodeId, input.rendered, input.attachments, input.scopes);
     const skipped = new Set([...reuse, ...notRun]);
     for (const n of graph.nodes) {
       const ws = workspaceOf(n);
@@ -235,6 +245,7 @@ export class Runner extends EventEmitter {
       ...(input.checkout && { checkout: toRunCheckout(input.checkout) }),
       ...(waitFor && { waitingFor: waitingOn(waitFor.holder) }),
       ...(Object.keys(workspaces).length > 0 && { workspaces }),
+      ...(input.scopes && Object.keys(input.scopes).length > 0 && { scopes: structuredClone(input.scopes) }),
     };
     meta.rendered = structuredClone(input.rendered);
     if (source) meta.sourceRunId = source.id;
@@ -483,9 +494,37 @@ export class Runner extends EventEmitter {
     this.safeEmit('run', run.meta);
   }
 
+  /**
+   * A sub-graph step, once its inner last steps all succeeded (sub-graphs spec §4.1): it calls no model, runs no command,
+   * takes no lease and asks nothing. Its output is each inner last step's output in run order, under its own heading.
+   */
+  private collect(run: ActiveRun, nodeId: string): void {
+    const { meta } = run;
+    run.running.set(nodeId, new AbortController());
+    this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
+    const startedAt = Date.now();
+    Promise.resolve()
+      .then((): NodeOutcome => {
+        this.emitEvent(run, nodeId, { type: 'start', kind: 'graph', cwd: this.deps.projectDir });
+        const lasts = new Set(upstream(meta.snapshot, nodeId));
+        const sections = topoOrder(meta.snapshot)
+          .filter((id) => lasts.has(id))
+          .map((id) => {
+            const title = meta.snapshot.nodes.find((n) => n.id === id)?.title ?? '';
+            const output = this.deps.runStore.readOutput(meta.id, id).trim();
+            return `### ${id.slice(nodeId.length + 1)} · ${title}\n${output || '(no output)'}\nFull output: ${this.deps.runStore.outputRelPath(meta.id, id)}`;
+          });
+        return { ok: true, output: sections.join('\n\n') };
+      })
+      .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
+      .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
+  }
+
   private launch(run: ActiveRun, nodeId: string): void {
     const { meta } = run;
     const node = meta.snapshot.nodes.find((n) => n.id === nodeId)!;
+    if (node.kind === 'graph') return this.collect(run, nodeId);
     const controller = new AbortController();
     run.running.set(nodeId, controller);
     this.deps.broker.beginStep(run.meta.id, nodeId);
@@ -518,20 +557,28 @@ export class Runner extends EventEmitter {
         // Inside the chain so a failure reading upstream outputs fails this node instead of escaping.
         const upstreamResults = upstream(meta.snapshot, nodeId).map((parentId) => {
           const rel = this.deps.runStore.outputRelPath(meta.id, parentId);
+          const graphName = meta.scopes?.[parentId]?.graphName;
           return {
             node: executionNode(meta, parentId),
             state: meta.nodes[parentId],
             output: this.deps.runStore.readOutput(meta.id, parentId),
             // Relative to the folder; a step working in a worktree needs the full path (Review Focus 3).
             outputPath: place ? join(this.deps.projectDir, rel) : rel,
+            ...(graphName && { graphName }),
           };
         });
-        const graph = meta.rendered ? { ...meta.snapshot, goal: meta.rendered.goal, instructions: meta.rendered.instructions } : meta.snapshot;
+        // A step inside a sub-graph gets that graph's goal, instructions and attachments, not the run's graph's (sub-graphs spec §4.3).
+        const scope = scopeOf(meta.scopes, nodeId);
+        const texts = scope ? (meta.rendered?.scopes?.[scope.stepId] ?? { goal: '', instructions: '' }) : meta.rendered;
+        const graph = texts ? { ...meta.snapshot, goal: texts.goal, instructions: texts.instructions } : meta.snapshot;
         const execNode = executionNode(meta, nodeId);
-        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, execNode, upstreamResults, place) : '';
+        // The prompt names the inner graph's own workspace name; the folder is the scoped one's (spec §4.3).
+        const prompted = scope && execNode.workspace ? { ...execNode, workspace: execNode.workspace.slice(folderId(scope.stepId).length + 1) } : execNode;
+        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, prompted, upstreamResults, place) : '';
         const cwd = place?.path ?? this.deps.projectDir;
-        const files = stepAttachments({ store: this.attachmentStore, graph: meta.snapshot, node, cwd, worktree: !!place });
-        notes = [...notes, ...files.filter((f) => f.missing).map((f) => missingAttachmentLine(meta.graphId, f.name))];
+        const filesGraph = scope ? { ...meta.snapshot, id: scope.graphId, attachments: scope.attachments } : meta.snapshot;
+        const files = stepAttachments({ store: this.attachmentStore, graph: filesGraph, node, cwd, worktree: !!place });
+        notes = [...notes, ...files.filter((f) => f.missing).map((f) => missingAttachmentLine(filesGraph.id, f.name))];
         return executor({
           runId: meta.id,
           graph,
@@ -543,27 +590,30 @@ export class Runner extends EventEmitter {
           emit,
           ...(use?.model && { model: use.model }),
           ...(use?.effort && { effort: use.effort }),
-          ...(files.length > 0 && { attachments: files, readAttachment: storeReader(this.attachmentStore, meta.graphId, files) }),
+          ...(files.length > 0 && { attachments: files, readAttachment: storeReader(this.attachmentStore, filesGraph.id, files) }),
+          ...(scope && { scopeName: scope.graphName }),
         });
       })
       .catch((e: unknown): NodeOutcome => ({ ok: false, output: '', error: e instanceof Error ? e.message : String(e) }))
       .then((outcome) => this.complete(run, nodeId, outcome, Date.now() - startedAt))
-      .catch((e: unknown) => {
-        // Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection.
-        console.error('[agent-stream] internal error in run', meta.id, 'node', nodeId, e);
-        const status = meta.nodes[nodeId]?.status;
-        if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
-          run.running.delete(nodeId);
-          run.waiting.delete(nodeId);
-          this.deps.broker.endStep(run.meta.id, nodeId);
-          this.setNode(run, nodeId, {
-            status: 'failed',
-            endedAt: this.clock(),
-            error: `Agent Stream internal error: ${e instanceof Error ? e.message : String(e)}`,
-          });
-        }
-        this.schedule(run);
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
+  }
+
+  /** Last resort: a run must always reach finish, and nothing may escape as an unhandled rejection. */
+  private failInternally(run: ActiveRun, nodeId: string, e: unknown): void {
+    console.error('[agent-stream] internal error in run', run.meta.id, 'node', nodeId, e);
+    const status = run.meta.nodes[nodeId]?.status;
+    if (run.running.has(nodeId) || status === 'running' || status === 'waiting_approval') {
+      run.running.delete(nodeId);
+      run.waiting.delete(nodeId);
+      this.deps.broker.endStep(run.meta.id, nodeId);
+      this.setNode(run, nodeId, {
+        status: 'failed',
+        endedAt: this.clock(),
+        error: `Agent Stream internal error: ${e instanceof Error ? e.message : String(e)}`,
       });
+    }
+    this.schedule(run);
   }
 
   private complete(run: ActiveRun, nodeId: string, outcome: NodeOutcome, durationMs: number): void {
@@ -659,6 +709,7 @@ function executionNode(meta: RunMeta, id: string): GraphNode {
   const node = meta.snapshot.nodes.find((n) => n.id === id)!;
   const text = meta.rendered?.nodes[id];
   if (text === undefined) throw new Error(`no reviewed text for step ${id}`);
+  if (node.kind === 'graph') return node;
   return node.kind === 'command' ? { ...node, command: text } : { ...node, prompt: text };
 }
 

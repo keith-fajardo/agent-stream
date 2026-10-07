@@ -2,7 +2,8 @@ import type { Graph, GraphNode, NodeRunState } from '@agent-stream/shared';
 
 export const MAX_UPSTREAM_CHARS = 20_000;
 
-export type UpstreamResult = { node: GraphNode; state: NodeRunState; output: string; outputPath: string };
+/** `graphName`: an upstream sub-graph step's inner graph name (sub-graphs spec §4.1). */
+export type UpstreamResult = { node: GraphNode; state: NodeRunState; output: string; outputPath: string; graphName?: string };
 
 export function truncateHead(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
@@ -26,6 +27,7 @@ function heading(u: UpstreamResult): string {
     const secs = u.state.durationMs !== undefined ? `, ${(u.state.durationMs / 1000).toFixed(1)} s` : '';
     return `## ${u.node.id} · ${u.node.title}${about} (command \`${u.node.command ?? ''}\`, exit ${u.state.exitCode ?? '?'}${secs}${where})`;
   }
+  if (u.node.kind === 'graph') return `## ${u.node.id} · ${u.node.title}${about} (sub-graph "${u.graphName ?? u.node.graph ?? ''}", ${u.state.status})`;
   return `## ${u.node.id} · ${u.node.title}${about} (agent, ${u.state.status}${where})`;
 }
 

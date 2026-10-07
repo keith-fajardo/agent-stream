@@ -16,6 +16,8 @@ export type StepData = {
   ghost?: boolean;
   /** The step's own model and effort (step model spec §4.2). */
   modelChip?: ModelChip;
+  /** A sub-graph step (sub-graphs spec §6.2): its inner graph's name, step count, and an expansion problem to show in the error style. */
+  subgraph?: { graphName: string; steps?: number; problem?: string };
 };
 export type StepFlowNode = Node<StepData, 'step'>;
 
@@ -24,16 +26,23 @@ const changeTitle = (change: NonNullable<StepData['change']>, fields?: ChangedFi
   `${change[0].toUpperCase()}${change.slice(1)}${fields?.length ? `: ${fields.join(', ')}` : ''}`;
 
 export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
-  const { node, state, waiting, change, changeBy, changeFields, modelChip } = data;
+  const { node, state, waiting, change, changeBy, changeFields, modelChip, subgraph } = data;
   const status = state?.status;
-  const classes = ['step', `kind-${node.kind}`, change ? `change-${change}` : '', status ? `status-${status}` : '', waiting ? 'waiting' : '', selected ? 'selected' : ''];
+  const classes = ['step', `kind-${node.kind}`, change ? `change-${change}` : '', status ? `status-${status}` : '', waiting ? 'waiting' : '', selected ? 'selected' : '', subgraph?.problem ? 'subgraph-problem' : ''];
   return (
     <div className={classes.filter(Boolean).join(' ')}>
       <Handle type="target" position={Position.Left} />
       <div className="step-title">
-        <span className="kind-icon">{node.kind === 'agent' ? '✦' : '$'}</span>
+        <span className="kind-icon">{node.kind === 'agent' ? '✦' : node.kind === 'graph' ? '⧉' : '$'}</span>
         {node.title}
       </div>
+      {subgraph && (
+        <div className="subgraph-line" title={subgraph.problem}>
+          {subgraph.graphName}
+          {subgraph.steps !== undefined && ` · ${subgraph.steps} step${subgraph.steps === 1 ? '' : 's'}`}
+          {subgraph.problem && <span className="subgraph-problem-text"> · {subgraph.problem}</span>}
+        </div>
+      )}
       {node.description?.trim() && (
         <div className="step-desc" title={node.description}>
           {node.description}

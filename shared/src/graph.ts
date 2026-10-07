@@ -2,6 +2,8 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem, workspaceOf } from './acce
 import { attachmentListProblem, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { ONLY_AGENT_STEPS_BROWSER } from './browser';
 import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
+import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, setsStepField, sortedValues, SUBGRAPH_FIELDS_ONLY, SUBGRAPH_NEEDS_GRAPH, subgraphValuesProblem, valuesText } from './subgraphStep';
+import { innerStepIds, scopeOf, subgraphFirstSteps, type Scope } from './subgraphs';
 import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
 
@@ -84,7 +86,16 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (attachProblem) return fail(attachProblem);
       if (op.node.attachments?.length && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       if (op.node.browser && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_BROWSER);
-      const workspace = op.node.workspace?.trim() || undefined;
+      const isGraph = op.node.kind === 'graph';
+      if (isGraph) {
+        if (setsStepField(op.node)) return fail(SUBGRAPH_FIELDS_ONLY);
+        if (!op.node.graph) return fail(SUBGRAPH_NEEDS_GRAPH);
+        const graphProblem = graphIdProblem(op.node.graph);
+        if (graphProblem) return fail(graphProblem);
+        const valuesProblem = op.node.values ? subgraphValuesProblem(op.node.values) : null;
+        if (valuesProblem) return fail(valuesProblem);
+      } else if (op.node.graph !== undefined || op.node.values !== undefined) return fail(ONLY_SUBGRAPH_STEPS_GRAPH);
+      const workspace = isGraph ? undefined : op.node.workspace?.trim() || undefined;
       const workspaceProblem = workspace === undefined ? null : workspaceNameProblem(workspace);
       if (workspaceProblem) return fail(workspaceProblem);
       const node = definedOnly<GraphNode>({
@@ -92,9 +103,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         title,
         kind: op.node.kind,
         description: op.node.description,
-        prompt: op.node.prompt,
-        command: op.node.command,
-        timeoutSec: op.node.timeoutSec,
+        prompt: isGraph ? undefined : op.node.prompt,
+        command: isGraph ? undefined : op.node.command,
+        timeoutSec: isGraph ? undefined : op.node.timeoutSec,
         access: op.node.access === 'read' ? 'read' : undefined,
         workspace,
         model: op.node.model && { provider: op.node.model.provider, id: op.node.model.id },
@@ -102,6 +113,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         attachments: op.node.attachments?.length ? [...op.node.attachments] : undefined,
         // Only `true` is stored: off is no field (spec §2.1).
         browser: op.node.browser === true ? true : undefined,
+        graph: isGraph ? op.node.graph : undefined,
+        // An empty map is no field; the values are kept in name order.
+        values: isGraph && op.node.values && Object.keys(op.node.values).length > 0 ? sortedValues(op.node.values) : undefined,
         position: op.node.position,
         createdBy: by,
         updatedBy: by,
@@ -112,7 +126,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
     case 'updateNode': {
       const node = graph.nodes.find((n) => n.id === op.id);
       if (!node) return fail(`node ${op.id} does not exist`);
-      const { access, workspace, timeoutSec, model, effort, attachments, browser, ...patch } = definedOnly<NodePatch>(op.patch);
+      const { access, workspace, timeoutSec, model, effort, attachments, browser, graph: innerGraph, values, ...patch } = definedOnly<NodePatch>(op.patch);
       if (patch.title !== undefined) {
         patch.title = patch.title.trim();
         if (!patch.title) return fail('a node needs a title');
@@ -127,28 +141,42 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (attachProblem) return fail(attachProblem);
       if (attachments?.length && kind === 'command') return fail(ONLY_AGENT_STEPS_ATTACH);
       if (browser && kind === 'command') return fail(ONLY_AGENT_STEPS_BROWSER);
-      let nextWorkspace = node.workspace;
-      if (workspace !== undefined) {
+      // A sub-graph step has only its graph and values (spec §2.1); becoming one needs a graph, becoming anything else drops both.
+      const isGraph = kind === 'graph';
+      if (isGraph && setsStepField({ prompt: patch.prompt, command: patch.command, timeoutSec, access, workspace, model, effort, attachments, browser })) return fail(SUBGRAPH_FIELDS_ONLY);
+      if (!isGraph && (innerGraph !== undefined || values !== undefined)) return fail(ONLY_SUBGRAPH_STEPS_GRAPH);
+      const nextGraph = isGraph ? (innerGraph ?? node.graph) : undefined;
+      if (isGraph && !nextGraph) return fail(SUBGRAPH_NEEDS_GRAPH);
+      const graphProblem = nextGraph ? graphIdProblem(nextGraph) : null;
+      if (graphProblem) return fail(graphProblem);
+      const valuesProblem = values ? subgraphValuesProblem(values) : null;
+      if (valuesProblem) return fail(valuesProblem);
+      const nextValues = isGraph ? (values ?? node.values) : undefined;
+      let nextWorkspace = isGraph ? undefined : node.workspace;
+      if (workspace !== undefined && !isGraph) {
         const trimmed = workspace.trim();
         const problem = trimmed === '' ? null : workspaceNameProblem(trimmed);
         if (problem) return fail(problem);
         nextWorkspace = trimmed || undefined;
       }
       // A command step can always change files, so becoming one drops `access` (spec §3.1).
-      const nextAccess = kind === 'command' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
+      const nextAccess = kind !== 'agent' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
       // 0 clears the timeout; a missing one keeps it.
-      const nextTimeout = timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
+      const nextTimeout = isGraph ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
       // Only agent steps have a model or effort, so becoming a command step drops both (spec §2.1); null clears one.
-      const nextModel = kind === 'command' || model === null ? undefined : (model ?? node.model);
-      const nextEffort = kind === 'command' || effort === null ? undefined : (effort ?? node.effort);
+      const nextModel = kind !== 'agent' || model === null ? undefined : (model ?? node.model);
+      const nextEffort = kind !== 'agent' || effort === null ? undefined : (effort ?? node.effort);
       // So do its attachments; [] clears them (spec §6b.3).
-      const nextAttachments = kind === 'command' ? undefined : (attachments ?? node.attachments);
+      const nextAttachments = kind !== 'agent' ? undefined : (attachments ?? node.attachments);
       // And the browser (browser spec §2.1); false turns it off.
-      const nextBrowser = kind === 'command' ? false : (browser ?? node.browser === true);
-      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, ...base } = node;
+      const nextBrowser = kind !== 'agent' ? false : (browser ?? node.browser === true);
+      const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, graph: _graph, values: _values, ...kept } = node;
+      // A sub-graph step has no prompt or command: neither the old one nor one the patch clears.
+      const { prompt: _prompt, command: _command, ...keptBase } = kept;
+      const { prompt: _patchPrompt, command: _patchCommand, ...patchBase } = patch;
       const updated: GraphNode = {
-        ...base,
-        ...patch,
+        ...(isGraph ? keptBase : kept),
+        ...(isGraph ? patchBase : patch),
         ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),
@@ -156,6 +184,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         ...(nextEffort && { effort: nextEffort }),
         ...(nextAttachments?.length && { attachments: [...nextAttachments] }),
         ...(nextBrowser && { browser: true }),
+        ...(nextGraph && { graph: nextGraph }),
+        ...(nextValues && Object.keys(nextValues).length > 0 && { values: sortedValues(nextValues) }),
         updatedBy: by,
         updatedAt: now,
       };
@@ -199,8 +229,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       const nodes = graph.nodes.map((n) => {
         const prompt = text(n.prompt);
         const command = text(n.command);
-        if (prompt === n.prompt && command === n.command) return n;
-        return definedOnly<GraphNode>({ ...n, prompt, command, updatedBy: by, updatedAt: now }) as GraphNode;
+        const values = n.values && Object.fromEntries(Object.entries(n.values).map(([k, v]) => [k, text(v) ?? v]));
+        if (prompt === n.prompt && command === n.command && JSON.stringify(values) === JSON.stringify(n.values)) return n;
+        return definedOnly<GraphNode>({ ...n, prompt, command, values, updatedBy: by, updatedAt: now }) as GraphNode;
       });
       return done({
         variables: graph.variables.map((v) => (v.name === op.name ? { ...v, name: op.newName } : v)),
@@ -291,7 +322,8 @@ export function contentSignature(g: Graph): string {
     goal: g.goal,
     instructions: g.instructions,
     attachments: g.attachments ?? [],
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true]),
+    // A sub-graph step's graph and values are added only for it, so graphs without one keep their signature.
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : [])]),
     edges: g.edges.map((e) => e.id).sort(),
   });
 }
@@ -302,12 +334,13 @@ export function validateRunnable(graph: Graph): string[] {
   for (const n of graph.nodes) {
     if (n.kind === 'agent' && !n.prompt?.trim()) problems.push(`${n.id} "${n.title}": an agent node needs a prompt.`);
     if (n.kind === 'command' && !n.command?.trim()) problems.push(`${n.id} "${n.title}": a command node needs a command.`);
+    if (n.kind === 'graph' && !n.graph) problems.push(`${n.id} "${n.title}": a sub-graph step needs a graph.`);
   }
   if (topoOrder(graph).length !== graph.nodes.length) problems.push('The graph has a cycle.');
   return problems;
 }
 
-export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun; attachments?: RunAttachment[] };
+export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; rendered?: RenderedRun; attachments?: RunAttachment[]; scopes?: Record<string, Scope> };
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
@@ -357,11 +390,18 @@ const isCurrent = (state: NodeRunState | undefined): boolean => didSucceed(state
  * The steps whose own definition or inputs differ from `source` (spec §7.2), not their descendants: a missing step, another kind or
  * rendered prompt/command (the template, for runs recorded before rendering), for an agent step another description, browser setting, model,
  * effort, access, workspace or attachments (its own, then the graph's: another list, or, given `attachments` (the files now)
- * and a source that recorded them, another file under a name), or another set of upstream steps.
+ * and a source that recorded them, another file under a name), or another set of upstream steps. On expanded graphs
+ * (`scopes`: the new run's sub-graph steps; `source.scopes`: the source run's), a step inside a sub-graph compares its
+ * scope graph's attachments, and a step whose sub-graph now uses another graph, or a sub-graph step with another graph
+ * or other values, changed (sub-graphs spec §4.5).
  */
-export function changedSinceSource(graph: Graph, source: RunSource, rendered?: RenderedRun, attachments?: readonly RunAttachment[]): Set<string> {
+export function changedSinceSource(graph: Graph, source: RunSource, rendered?: RenderedRun, attachments?: readonly RunAttachment[], scopes?: Record<string, Scope>): Set<string> {
   const changed = new Set<string>();
   for (const n of graph.nodes) {
+    const scope = scopeOf(scopes, n.id);
+    const prevScope = scopeOf(source.scopes, n.id);
+    /** The graph-level attachments a step gets: its sub-graph's, else the run's graph's. */
+    const graphFiles = (s: Scope | undefined, g: Graph) => (s ? (s.attachments ?? []) : (g.attachments ?? []));
     const prev = source.snapshot.nodes.find((p) => p.id === n.id);
     const before = source.rendered?.nodes[n.id];
     const now = rendered?.nodes[n.id];
@@ -376,13 +416,17 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
     // The model and effort a step runs with are part of its definition: comparing models is one of their uses (spec §1).
     const sameModel = n.kind !== 'agent' || ((prev?.model ? stepModelText(prev.model) : '') === (n.model ? stepModelText(n.model) : '') && (prev?.effort ?? '') === (n.effort ?? ''));
     // An agent step gets its own attachments, then the graph's (spec §6b.5): another list is another input.
-    const files = (step: GraphNode | undefined, g: Graph) => JSON.stringify([...(step?.attachments ?? []), ...(g.attachments ?? [])]);
-    const hashOf = (list: readonly RunAttachment[] | undefined, name: string) => list?.find((a) => a.name === name)?.sha256 ?? '';
-    const sameContent = !attachments || !source.attachments || [...(n.attachments ?? []), ...(graph.attachments ?? [])].every((name) => hashOf(attachments, name) === hashOf(source.attachments, name));
-    const sameFiles = n.kind !== 'agent' || (files(prev, source.snapshot) === files(n, graph) && sameContent);
+    const files = (step: GraphNode | undefined, list: readonly string[]) => JSON.stringify([...(step?.attachments ?? []), ...list]);
+    // A file is known by its scope graph's folder and its name: two graphs may each have a `brief.md`.
+    const hashOf = (list: readonly RunAttachment[] | undefined, name: string) => list?.find((a) => a.name === name && a.graphId === scope?.graphId)?.sha256 ?? '';
+    const sameContent = !attachments || !source.attachments || [...(n.attachments ?? []), ...graphFiles(scope, graph)].every((name) => hashOf(attachments, name) === hashOf(source.attachments, name));
+    const sameFiles = n.kind !== 'agent' || (files(prev, graphFiles(prevScope, source.snapshot)) === files(n, graphFiles(scope, graph)) && sameContent);
     // Whether it may use the browser is part of its definition too (browser spec §2.2).
     const sameBrowser = n.kind !== 'agent' || (prev?.browser === true) === (n.browser === true);
-    const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles && sameBrowser;
+    // Which graph a step's sub-graph uses, and a sub-graph step's own graph and values (sub-graphs spec §2.3).
+    const sameScope = (prevScope?.graphId ?? '') === (scope?.graphId ?? '');
+    const sameSubgraph = n.kind !== 'graph' || ((prev?.graph ?? '') === (n.graph ?? '') && valuesText(prev?.values) === valuesText(n.values));
+    const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles && sameBrowser && sameScope && sameSubgraph;
     const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
     if (!sameDefinition || !sameInputs) changed.add(n.id);
   }
@@ -393,10 +437,11 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
  * `fromNodeId`, did not succeed last time or is marked stale, changed (see changedSinceSource), or has a workspace
  * — and so does everything downstream of it. With no `fromNodeId` this is a retry from where the run stopped. Everything else is reused.
+ * Re-run from a sub-graph step starts at its inner first steps (sub-graphs spec §4.5).
  */
-export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[]): Set<string> {
-  const seeds = new Set<string>(fromNodeId ? [fromNodeId] : []);
-  const changed = changedSinceSource(graph, source, rendered, attachments);
+export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[], scopes?: Record<string, Scope>): Set<string> {
+  const seeds = new Set<string>(fromNodeId ? fromSeeds(graph, fromNodeId) : []);
+  const changed = changedSinceSource(graph, source, rendered, attachments, scopes);
   for (const n of graph.nodes) {
     // A step with a workspace is never reused: its files lived in that run's own worktree (spec §4.3a).
     if (!isCurrent(source.nodes[n.id]) || changed.has(n.id) || n.workspace) seeds.add(n.id);
@@ -404,6 +449,12 @@ export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: st
   const execute = new Set(seeds);
   for (const id of seeds) for (const d of descendants(graph, id)) execute.add(d);
   return new Set(graph.nodes.map((n) => n.id).filter((id) => !execute.has(id)));
+}
+
+/** Where Re-run from `id` starts: the step, or a sub-graph step's inner first steps, which run it all (sub-graphs spec §4.5). */
+function fromSeeds(graph: Graph, id: string): string[] {
+  const firsts = graph.nodes.find((n) => n.id === id)?.kind === 'graph' ? subgraphFirstSteps(graph, id) : [];
+  return firsts.length ? firsts : [id];
 }
 
 /** A stale marker before the run that makes it is known. */
@@ -426,12 +477,16 @@ export type OnlyRunPlan =
  * edited since (`edited`), and a step following a stale one is stale for the same reason; a mark it already carries stays.
  * Refused unless every ancestor of `nodeId` has a current result: it succeeded, isn't stale and is unchanged. Also refused for a
  * step in a workspace when an ancestor shares it: the new worktree starts from HEAD, without the changes that ancestor made.
+ * Run only a sub-graph step runs it and every step inside it; the ancestor rule applies to the steps that fed it (sub-graphs spec §4.5).
  */
-export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[]): OnlyRunPlan {
-  if (!graph.nodes.some((n) => n.id === nodeId)) return { ok: false, error: `node ${nodeId} does not exist` };
-  const changed = changedSinceSource(graph, source, rendered, attachments);
+export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[], scopes?: Record<string, Scope>): OnlyRunPlan {
+  const target = graph.nodes.find((n) => n.id === nodeId);
+  if (!target) return { ok: false, error: `node ${nodeId} does not exist` };
+  const changed = changedSinceSource(graph, source, rendered, attachments, scopes);
   const order = topoOrder(graph);
-  const before = ancestors(graph, nodeId);
+  /** What runs: the step, and for a sub-graph step everything inside it. */
+  const group = new Set([nodeId, ...(target.kind === 'graph' ? innerStepIds(graph, nodeId) : [])]);
+  const before = new Set([...group].flatMap((id) => [...ancestors(graph, id)]).filter((id) => !group.has(id)));
   const place = workspaceOf(graph.nodes.find((n) => n.id === nodeId)!);
   const sharing = place === null ? undefined : nearestAncestor(graph, nodeId, (a) => workspaceOf(a) === place);
   if (sharing) return { ok: false, error: `Run only ${nodeId} needs the changes ${sharing} made in its workspace: use Re-run from ${sharing} instead.` };
@@ -445,7 +500,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
   /** Every reused step's mark, the new and the one it already carried: what the steps after it inherit. */
   const marked = new Map<string, StaleReason>();
   for (const id of order) {
-    if (id === nodeId) continue;
+    if (group.has(id)) continue;
     const state = source.nodes[id];
     if (!didSucceed(state)) {
       notRun.add(id);

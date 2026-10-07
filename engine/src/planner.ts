@@ -54,6 +54,11 @@ Variables and templates:
 - Values "true" and "false" are booleans, so {% if full_refresh %}--full-refresh{% endif %} works.
 - dbt's own Jinja ({{ ref('x') }}, {{ config(...) }}) must be wrapped in {% raw %}...{% endraw %} so Agent Stream leaves it alone.
 
+Sub-graphs:
+- A step can run another graph of this folder as one step (kind "graph"): its steps run in its place, and the steps after it get its final steps' results. Before building steps that an existing graph already does, call list_graphs and use a sub-graph step instead. Never use one whose loop is true.
+- Set its values from this graph's variables where they fit ("{{ target_company }}"); leave out a value the user should give when the run starts.
+- You can't edit the graphs it uses from this chat. When one needs changing, tell the user to go inside the step (double-click it) or open that graph.
+
 Parallel work and workspaces:
 - ${PARALLEL_POLICY}
 - ${ALTERNATIVES_RULE}

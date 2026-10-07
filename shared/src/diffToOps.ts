@@ -1,5 +1,6 @@
 import type { DocStep, GraphDoc } from './graphDoc';
 import { stepModelText } from './stepModels';
+import { valuesText } from './subgraphStep';
 import type { Graph, GraphNode, NewNodeInput, NodePatch, Op, StepModel } from './types';
 
 const modelText = (m: StepModel | undefined) => (m ? stepModelText(m) : '');
@@ -28,6 +29,9 @@ function patchOf(node: GraphNode, step: DocStep): NodePatch {
   if (step.kind === 'agent' && JSON.stringify(node.attachments ?? []) !== JSON.stringify(step.attachments ?? [])) patch.attachments = step.attachments ?? [];
   // Removing the line turns the browser off.
   if (step.kind === 'agent' && (node.browser === true) !== (step.browser === true)) patch.browser = step.browser === true;
+  // A sub-graph step's graph and its whole values map (spec §2.1); a step that stops being one loses both in applyOp.
+  if (step.kind === 'graph' && (node.graph ?? '') !== (step.graph ?? '')) patch.graph = step.graph;
+  if (step.kind === 'graph' && valuesText(node.values) !== valuesText(step.values)) patch.values = step.values ?? {};
   return patch;
 }
 

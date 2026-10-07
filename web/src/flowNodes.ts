@@ -1,5 +1,5 @@
 import { MarkerType, type Edge as FlowEdge } from '@xyflow/react';
-import type { AgentChange, ApprovalRequest, Graph, ModelChoice, Position, ProviderId, RunMeta } from '@agent-stream/shared';
+import { derivedStatus, type AgentChange, type ApprovalRequest, type Graph, type ModelChoice, type Position, type ProviderId, type RunMeta, type SubgraphEntry, type SubgraphProblem } from '@agent-stream/shared';
 import type { StepData, StepFlowNode } from './components/StepNode';
 import { layoutPositions } from './layout';
 import { modelChip } from './stepModelMenus';
@@ -19,11 +19,25 @@ export type FlowNodesInput = {
   /** The current provider and its models ([] while unknown): a step's model chip names and checks its model by them. */
   provider?: ProviderId;
   models?: readonly ModelChoice[];
+  /** The canvas is inside sub-graph steps: a step's run state is under `prefix + id` (`n4/`), and '' at the top (sub-graphs spec §6.1). */
+  prefix?: string;
+  /** The inner graphs, for a sub-graph step's card, and the expansion's problems, each shown on the card it concerns. */
+  subgraphs?: Record<string, SubgraphEntry>;
+  problems?: readonly SubgraphProblem[];
 };
+
+/** A sub-graph step's card data: its inner graph's name and step count, and the first expansion problem at or inside it. */
+function subgraphData(n: Graph['nodes'][number], expandedId: string, subgraphs: Record<string, SubgraphEntry>, problems: readonly SubgraphProblem[]): Pick<StepData, 'subgraph'> {
+  if (n.kind !== 'graph') return {};
+  const entry = n.graph ? subgraphs[n.graph] : undefined;
+  const inner = entry && !('error' in entry) ? entry : undefined;
+  const problem = problems.find((p) => p.stepId === expandedId || p.stepId.startsWith(`${expandedId}/`))?.message;
+  return { subgraph: { graphName: inner?.name ?? (entry && 'error' in entry ? entry.name : undefined) ?? n.graph ?? '', ...(inner && { steps: inner.nodes.length }), ...(problem && { problem }) } };
+}
 
 /** Merge the server graph into the local React Flow nodes without clobbering in-flight drags, unconfirmed moves or local selection. */
 export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
-  const { graph, run, approvals, selectedId, selectionChanged, current, dragging, pendingMoves, baseline, changes = [], provider, models = [] } = input;
+  const { graph, run, approvals, selectedId, selectionChanged, current, dragging, pendingMoves, baseline, changes = [], provider, models = [], prefix = '', subgraphs = {}, problems = [] } = input;
   const auto = layoutPositions(graph, true);
   const previous = new Map(current.map((n) => [n.id, n]));
   const nodeChange = new Map(changes.flatMap((c) => (c.kind === 'node' ? [[c.id, c] as const] : [])));
@@ -44,10 +58,12 @@ export function buildFlowNodes(input: FlowNodesInput): StepFlowNode[] {
       selected: selectionChanged || !prev ? n.id === selectedId : prev.selected,
       data: {
         node: n,
-        state: run?.nodes[n.id],
-        waiting: approvals.some((a) => a.nodeId === n.id && a.runId === run?.id),
+        // A sub-graph step shows the status derived from everything inside it (spec §4.2).
+        state: n.kind === 'graph' && run ? derivedStatus(run, prefix + n.id) : run?.nodes[prefix + n.id],
+        waiting: approvals.some((a) => a.runId === run?.id && (a.nodeId === prefix + n.id || (n.kind === 'graph' && a.nodeId.startsWith(`${prefix}${n.id}/`)))),
         ...changeData(nodeChange.get(n.id)),
         ...modelChipData(n, provider, models),
+        ...subgraphData(n, prefix + n.id, subgraphs, problems),
       },
     };
   });
@@ -92,7 +108,7 @@ export const GHOST_PREFIX = 'ghost:';
 const ghostId = (id: string) => `${GHOST_PREFIX}${id}`;
 
 /** React Flow edges for the server graph, keeping local edge selection so Delete can remove a selected edge. */
-export function buildFlowEdges(graph: Graph, run: RunMeta | undefined, current: FlowEdge[], changes: AgentChange[] = []): FlowEdge[] {
+export function buildFlowEdges(graph: Graph, run: RunMeta | undefined, current: FlowEdge[], changes: AgentChange[] = [], prefix = ''): FlowEdge[] {
   const previous = new Map(current.map((e) => [e.id, e]));
   const added = new Set(changes.flatMap((c) => (c.kind === 'edge' && c.change === 'added' ? [c.id] : [])));
   const real: FlowEdge[] = graph.edges.map((e) => ({
@@ -100,7 +116,7 @@ export function buildFlowEdges(graph: Graph, run: RunMeta | undefined, current: 
     source: e.from,
     target: e.to,
     markerEnd: { type: MarkerType.ArrowClosed },
-    animated: run?.nodes[e.to]?.status === 'running',
+    animated: run?.nodes[prefix + e.to]?.status === 'running',
     selected: previous.get(e.id)?.selected ?? false,
     ...(added.has(e.id) && { className: 'edge-added' }),
   }));

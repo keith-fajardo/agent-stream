@@ -2,10 +2,11 @@ import { changedFields, changedFieldText, relativeTime, type AgentChange, type C
 import { actions } from '../actions';
 import { changeKey, sourceLabel } from '../changeLabels';
 import { lineDiff } from '../lineDiff';
+import { shownGraph, shownReview } from '../scope';
 import { dispatch, useStore } from '../store';
 
 const ICONS: Record<AgentChange['change'], string> = { added: '＋', changed: '✎', removed: '✕' };
-const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace', model: 'Model', effort: 'Effort', attachments: 'Attachments', browser: 'Browser' };
+const FIELD_LABELS: Record<ChangedField, string> = { title: 'Title', description: 'Description', kind: 'Kind', prompt: 'Prompt', command: 'Command', timeoutSec: 'Timeout (seconds)', access: 'Access', workspace: 'Workspace', model: 'Model', effort: 'Effort', attachments: 'Attachments', browser: 'Browser', graph: 'Graph', values: 'Values' };
 
 const target = (c: AgentChange) => ({ kind: c.kind, id: c.id });
 const name = (c: AgentChange) => (c.kind === 'edge' ? `${c.from} → ${c.to}` : c.title);
@@ -60,9 +61,9 @@ function ChangeDetail({ change, baseline, graph }: { change: AgentChange; baseli
 
 /** The Changes tab: what agents changed since the user's accepted version, with Accept and Revert (spec §5). */
 export function ChangesPanel() {
-  const changes = useStore((s) => s.changes);
-  const baseline = useStore((s) => s.baseline);
-  const graph = useStore((s) => s.graph);
+  const changes = useStore((s) => shownReview(s).changes);
+  const baseline = useStore((s) => shownReview(s).baseline);
+  const graph = useStore(shownGraph);
   const selected = useStore((s) => s.selectedChange);
   if (changes.length === 0) return <p className="muted pad changes-panel">No agent changes to review.</p>;
   const rows = [...changes].sort(newestFirst);

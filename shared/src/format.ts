@@ -87,11 +87,14 @@ export function approvalSummary(toolName: string, input: unknown, graphChange?: 
   return toolName;
 }
 
-/** A sentence for notifications: "n2 Build new wants to run: dbt build". */
+/** The step an approval is for, as cards and the sidebar name it: `n2 · Build new`, `n4/n2 · Read news (in Company research)`. */
+export const approvalStepLabel = (a: Pick<ApprovalRequest, 'nodeId' | 'nodeTitle' | 'inGraph'>): string => `${a.nodeId} · ${a.nodeTitle}${a.inGraph ? ` (in ${a.inGraph})` : ''}`;
+
+/** A sentence for notifications: "n2 Build new wants to run: dbt build"; a step inside a sub-graph by its full label. */
 export function approvalSentence(a: ApprovalRequest): string {
   if (a.graphChange) return a.graphChange.summary;
   const f = fieldsOf(a.input);
-  const who = `${a.nodeId} ${a.nodeTitle}`;
+  const who = a.inGraph ? approvalStepLabel(a) : `${a.nodeId} ${a.nodeTitle}`;
   if (a.browserAction) return `${who} wants to ${browserActionText(a.toolName, a.browserAction)}`;
   if ((a.toolName === 'Bash' || a.toolName === 'PowerShell') && typeof f.command === 'string') return `${who} wants to run: ${firstLine(f.command)}`;
   if (a.toolName === 'Edit' && typeof f.file_path === 'string') return `${who} wants to edit ${f.file_path}`;

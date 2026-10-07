@@ -1110,7 +1110,7 @@ describe('app', () => {
       await app.handle(a.c, { type: 'openGraph', graphId: g.id });
       expect(a.of('graphOpened').at(-1)).toMatchObject({ baseline: { nodes: [{ prompt: 'p' }] } });
       expect(a.of('graphOpened').at(-1)?.changes).toEqual([change]);
-      expect(app.listGraphs()).toEqual([{ id: g.id, name: 'G', updatedAt: expect.any(String), agentChanges: 1 }]);
+      expect(app.listGraphs()).toEqual([{ id: g.id, name: 'G', updatedAt: expect.any(String), agentChanges: 1, steps: 1 }]);
       await app.handle(a.c, { type: 'op', graphId: g.id, op: { type: 'acceptChange', target: { kind: 'node', id: 'n1' } } });
       expect(a.of('graph').at(-1)?.changes).toEqual([]);
       expect(a.of('graph').at(-1)).not.toHaveProperty('baseline');

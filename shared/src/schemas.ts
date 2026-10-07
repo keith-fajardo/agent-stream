@@ -3,13 +3,16 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { attachmentListProblem, MAX_ATTACHMENTS, MAX_ATTACH_PAYLOAD_CHARS, ONLY_AGENT_STEPS_ATTACH } from './attachments';
 import { legacyNodeIdProblem, topoOrder } from './graph';
 import { MODEL_ID_RE, ONLY_AGENT_STEPS_MODEL } from './stepModels';
+import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, SUBGRAPH_NEEDS_GRAPH, subgraphValuesProblem } from './subgraphStep';
 import { MAX_UNDO_LABEL_CHARS } from './undo';
 import { MAX_VARIABLE_VALUE_CHARS, variableNameProblem } from './variables';
 import { EFFORT_LEVELS, MAX_IMPORT_CHARS, PROVIDER_IDS, type ClientMessage, type Graph, type GraphResult, type WebviewHostMessage } from './types';
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
-const nodeKind = z.enum(['agent', 'command']);
+const nodeKind = z.enum(['agent', 'command', 'graph']);
+/** A sub-graph step's values as a client sends them; names and lengths are checked by subgraphValuesProblem in applyOp. */
+const subgraphValues = z.record(z.string().max(64), z.string().max(MAX_VARIABLE_VALUE_CHARS));
 const access = z.enum(['read', 'write']);
 const timeoutSec = z.number().positive();
 const description = z.string().max(2000).optional();
@@ -36,6 +39,8 @@ const graphNodeSchema = z.object({
   effort: effort.optional(),
   attachments: z.array(z.string()).optional(),
   browser: z.boolean().optional(),
+  graph: z.string().optional(),
+  values: z.record(z.string(), z.string()).optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -73,6 +78,11 @@ export function parseGraph(json: unknown): GraphResult {
     if (n.attachments?.length && n.kind === 'command') return { ok: false, error: `${n.id}: ${ONLY_AGENT_STEPS_ATTACH}` };
     const workspaceProblem = n.workspace === undefined ? null : workspaceNameProblem(n.workspace);
     if (workspaceProblem) return { ok: false, error: `${n.id}: ${workspaceProblem}` };
+    if (n.kind !== 'graph' && (n.graph !== undefined || n.values !== undefined)) return { ok: false, error: `${n.id}: ${ONLY_SUBGRAPH_STEPS_GRAPH}` };
+    if (n.kind === 'graph') {
+      const subProblem = !n.graph ? SUBGRAPH_NEEDS_GRAPH : (graphIdProblem(n.graph) ?? (n.values ? subgraphValuesProblem(n.values) : null));
+      if (subProblem) return { ok: false, error: `${n.id}: ${subProblem}` };
+    }
   }
   const seen = new Set<string>();
   for (const e of graph.edges) {
@@ -105,6 +115,8 @@ const newNode = z.object({
   effort: effort.optional(),
   attachments: attachmentNames.optional(),
   browser: z.boolean().optional(),
+  graph: z.string().max(80).optional(),
+  values: subgraphValues.optional(),
   position: position.optional(),
 });
 
@@ -123,6 +135,9 @@ const nodePatch = z.object({
   attachments: attachmentNames.optional(),
   // false turns the browser off.
   browser: z.boolean().optional(),
+  graph: z.string().max(80).optional(),
+  // The whole map; {} clears it.
+  values: subgraphValues.optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);

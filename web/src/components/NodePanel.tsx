@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { BROWSER_HINT, TURN_ON_BROWSER, browserMention, browserMentionHint, parseStepModel, refinable, stepModelText, type EffortLevel, type GraphNode, type ModelChoice, type NodeKind, type NodePatch } from '@agent-stream/shared';
 import { actions, registerNodeDraft } from '../actions';
 import { AttachmentList } from './AttachmentList';
+import { SubgraphFields } from './SubgraphFields';
 import { changedSentence, changeKey } from '../changeLabels';
 import { send } from '../bridge';
 import { reportDraft } from '../draftState';
 import { onlyAvailability } from '../retry';
+import { expandedIdOf, shownGraph, shownReview } from '../scope';
 import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModelMenus';
 import { dispatch, useStore } from '../store';
 
 /** `model`: `<provider>/<id>`, '' for Default; `effort`: a level, '' for Default. */
-type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string };
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string; graph: string; values: Record<string, string> };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
@@ -24,13 +26,15 @@ const toDraft = (n: GraphNode): Draft => ({
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
+  graph: n.graph ?? '',
+  values: { ...(n.values ?? {}) },
 });
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
 export function NodePanel() {
-  const graph = useStore((s) => s.graph);
+  const graph = useStore(shownGraph);
   const selectedId = useStore((s) => s.selectedNodeId);
-  const changes = useStore((s) => s.changes);
+  const changes = useStore((s) => shownReview(s).changes);
   const node = graph?.nodes.find((n) => n.id === selectedId);
   if (!graph || !node) return <p className="muted pad">Select a step on the canvas, or double-click empty canvas to add one.</p>;
   const workspaces = [...new Set(graph.nodes.flatMap((n) => (n.workspace ? [n.workspace] : [])))].sort();
@@ -49,12 +53,14 @@ export function NodePanel() {
           </span>
         </div>
       )}
-      <NodeEditor key={node.id} graphId={graph.id} node={node} workspaces={workspaces} />
+      <NodeEditor key={`${graph.id}:${node.id}`} graphId={graph.id} node={node} workspaces={workspaces} />
     </div>
   );
 }
 
 const NO_MODELS: ModelChoice[] = [];
+/** Refine and Split inside a sub-graph: the planner chat belongs to the tab's graph (sub-graphs spec §7). */
+export const PLANNER_OUTER_ONLY = "The planner works on this tab's own graph. Open this graph in its own tab to refine its steps.";
 const options = (list: MenuOption[]) =>
   list.map((o) => (
     <option key={o.value} value={o.value} disabled={o.disabled}>
@@ -107,13 +113,19 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const run = useStore((s) => s.run);
   const runs = useStore((s) => s.runs);
   const openGraph = useStore((s) => s.graph);
+  const scope = useStore((s) => s.scope);
   const status = useStore((s) => s.status);
   const [base, setBase] = useState(() => ({ draft: toDraft(node), at: node.updatedAt }));
   const [draft, setDraft] = useState<Draft>(base.draft);
   const dirty = !sameDraft(draft, base.draft);
   // Judged on the draft, so the hint follows what the user types and goes once Browser is on.
   const mention = browserMention({ kind: draft.kind, browser: draft.browser, title: draft.title, description: draft.description, prompt: draft.prompt });
-  const canRefine = refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
+  // The planner refines prompts and commands: a sub-graph step has neither, and the planner works on the tab's own graph only (sub-graphs spec §7).
+  const inside = scope.length > 0;
+  const canRefine = !inside && draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
+  const isGraph = draft.kind === 'graph';
+  // A sub-graph step needs its graph (spec §2.1): neither the Save button nor ⌘S saves it without one.
+  const canSave = dirty && !(isGraph && !draft.graph);
   useEffect(() => {
     reportDraft('node', dirty);
   }, [dirty]);
@@ -154,16 +166,20 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
     if (draft.timeoutSec !== base.draft.timeoutSec && timeout > 0) patch.timeoutSec = timeout;
+    // A sub-graph step's graph and its whole values map (sub-graphs spec §2.1); becoming one sends its graph with the kind.
+    if (draft.kind === 'graph' && (draft.graph !== base.draft.graph || draft.kind !== base.draft.kind)) patch.graph = draft.graph;
+    if (draft.kind === 'graph' && JSON.stringify(draft.values) !== JSON.stringify(base.draft.values)) patch.values = draft.values;
     send({ type: 'op', graphId, op: { type: 'updateNode', id: node.id, patch } });
     setBase({ draft, at: node.updatedAt });
   };
   // ⌘S saves this draft exactly as the Save button does (spec §6a.1).
-  const draftRef = useRef({ dirty, save });
-  draftRef.current = { dirty, save };
-  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), [node.id]);
+  const draftRef = useRef({ canSave, blocked: dirty && !canSave, save });
+  draftRef.current = { canSave, blocked: dirty && !canSave, save };
+  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, blocked: () => draftRef.current.blocked, save: () => draftRef.current.save() }), [graphId, node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
-  const only = onlyAvailability({ run, runs, graph: openGraph }, node.id);
+  const subgraphs = useStore((s) => s.subgraphs);
+  const only = onlyAvailability({ run, runs, graph: openGraph, subgraphs }, expandedIdOf({ scope }, node.id));
 
   return (
     <>
@@ -195,9 +211,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as NodeKind })}>
           <option value="agent">Agent: an AI agent run</option>
           <option value="command">Command: an exact shell command</option>
+          <option value="graph">Sub-graph: another graph as one step</option>
         </select>
       </div>
-      {draft.kind === 'agent' ? (
+      {isGraph && <SubgraphFields ownerId={graphId} graph={draft.graph} values={draft.values} onChange={(next) => setDraft({ ...draft, ...next })} />}
+      {isGraph ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label htmlFor="node-access">Access</label>
           <select id="node-access" value={draft.access} onChange={(e) => setDraft({ ...draft, access: e.target.value as Draft['access'] })}>
@@ -211,6 +229,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           <p className="static-note">Command steps can change files</p>
         </div>
       )}
+      {!isGraph && (
       <div className="field">
         <label htmlFor="node-workspace">Workspace</label>
         <input id="node-workspace" list="workspace-names" value={draft.workspace} placeholder="This checkout" onChange={(e) => setDraft({ ...draft, workspace: e.target.value })} />
@@ -220,6 +239,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           ))}
         </datalist>
       </div>
+      )}
       {draft.kind === 'agent' && <StepModelFields model={draft.model} effort={draft.effort} onChange={(next) => setDraft({ ...draft, ...next })} />}
       {draft.kind === 'agent' && (
         <div className="field">
@@ -239,7 +259,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
       {node.kind === 'agent' && (
         <AttachmentList graphId={graphId} target={{ kind: 'step', nodeId: node.id }} names={node.attachments ?? []} hint="Drop or paste files here. This step's agent gets them every time it runs." />
       )}
-      {draft.kind === 'agent' ? (
+      {isGraph ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label>Prompt</label>
           <textarea
@@ -265,7 +285,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         {node.id} · created by {node.createdBy} · last edited by {node.updatedBy}
       </p>
       <div className="actions">
-        <button className="primary" disabled={!dirty} onClick={save}>
+        <button className="primary" disabled={!canSave} onClick={save}>
           Save
         </button>
         <button
@@ -273,9 +293,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           title={
             !status?.ok
               ? status?.error
-              : canRefine
-                ? 'Ask the planner to turn this step into a precise prompt or command, with a plain-language description'
-                : 'Write what the step should do first.'
+              : inside
+                ? PLANNER_OUTER_ONLY
+                : canRefine
+                  ? 'Ask the planner to turn this step into a precise prompt or command, with a plain-language description'
+                  : 'Write what the step should do first.'
           }
           onClick={() => {
             if (dirty) save();
@@ -289,9 +311,11 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           title={
             !status?.ok
               ? status?.error
-              : canRefine
-                ? 'Ask the planner to break this step into several connected steps'
-                : 'Write what the step should do first.'
+              : inside
+                ? PLANNER_OUTER_ONLY
+                : canRefine
+                  ? 'Ask the planner to break this step into several connected steps'
+                  : 'Write what the step should do first.'
           }
           onClick={() => {
             if (dirty) save();
@@ -310,6 +334,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         <button disabled={!only.enabled} title={only.title} onClick={actions.runOnlySelected}>
           Run only this step
         </button>
+        {isGraph && node.kind === 'graph' && <button onClick={() => actions.openStep(node.id)}>Go inside</button>}
         <button className="danger" onClick={actions.deleteSelectedStep}>
           Delete
         </button>

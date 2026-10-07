@@ -1,4 +1,5 @@
 import { edgeId, nodeIdProblem, seqOf } from './graph';
+import { sortedValues } from './subgraphStep';
 import type { FlowEdge } from './graphFlow';
 import type { EffortLevel, Graph, GraphFileError, GraphNode, NodeKind, StepModel } from './types';
 
@@ -21,6 +22,9 @@ export type DocStep = {
   effort?: EffortLevel;
   /** Agent steps only: `- browser: on` (browser spec §2.1). */
   browser?: true;
+  /** Sub-graph steps only: `- graph: <id>` and the ```value <name>``` blocks (sub-graphs spec §2.2). */
+  graph?: string;
+  values?: Record<string, string>;
   attachments?: string[];
   description?: string;
   prompt?: string;
@@ -75,21 +79,24 @@ export function canonicalGraph(graph: Graph): Graph {
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, browser, ...rest } = node;
-  const text = normText((node.kind === 'agent' ? prompt : command) ?? '');
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, browser, graph, values, ...rest } = node;
+  const isGraph = node.kind === 'graph';
+  const text = normText((node.kind === 'agent' ? prompt : node.kind === 'command' ? command : '') ?? '');
   const summary = oneLine(description ?? '');
   return {
     ...rest,
     title: oneLine(node.title),
     ...(summary && { description: summary }),
     ...(text && (node.kind === 'agent' ? { prompt: text } : { command: text })),
-    ...(timeoutSec !== undefined && { timeoutSec: timeoutValue(timeoutSec) }),
+    ...(timeoutSec !== undefined && !isGraph && { timeoutSec: timeoutValue(timeoutSec) }),
     ...(node.kind === 'agent' && access === 'read' && { access: 'read' as const }),
-    ...(workspace && { workspace }),
+    ...(workspace && !isGraph && { workspace }),
     ...(node.kind === 'agent' && model && { model: { provider: model.provider, id: model.id } }),
     ...(node.kind === 'agent' && effort && { effort }),
     ...(node.kind === 'agent' && attachments?.length && { attachments: [...attachments] }),
     ...(node.kind === 'agent' && browser === true && { browser: true }),
+    ...(isGraph && graph && { graph }),
+    ...(isGraph && values && Object.keys(values).length > 0 && { values: sortedValues(values) }),
   };
 }
 

@@ -2,6 +2,7 @@ import { fenceFor } from './fence';
 import { escapeFreeText } from './freeText';
 import { normText, oneLine, STEP_SEPARATOR, timeoutValue } from './graphDoc';
 import { stepModelText } from './stepModels';
+import { sortedValues } from './subgraphStep';
 import type { Graph, GraphNode } from './types';
 
 /** A Mermaid node label: quoted, `"` as #quot;, on one line (spec §4.1). */
@@ -23,7 +24,21 @@ function block(info: string, content: string): string[] {
   return [`${fence}${info}`, ...(content === '' ? [] : content.split('\n')), fence];
 }
 
+/** A sub-graph step (sub-graphs spec §2.2): its graph line, its description, then a ```value <name>``` block per value. */
+function subgraphStepLines(node: GraphNode): string[] {
+  const description = oneLine(node.description ?? '');
+  return [
+    `## ${node.id}${STEP_SEPARATOR}${oneLine(node.title)}`,
+    '',
+    '- kind: graph',
+    ...(node.graph ? [`- graph: ${node.graph}`] : []),
+    ...(description ? ['', `> ${description}`] : []),
+    ...Object.entries(sortedValues(node.values)).flatMap(([name, value]) => ['', ...block(`value ${name}`, normText(value))]),
+  ];
+}
+
 function stepLines(node: GraphNode): string[] {
+  if (node.kind === 'graph') return subgraphStepLines(node);
   const fields = [`- kind: ${node.kind}`];
   if (node.kind === 'agent' && node.access === 'read') fields.push('- access: read');
   if (node.workspace) fields.push(`- workspace: ${node.workspace}`);

@@ -1,6 +1,7 @@
 import { refinable, type HostCommand } from '@agent-stream/shared';
 import { actions, approvableApprovals } from './actions';
 import { onlyAvailability, retryTarget } from './retry';
+import { expandedIdOf, shownGraph, shownReview, shownUndoLabel } from './scope';
 import { MOD } from './shortcuts';
 import type { State, Tab } from './state';
 
@@ -32,10 +33,13 @@ export function buildMenus(s: State): Menu[] {
   const onCanvas = hasGraph && s.canvasMode === 'graph';
   const running = s.run?.status === 'running';
   const signedIn = !!s.status?.ok;
-  const selected = !!s.selectedNodeId && !!s.graph?.nodes.some((n) => n.id === s.selectedNodeId);
+  // Inside a sub-graph the selected step is the inner graph's; the planner (Refine, Split) works on the tab's graph only.
+  const shown = shownGraph(s);
+  const selected = !!s.selectedNodeId && !!shown?.nodes.some((n) => n.id === s.selectedNodeId);
   const pending = approvableApprovals(s).length;
-  const changeCount = s.changes.length;
-  const selectedNode = s.graph?.nodes.find((n) => n.id === s.selectedNodeId);
+  const changeCount = shownReview(s).changes.length;
+  const selectedNode = s.scope.length === 0 ? s.graph?.nodes.find((n) => n.id === s.selectedNodeId) : undefined;
+  const undoLabel = shownUndoLabel(s);
   const changedIds = (s.graph?.nodes ?? []).filter((n) => n.updatedBy === 'user' && refinable(n)).map((n) => n.id);
   const tab = (label: string, t: Tab) => item(label, hasGraph, () => actions.showTab(t), { checked: s.tab === t });
   return [
@@ -60,7 +64,7 @@ export function buildMenus(s: State): Menu[] {
       id: 'edit',
       label: 'Edit',
       items: [
-        item(s.undoLabel ? `Undo ${s.undoLabel}` : 'Undo', hasGraph && !!s.undoLabel, actions.undo, { shortcut: `${MOD}Z` }),
+        item(undoLabel ? `Undo ${undoLabel}` : 'Undo', hasGraph && !!undoLabel, actions.undo, { shortcut: `${MOD}Z` }),
         SEPARATOR,
         item('Add step', onCanvas, actions.addStep),
         item('Delete selected step', selected, actions.deleteSelectedStep),
@@ -83,7 +87,7 @@ export function buildMenus(s: State): Menu[] {
         item('Stop', running, actions.stop),
         item('Retry from where it stopped', signedIn && !!retryTarget(s), actions.retryFromStop),
         item('Re-run from selected step…', signedIn && !running && selected && s.runs.length > 0, actions.rerunFromSelected),
-        item('Run only selected step…', signedIn && selected && onlyAvailability(s, s.selectedNodeId!).enabled, actions.runOnlySelected),
+        item('Run only selected step…', signedIn && selected && onlyAvailability(s, expandedIdOf(s, s.selectedNodeId!)).enabled, actions.runOnlySelected),
         SEPARATOR,
         item(`Approve all (${pending})`, pending > 0, actions.approveAll),
         SEPARATOR,

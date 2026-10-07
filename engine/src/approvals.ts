@@ -127,7 +127,7 @@ export class ApprovalBroker extends EventEmitter {
  */
 export async function requestApproval(o: {
   broker: ApprovalBroker;
-  ctx: { runId: string; graph: Pick<Graph, 'id'>; node: Pick<GraphNode, 'id' | 'title'>; emit: (event: NodeEventBody) => void };
+  ctx: { runId: string; graph: Pick<Graph, 'id'>; node: Pick<GraphNode, 'id' | 'title'>; emit: (event: NodeEventBody) => void; scopeName?: string };
   toolName: string;
   input: unknown;
   /** The card: a graph change or a browser action. */
@@ -151,7 +151,7 @@ export async function requestApproval(o: {
     ctx.emit({ type: 'approval_decided', approvalId: randomUUID(), decision: 'approve', scope: 'step', auto: true, toolName });
     return decided;
   }
-  const { id, decision } = broker.request({ runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, toolName, input, ...o.card }, o.signal);
+  const { id, decision } = broker.request({ runId: ctx.runId, graphId: ctx.graph.id, nodeId: ctx.node.id, nodeTitle: ctx.node.title, ...(ctx.scopeName && { inGraph: ctx.scopeName }), toolName, input, ...o.card }, o.signal);
   try {
     ctx.emit({ type: 'approval_requested', approvalId: id, toolName, input });
   } catch (error) {

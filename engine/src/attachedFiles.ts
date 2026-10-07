@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
-import { attachmentKind, attachmentNameProblem, stepAttachmentNames, imageMediaType, type AttachmentKind, type ImageMediaType, type Graph, type GraphNode, type RunAttachment } from '@agent-stream/shared';
+import { attachmentKind, attachmentNameProblem, scopeOf, stepAttachmentNames, imageMediaType, type AttachmentKind, type ImageMediaType, type Graph, type GraphNode, type RunAttachment, type Scope } from '@agent-stream/shared';
 import type { AttachmentStore } from './attachmentStore';
 
 /**
@@ -20,6 +20,30 @@ export function runAttachments(graph: Graph, hash: (name: string) => string | un
     const sha256 = hash(name);
     return { name, ...(sha256 && { sha256 }) };
   });
+}
+
+/**
+ * The run's record of the attachments of an expanded graph (sub-graphs spec §4.3): the run's graph's, as runAttachments
+ * gives them, then each sub-graph's own and its steps', under its graph id (its files are in that graph's folder).
+ */
+export function runAttachmentsOf(graph: Graph, scopes: Record<string, Scope>, hash: (graphId: string, name: string) => string | undefined): RunAttachment[] {
+  const out: RunAttachment[] = [];
+  const seen = new Set<string>();
+  const add = (graphId: string | undefined, name: string) => {
+    const key = `${graphId ?? ''}\u0000${name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const sha256 = hash(graphId ?? graph.id, name);
+    out.push({ name, ...(sha256 && { sha256 }), ...(graphId && { graphId }) });
+  };
+  for (const name of graph.attachments ?? []) add(undefined, name);
+  for (const n of graph.nodes) if (!scopeOf(scopes, n.id)) for (const name of n.attachments ?? []) add(undefined, name);
+  for (const s of Object.values(scopes)) for (const name of s.attachments ?? []) add(s.graphId, name);
+  for (const n of graph.nodes) {
+    const s = scopeOf(scopes, n.id);
+    if (s) for (const name of n.attachments ?? []) add(s.graphId, name);
+  }
+  return out;
 }
 
 /**

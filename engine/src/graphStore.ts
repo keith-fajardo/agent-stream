@@ -30,6 +30,7 @@ import {
   type GraphFileError,
   type GraphNode,
   type GraphListItem,
+  type GraphLookup,
   type GraphResult,
   type Op,
   type OpRecord,
@@ -94,8 +95,8 @@ function inOrderOf(graph: Graph, order: Graph): Graph {
 
 /** `node` with `source`'s content fields (absent ones removed), keeping its id, position and authorship. */
 function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
-  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, attachments: _f, browser: _b, ...rest } = node;
-  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort, attachments: source.attachments, browser: source.browser };
+  const { description: _d, prompt: _p, command: _c, timeoutSec: _t, access: _a, workspace: _w, model: _m, effort: _e, attachments: _f, browser: _b, graph: _g, values: _v, ...rest } = node;
+  const optional = { description: source.description, prompt: source.prompt, command: source.command, timeoutSec: source.timeoutSec, access: source.access, workspace: source.workspace, model: source.model, effort: source.effort, attachments: source.attachments, browser: source.browser, graph: source.graph, values: source.values };
   return { ...rest, title: source.title, kind: source.kind, ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)) };
 }
 
@@ -176,11 +177,29 @@ export class GraphStore extends EventEmitter {
       .filter((f) => f.endsWith('.md'))
       .map((f) => f.slice(0, -'.md'.length))
       .sort();
-    const items = ids.map((id): GraphListItem => {
-      const r = this.load(id);
+    const loaded = ids.map((id) => ({ id, r: this.load(id) }));
+    // Which graphs use each graph as a sub-graph (sub-graphs spec §4.7).
+    const usedBy = new Map<string, string[]>();
+    for (const { id, r } of loaded) {
+      if (!r.ok) continue;
+      for (const inner of new Set(r.graph.nodes.flatMap((n) => (n.kind === 'graph' && n.graph ? [n.graph] : [])))) usedBy.set(inner, [...(usedBy.get(inner) ?? []), id]);
+    }
+    const items = loaded.map(({ id, r }): GraphListItem => {
       if (!r.ok) return { id, name: id, error: r.error };
       const agentChanges = this.agentChanges(id).length;
-      return { id, name: r.graph.name, updatedAt: r.graph.updatedAt, ...(agentChanges > 0 && { agentChanges }) };
+      const users = usedBy.get(id);
+      const steps = r.graph.nodes.length;
+      // A file that broke after it was read still loads its last good version, but is listed as `broken` (not as unreadable, so it stays usable in the sidebar and chat): not offered as a sub-graph (spec §6.2).
+      const errors = this.fileErrors(id);
+      return {
+        id,
+        name: r.graph.name,
+        ...(errors.length > 0 && { broken: formatFileErrors(errors) }),
+        updatedAt: r.graph.updatedAt,
+        ...(agentChanges > 0 && { agentChanges }),
+        ...(users && { usedBy: users }),
+        ...(steps > 0 && { steps }),
+      };
     });
     return items.sort(
       (a, b) => Number(!!a.error) - Number(!!b.error) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || a.id.localeCompare(b.id),
@@ -327,6 +346,19 @@ export class GraphStore extends EventEmitter {
     this.cache.set(id, { ...cached, graph, metaText, meta, broken: md });
     this.setErrors(id, errors);
     return 'errors';
+  }
+
+  /**
+   * The inner graph of a sub-graph step (sub-graphs spec §3.1.1). A file that doesn't read now is `broken`, with its first
+   * error, even when load() still has its last good version: a run must never use that silently. A missing file is
+   * `missing`, without load()'s handling of a deleted file (no 'fileDeleted').
+   */
+  lookup(id: string): ReturnType<GraphLookup> {
+    if (!isGraphId(id) || !existsSync(this.file(id))) return { ok: false, reason: 'missing', error: `graph "${id}" not found` };
+    const r = this.load(id);
+    const first = this.fileErrors(id)[0];
+    if (first) return { ok: false, reason: 'broken', error: `line ${first.line}: ${first.message}`, ...(r.ok && { name: r.graph.name }) };
+    return r.ok ? { ok: true, graph: r.graph } : { ok: false, reason: 'broken', error: r.error };
   }
 
   /** While the Markdown file has errors, edits that would rewrite it are refused, so a half-finished hand edit is never lost. */

@@ -1,5 +1,7 @@
+import type { Scope, SubgraphEntry } from './subgraphs';
+
 export type Actor = 'user' | 'agent';
-export type NodeKind = 'agent' | 'command';
+export type NodeKind = 'agent' | 'command' | 'graph';
 export type Position = { x: number; y: number };
 
 export type NodeAccess = 'read' | 'write';
@@ -25,6 +27,10 @@ export type GraphNode = {
   attachments?: string[];
   /** Agent steps: the step may use the Agent Stream browser (browser spec §2.1). Missing means off; only `true` is stored. */
   browser?: boolean;
+  /** Sub-graph steps: the inner graph's id, its file name in .agent-stream/graphs/ (sub-graphs spec §2.1). */
+  graph?: string;
+  /** Sub-graph steps: inner variable name → value template, in name order; absent means none. An empty value is asked for when the run starts. */
+  values?: Record<string, string>;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
@@ -67,6 +73,8 @@ export type NewNodeInput = {
   effort?: EffortLevel;
   attachments?: string[];
   browser?: boolean;
+  graph?: string;
+  values?: Record<string, string>;
   position?: Position;
 };
 
@@ -90,6 +98,10 @@ export type NodePatch = {
   attachments?: string[];
   /** true turns the browser on for an agent step; false turns it off. */
   browser?: boolean;
+  /** A sub-graph step's inner graph id. */
+  graph?: string;
+  /** A sub-graph step's whole values map, like `attachments`; {} clears it. */
+  values?: Record<string, string>;
 };
 
 export type Op =
@@ -128,7 +140,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser' | 'graph' | 'values';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
@@ -184,8 +196,12 @@ export type NodeRunState = {
   browserPages?: string[];
 };
 
-/** What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. */
-export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string> };
+/**
+ * What a run actually executes: the goal, instructions and each step's prompt/command with variables filled in. `nodes` is
+ * keyed by expanded id (a sub-graph step's entry is ''); `scopes`: each sub-graph's own goal and instructions, rendered
+ * with its values (sub-graphs spec §3.3), absent without sub-graphs.
+ */
+export type RenderedRun = { goal: string; instructions: string; nodes: Record<string, string>; scopes?: Record<string, { goal: string; instructions: string }> };
 
 /**
  * `text` is the command or prompt as it will run; it is absent while the step can't be filled in (a variable it uses has no
@@ -206,6 +222,10 @@ export type PreviewStep = {
   notRun?: boolean;
   modelLine?: string;
   modelNote?: string;
+  /** A step inside a sub-graph: how deep (1 inside a sub-graph step of the graph being run); absent for the graph's own steps. */
+  depth?: number;
+  /** A sub-graph step: its inner graph's name and how many steps that graph has (sub-graphs spec §5). */
+  subgraph?: { graphName: string; steps: number };
 };
 
 /** The run confirmation dialog's contents, computed by the engine (spec §7.6). */
@@ -219,7 +239,8 @@ export type RunPreview = {
   /** Shown, don't block. */
   warnings: string[];
   steps: PreviewStep[];
-  variables: { name: string; value: string }[];
+  /** `name`: a variable of the graph, or `<sub-graph step>/<inner variable>` asked at run start, shown as `label` (`n4 · company`). */
+  variables: { name: string; value: string; label?: string }[];
   /** Start must send this back; the engine refuses if a re-render differs. */
   signature: string;
   /** Shown, never block (spec §4.7): writers that take turns, uncommitted changes left out of workspaces. */
@@ -290,10 +311,15 @@ export type RunMeta = {
   stepModels?: Record<string, StepModelUse>;
   /** Every attachment the run's steps use, with its SHA-256 when it started; a missing file has none (spec §6b.5). */
   attachments?: RunAttachment[];
+  /** The run's sub-graph steps, by expanded id (sub-graphs spec §3.1); absent in runs without any, and in runs from before. */
+  scopes?: Record<string, Scope>;
 };
 
-/** An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. */
-export type RunAttachment = { name: string; sha256?: string };
+/**
+ * An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. `graphId`: the inner graph
+ * whose folder holds it, for a step inside a sub-graph (sub-graphs spec §4.3); absent for the run's own graph.
+ */
+export type RunAttachment = { name: string; sha256?: string; graphId?: string };
 
 /** What one agent step of a run uses: absent fields are the provider's own default. `note` says why it isn't the step's own choice. */
 export type StepModelUse = { model?: string; effort?: EffortLevel; note?: string };
@@ -346,6 +372,8 @@ export type ApprovalRequest = {
   graphChange?: GraphChangeRequest;
   /** A browser step's click, typing, choice or key press (browser spec §4.2): what the card shows. */
   browserAction?: BrowserActionRequest;
+  /** A step inside a sub-graph: the inner graph's name, so cards say `n4/n2 · Read news (in Company research)` (sub-graphs spec §4.3). */
+  inGraph?: string;
 };
 
 /**
@@ -403,7 +431,9 @@ export type ProviderStatus = {
   error?: string;
 };
 
-export type GraphListItem = { id: string; name: string; error?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number };
+/** `usedBy`: the ids of the graphs with a sub-graph step pointing at this one, sorted (sub-graphs spec §4.7); absent when none. */
+/** `error`: the file has never been readable. `broken`: it read before and loads its last good version, but its file has errors now. */
+export type GraphListItem = { id: string; name: string; error?: string; broken?: string; updatedAt?: string; lastRun?: { status: RunStatus; startedAt: string }; agentChanges?: number; usedBy?: string[]; steps?: number };
 
 export type ServerMessage =
   | { type: 'auth'; status: ProviderStatus }
@@ -416,6 +446,11 @@ export type ServerMessage =
   /** The graph's Markdown file has these problems, so the graph shown is the last good version; [] when they are fixed. */
   | { type: 'graphFileErrors'; graphId: string; errors: GraphFileError[] }
   | { type: 'graph'; graph: Graph; baseline?: Graph; changes: AgentChange[] }
+  /**
+   * Every graph the tab's graph reaches through sub-graph steps, transitively, or why one can't be used; with each readable
+   * one's agent-change review (sub-graphs spec §6.3). Sent after graphOpened when there are any, and whenever they change.
+   */
+  | { type: 'subgraphs'; graphId: string; graphs: Record<string, SubgraphEntry>; reviews: Record<string, { baseline?: Graph; changes: AgentChange[] }> }
   /** The graph's Markdown file exactly as it is on disk, even with errors: the answer to getGraphMarkdown, then again whenever the text changes. */
   | { type: 'graphMarkdown'; graphId: string; text: string }
   /**

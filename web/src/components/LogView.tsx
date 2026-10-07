@@ -34,7 +34,7 @@ function LogEvent({ event: e, ended, live }: { event: NodeEvent; ended: Readonly
     case 'start':
       return (
         <div className="ev start">
-          {time}Started {e.kind} step in <code>{e.cwd}</code>
+          {time}Started {e.kind === 'graph' ? 'sub-graph' : e.kind} step in <code>{e.cwd}</code>
           {e.command && <pre>{e.command}</pre>}
           {e.prompt && (
             <details>

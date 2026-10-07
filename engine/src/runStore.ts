@@ -1,11 +1,12 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { NodeEvent, NodeStatus, RunMeta, RunSummary } from '@agent-stream/shared';
+import { EXPANDED_NODE_ID_RE, folderId, type NodeEvent, type NodeStatus, type RunMeta, type RunSummary } from '@agent-stream/shared';
 import { readJsonLines, writeFileAtomic } from './fsutil';
 import type { ProjectPaths } from './paths';
 
 const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
-const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+/** A step id, or a step inside sub-graphs (`n4/n2`, at most 4 parts): its folder is `n4~n2` (sub-graphs spec §4.4). */
+const NODE_ID_RE = EXPANDED_NODE_ID_RE;
 const ACTIVE = new Set(['queued', 'running', 'waiting_approval']);
 /** Status names used before the queued / not_run rename, translated when old runs are read. */
 const RENAMED_STATUSES: Record<string, NodeStatus> = { pending: 'queued', skipped: 'not_run' };
@@ -25,7 +26,7 @@ export class RunStore {
 
   private nodeDir(runId: string, nodeId: string): string {
     if (!NODE_ID_RE.test(nodeId)) throw new Error(`invalid node id "${nodeId}"`);
-    return join(this.runDir(runId), 'nodes', nodeId);
+    return join(this.runDir(runId), 'nodes', folderId(nodeId));
   }
 
   private validIds(runId: string, nodeId: string): boolean {

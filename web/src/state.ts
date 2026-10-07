@@ -20,8 +20,10 @@ import type {
   RunMode,
   RunPreview,
   RunSummary,
+  SubgraphEntry,
 } from '@agent-stream/shared';
 import { changeKey } from './changeLabels';
+import { shownGraph } from './scope';
 
 export type Tab = 'node' | 'graph' | 'changes';
 /** Size and collapsed state of the side panel and the logs panel; `logsHeight` null is the stylesheet default. */
@@ -107,6 +109,14 @@ export type State = {
   undoLabel?: string;
   /** How many edits the engine has refused: the canvas forgets its unconfirmed moves on each. */
   rejections: number;
+  /** Every graph the tab's graph reaches through sub-graph steps, or why one can't be used (sub-graphs spec §6.3). */
+  subgraphs: Record<string, SubgraphEntry>;
+  /** Each inner graph's agent-change review, for editing inside it. */
+  subReviews: Record<string, { baseline?: Graph; changes: AgentChange[] }>;
+  /** The sub-graph steps the canvas is inside, from the tab's graph down (`['n4', 'n2']`); [] shows the tab's graph. */
+  scope: string[];
+  /** What Edit › Undo would undo in each inner graph this tab edited (the engine keeps a stack per tab and graph). */
+  subUndo: Record<string, string>;
 };
 
 function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
@@ -115,7 +125,7 @@ function confirmRequest(msg: ConfirmRequest): ConfirmRequest {
 
 const initialMarkdown: MarkdownEditorState = { conflict: false, confirmLeave: false };
 
-export const initialState: State = { rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
+export const initialState: State = { subgraphs: {}, subReviews: {}, scope: [], subUndo: {}, rejections: 0, connected: false, graphs: [], fileErrors: [], changes: [], runs: [], logs: {}, approvals: [], chat: [], chatBusy: false, models: [], defaultEfforts: [], plannerModel: {}, variableValues: {}, tab: 'node', minimap: true, canvasMode: 'graph', markdown: initialMarkdown, layout: { sideWidth: 440, sideCollapsed: false, logsHeight: null, logsCollapsed: false } };
 
 export type Action =
   | { kind: 'server'; msg: HostMessage }
@@ -144,7 +154,13 @@ export type Action =
   /** Drops the unsaved edits: the editor shows the file again. */
   | { kind: 'markdownReload' }
   | { kind: 'confirmLeaveMarkdown'; open: boolean }
-  | { kind: 'showToast'; message: string };
+  | { kind: 'showToast'; message: string }
+  /** Goes inside sub-graph step `stepId` of the shown graph (double-click, Go inside). */
+  | { kind: 'enterScope'; stepId: string }
+  /** Climbs to `depth` levels below the tab's graph (0: the tab's graph): the breadcrumb and ↑ Back. */
+  | { kind: 'climbScope'; depth: number }
+  /** Shows a step by its expanded id (`n4/n2`): goes inside `n4` and selects `n2` (spec §6.1). */
+  | { kind: 'reveal'; nodeId: string };
 
 export const logKey = (runId: string, nodeId: string) => `${runId}:${nodeId}`;
 
@@ -154,8 +170,25 @@ const selection = (m: ModelSelection): ModelSelection => ({ ...(m.model && { mod
 const sameTarget = (a?: ChatTarget, b?: ChatTarget) => !!a && !!b && a.graphId === b.graphId && a.sessionId === b.sessionId;
 const forTarget = (s: State, graphId: string, sessionId: string) => s.chatTarget?.graphId === graphId && s.chatTarget.sessionId === sessionId;
 
+/** The state showing step `nodeId` (an expanded id): inside each sub-graph step on its way, when they all still are ones. */
+function revealed(state: State, nodeId: string): State {
+  const parts = nodeId.split('/');
+  const scope = parts.slice(0, -1);
+  const target = shownGraph({ ...state, scope });
+  if (!target?.nodes.some((n) => n.id === parts.at(-1))) return state;
+  return { ...state, scope, selectedNodeId: parts.at(-1), tab: 'node' };
+}
+
 export function reduce(state: State, action: Action): State {
   switch (action.kind) {
+    case 'enterScope': {
+      const step = shownGraph(state)?.nodes.find((n) => n.id === action.stepId);
+      return step?.kind === 'graph' ? { ...state, scope: [...state.scope, action.stepId], selectedNodeId: undefined } : state;
+    }
+    case 'climbScope':
+      return action.depth >= state.scope.length ? state : { ...state, scope: state.scope.slice(0, Math.max(0, action.depth)), selectedNodeId: state.scope[Math.max(0, action.depth)] };
+    case 'reveal':
+      return revealed(state, action.nodeId);
     case 'disconnected':
       // No answer will come for a save on its way.
       return { ...state, connected: false, markdown: { ...state.markdown, saving: undefined } };
@@ -268,10 +301,17 @@ function reduceServer(state: State, msg: HostMessage): State {
         preview: undefined,
         previewRequestId: undefined,
         selectedNodeId: current === msg.graph.id ? state.selectedNodeId : undefined,
+        // The engine sends the inner graphs again right after. The same graph keeps the ones it has until then, so its
+        // sub-graph steps don't flash as missing; another graph starts with none, and at its own top.
+        ...(current !== msg.graph.id && { subgraphs: {}, subReviews: {} }),
+        ...(current !== msg.graph.id && { scope: [], subUndo: {} }),
       };
+    case 'subgraphs':
+      return msg.graphId === current ? { ...state, subgraphs: msg.graphs, subReviews: msg.reviews } : state;
     case 'graph': {
       if (msg.graph.id !== current) return state;
-      const stillThere = msg.graph.nodes.some((n) => n.id === state.selectedNodeId);
+      // Inside a sub-graph the selected step belongs to the shown (inner) graph, not to the one that changed.
+      const stillThere = !!shownGraph({ graph: msg.graph, scope: state.scope, subgraphs: state.subgraphs })?.nodes.some((n) => n.id === state.selectedNodeId);
       return { ...state, ...reviewing(state, msg.changes), graph: msg.graph, baseline: msg.baseline, changes: msg.changes, selectedNodeId: stillThere ? state.selectedNodeId : undefined, preview: undefined };
     }
     case 'graphMarkdown': {
@@ -293,7 +333,8 @@ function reduceServer(state: State, msg: HostMessage): State {
       return { ...state, markdown, canvasMode: msg.ok && state.markdown.saving?.thenGraph ? 'graph' : state.canvasMode, ...(msg.ok && { toast: MARKDOWN_SAVED }) };
     }
     case 'opRejected':
-      return msg.graphId === current ? { ...state, toast: msg.error, rejections: state.rejections + 1 } : state;
+      // An edit inside a sub-graph is refused under the inner graph's id.
+      return msg.graphId === current || Object.hasOwn(state.subgraphs, msg.graphId) ? { ...state, toast: msg.error, rejections: state.rejections + 1 } : state;
     case 'runs':
       return msg.graphId === current ? { ...state, runs: msg.runs } : state;
     case 'run': {
@@ -351,10 +392,14 @@ function reduceServer(state: State, msg: HostMessage): State {
     case 'runReport':
       // The extension saves the report itself; a tab has nothing to show.
       return state;
-    case 'undoState':
-      return msg.graphId === current ? { ...state, undoLabel: msg.label } : state;
+    case 'undoState': {
+      if (msg.graphId === current) return { ...state, undoLabel: msg.label };
+      // This tab's undo steps inside a sub-graph (spec §6.1): kept per inner graph.
+      const { [msg.graphId]: _gone, ...rest } = state.subUndo;
+      return { ...state, subUndo: msg.label === undefined ? rest : { ...rest, [msg.graphId]: msg.label } };
+    }
     case 'undone':
-      return msg.graphId === current ? { ...state, toast: msg.message } : state;
+      return msg.graphId === current || Object.hasOwn(state.subgraphs, msg.graphId) ? { ...state, toast: msg.message } : state;
     case 'attached':
       // The graph's first attachment: the one-time notice (spec §6b.2).
       return msg.graphId === current && msg.notice ? { ...state, toast: msg.notice } : state;
@@ -362,7 +407,9 @@ function reduceServer(state: State, msg: HostMessage): State {
       // A save the engine or the extension refused before it could answer (a message too large, a throw) is over too.
       return { ...state, toast: msg.message, ...(state.markdown.saving && { markdown: { ...state.markdown, saving: undefined } }) };
     case 'revealNode':
-      return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, selectedNodeId: msg.nodeId, tab: 'node' } : state;
+      // An approval inside a sub-graph (`n4/n2`) goes inside n4 and selects n2.
+      if (msg.nodeId.includes('/')) return revealed(state, msg.nodeId);
+      return state.graph?.nodes.some((n) => n.id === msg.nodeId) ? { ...state, scope: [], selectedNodeId: msg.nodeId, tab: 'node' } : state;
     case 'openRunDialog':
       return { ...state, confirm: confirmRequest(msg), preview: undefined, previewRequestId: undefined };
     case 'openVariables':

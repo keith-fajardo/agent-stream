@@ -1,5 +1,5 @@
 import { z, type ZodRawShape } from 'zod';
-import { CLI_DEFAULT_MODEL, EFFORT_LEVELS, parseStepModel, staleNote, stepModelText, type ChangeSource, type CheckoutInfo, type EffortLevel, type Graph, type LeaseHolder, type ModelChoice, type NodePatch, type Op, type ProviderId, type RunMode, type StepModel } from '@agent-stream/shared';
+import { CLI_DEFAULT_MODEL, derivedStatus, EFFORT_LEVELS, groupedOrder, parseStepModel, scopeOf, staleNote, stepModelText, wouldCreateGraphLoop, type ChangeSource, type CheckoutInfo, type EffortLevel, type Graph, type LeaseHolder, type ModelChoice, type NodePatch, type Op, type ProviderId, type RunMode, type StepModel } from '@agent-stream/shared';
 import type { GraphStore } from './graphStore';
 import { truncateHead, truncateTail } from './prompt';
 import { ALL_HAVE_WORKTREES_ADVICE, MISSING_WORKTREES_ADVICE, OUTSIDE_GIT_ADVICE } from './policy';
@@ -40,7 +40,9 @@ export function defineTool<S extends ZodRawShape>(name: string, description: str
   };
 }
 
-const kind = z.enum(['agent', 'command']);
+const kind = z.enum(['agent', 'command', 'graph']);
+/** A sub-graph step's values: inner variable name → value, a template that may use this graph's variables (sub-graphs spec §7). */
+const subgraphValues = z.record(z.string(), z.string());
 const access = z.enum(['read', 'write']);
 const effort = z.enum(EFFORT_LEVELS);
 const RUN_EXCERPT_CHARS = 2000;
@@ -55,14 +57,15 @@ function modelArg(text: string | undefined): { ok: true; model?: StepModel | nul
   return r.ok ? { ok: true, model: r.model } : r;
 }
 
-export function summarizeGraph(graph: Graph) {
+/** `graphName`: a sub-graph step's inner graph name, by its id (undefined when it can't be read). */
+export function summarizeGraph(graph: Graph, graphName: (id: string) => string | undefined = () => undefined) {
   return {
     goal: graph.goal,
     instructions: graph.instructions,
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
     // Names only, as context: the planner never gets their contents, and can't add or remove them (step model spec §6b.1).
     ...(graph.attachments?.length && { attachments: graph.attachments }),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, browser, createdBy, updatedBy }) => ({
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, browser, graph: inner, values, createdBy, updatedBy }) => ({
       id, title, kind: k, description, prompt, command, timeoutSec,
       ...(a === 'read' && { access: 'read' as const }),
       ...(workspace && { workspace }),
@@ -70,6 +73,9 @@ export function summarizeGraph(graph: Graph) {
       ...(e && { effort: e }),
       ...(attachments?.length && { attachments }),
       ...(browser && { browser: true }),
+      // A sub-graph step: the graph it runs, by id and name, and its values (sub-graphs spec §7).
+      ...(inner && { graph: inner, graphName: graphName(inner) ?? null }),
+      ...(values && { values }),
       createdBy, updatedBy,
     })),
     edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
@@ -80,10 +86,14 @@ export function summarizeGraph(graph: Graph) {
 export function graphTools(d: PlannerToolDeps): GraphTool[] {
   const apply = (op: Op) => d.graphStore.apply(d.graphId, op, 'agent', d.source);
   const outcome = (r: { ok: true } | { ok: false; error: string }, success: string) => (r.ok ? reply(success) : reply(r.error, true));
+  const graphName = (id: string) => {
+    const r = d.graphStore.lookup(id);
+    return r.ok ? r.graph.name : undefined;
+  };
 
   return [
-    defineTool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command, and an agent step\'s own model and effort) and edges.', {}, async () =>
-      reply(JSON.stringify(summarizeGraph(d.graphStore.get(d.graphId)), null, 2)),
+    defineTool('get_graph', 'Return the current workflow graph: goal, nodes (id, title, kind, prompt or command, an agent step\'s own model and effort, a sub-graph step\'s graph and values) and edges.', {}, async () =>
+      reply(JSON.stringify(summarizeGraph(d.graphStore.get(d.graphId), graphName), null, 2)),
     ),
     defineTool(
       'list_models',
@@ -99,7 +109,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s. `browser` true lets an agent step use the Agent Stream browser, with the user\'s logins (clicks and typing ask the user first): set it only for steps that need websites.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root; kind "graph" runs another graph of this folder (`graph`, an id from list_graphs) as one step, with `values` for its variables (each a template that may use this graph\'s variables; leave one out to have it asked when the run starts). `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s. `browser` true lets an agent step use the Agent Stream browser, with the user\'s logins (clicks and typing ask the user first): set it only for steps that need websites.',
       {
         kind,
         title: z.string(),
@@ -113,11 +123,13 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         model: z.string().optional(),
         effort: effort.optional(),
         browser: z.boolean().optional(),
+        graph: z.string().optional(),
+        values: subgraphValues.optional(),
       },
       async (a) => {
         const m = modelArg(a.model || undefined);
         if (!m.ok) return reply(m.error, true);
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }), ...(a.browser !== undefined && { browser: a.browser }) } });
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }), ...(a.browser !== undefined && { browser: a.browser }), ...(a.graph !== undefined && { graph: a.graph }), ...(a.values && { values: a.values }) } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -130,7 +142,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s. `browser` true or false switches the Agent Stream browser on or off for an agent step.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s. `browser` true or false switches the Agent Stream browser on or off for an agent step. A sub-graph step (kind "graph") takes `graph` and `values`; `values` replaces all of them.',
       {
         id: z.string(),
         title: z.string().optional(),
@@ -144,6 +156,8 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         model: z.string().optional(),
         effort: z.union([effort, z.literal('')]).optional(),
         browser: z.boolean().optional(),
+        graph: z.string().optional(),
+        values: subgraphValues.optional(),
       },
       async ({ id, model, effort: e, ...rest }) => {
         const m = modelArg(model);
@@ -197,11 +211,15 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
       const meta = id ? d.runStore.get(id) : undefined;
       if (!meta || meta.graphId !== d.graphId) return runId ? reply(`Run ${runId} not found.`, true) : reply('No runs yet.');
       const lines = [`Run ${meta.id}: ${meta.status}`];
-      for (const n of meta.snapshot.nodes) {
-        const state = meta.nodes[n.id];
+      // Run order; steps inside a sub-graph indented under it, which shows the status of everything in it (sub-graphs spec §7).
+      for (const id of groupedOrder(meta.snapshot)) {
+        const n = meta.snapshot.nodes.find((x) => x.id === id)!;
+        const state = n.kind === 'graph' ? derivedStatus(meta, n.id) : meta.nodes[n.id];
         const output = d.runStore.readOutput(meta.id, n.id);
         const excerpt = n.kind === 'command' ? truncateTail(output, RUN_EXCERPT_CHARS) : truncateHead(output, RUN_EXCERPT_CHARS);
-        lines.push(`\n## ${n.id} · ${n.title} — ${state?.status ?? 'unknown'}${state?.stale ? ` (stale: ${staleNote(state.stale, n.id)})` : ''}`);
+        const indent = '  '.repeat(scopeOf(meta.scopes, n.id)?.depth ?? 0);
+        const sub = meta.scopes?.[n.id] ? ` (sub-graph "${meta.scopes[n.id].graphName}")` : '';
+        lines.push(`\n${indent}## ${n.id} · ${n.title}${sub} — ${state?.status ?? 'unknown'}${state?.stale ? ` (stale: ${staleNote(state.stale, n.id)})` : ''}`);
         if (state?.error) lines.push(`error: ${state.error}`);
         if (excerpt.trim()) lines.push(`output:\n${excerpt}`);
       }
@@ -232,6 +250,23 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         const allHaveWorktrees = info.git && rows.every((r) => r.worktree);
         const advice = !info.git ? OUTSIDE_GIT_ADVICE : allHaveWorktrees ? ALL_HAVE_WORKTREES_ADVICE : MISSING_WORKTREES_ADVICE;
         return reply(JSON.stringify({ tickets: rows, allHaveWorktrees, advice }, null, 2));
+      },
+    ),
+    defineTool(
+      'list_graphs',
+      "Read-only. List this folder's other graphs as JSON: each one's id, name, goal, variables (name and description), number of steps, and `loop`: true when using it here would put this graph inside itself. Use one as a step with add_node kind \"graph\".",
+      {},
+      async () => {
+        const lookup = (id: string) => d.graphStore.lookup(id);
+        const graphs = d.graphStore
+          .list()
+          .filter((g) => g.id !== d.graphId)
+          .map((g) => {
+            const r = lookup(g.id);
+            if (!r.ok) return { id: g.id, name: g.name, error: r.error };
+            return { id: g.id, name: r.graph.name, goal: r.graph.goal, variables: r.graph.variables.map(({ name, description }) => ({ name, description })), steps: r.graph.nodes.length, loop: wouldCreateGraphLoop(d.graphId, g.id, lookup) };
+          });
+        return reply(JSON.stringify(graphs, null, 2));
       },
     ),
   ];

@@ -1,13 +1,15 @@
 import { stepModelText } from './stepModels';
+import { valuesText } from './subgraphStep';
 import type { AgentChange, ChangedField, Graph, GraphNode } from './types';
 
-const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments', 'browser'];
+const FIELDS: ChangedField[] = ['title', 'description', 'kind', 'prompt', 'command', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments', 'browser', 'graph', 'values'];
 
 /** A step field as text, for comparing and for the Changes tab: '' when absent, a model as `claude/opus`, attachments one per line. */
 export function changedFieldText(node: GraphNode | undefined, field: ChangedField): string {
   if (field === 'model') return node?.model ? stepModelText(node.model) : '';
   if (field === 'attachments') return (node?.attachments ?? []).join('\n');
   if (field === 'browser') return node?.browser ? 'on' : '';
+  if (field === 'values') return valuesText(node?.values);
   const v = node?.[field];
   return v === undefined || v === null ? '' : String(v);
 }

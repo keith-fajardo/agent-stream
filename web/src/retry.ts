@@ -1,5 +1,24 @@
-import { onlyRunPlan, type RunStatus, type RunSummary } from '@agent-stream/shared';
+import { contentSignature, onlyRunPlan, type RunStatus, type RunSummary, type SubgraphEntry } from '@agent-stream/shared';
+import { liveExpansion } from './scope';
 import type { State } from './state';
+
+const NO_SUBGRAPHS: Record<string, SubgraphEntry> = {};
+/**
+ * The live graph as a run would execute it: its sub-graph steps expanded with the inner graphs the tab has (sub-graphs spec §6.3).
+ * While those haven't arrived there is nothing to compare or plan with yet: no graph, so nothing reads as changed.
+ */
+function liveRunGraph(s: Pick<State, 'graph'> & Partial<Pick<State, 'subgraphs'>>) {
+  const r = liveExpansion({ graph: s.graph, subgraphs: s.subgraphs ?? NO_SUBGRAPHS });
+  if (s.graph && !r) return { graph: undefined, scopes: undefined };
+  return r?.ok ? { graph: r.graph, scopes: r.scopes } : { graph: s.graph, scopes: undefined };
+}
+
+/** "Graph changed since this run started": the run's snapshot against the expanded live graph, so an edit inside a sub-graph counts. */
+export function changedSinceRun(s: Pick<State, 'run' | 'graph'> & Partial<Pick<State, 'subgraphs'>>): boolean {
+  if (!s.run || !s.graph || s.run.graphId !== s.graph.id) return false;
+  const live = liveRunGraph(s).graph;
+  return !!live && contentSignature(s.run.snapshot) !== contentSignature(live);
+}
 
 /** The runs Retry from where it stopped applies to: they ended without every step finishing. */
 const STOPPED: ReadonlySet<RunStatus> = new Set(['cancelled', 'failed', 'interrupted']);
@@ -32,13 +51,15 @@ export function retryTarget(s: Pick<State, 'run' | 'runs'>): RunSummary | undefi
  * Whether `Run only` is allowed for a step, and its tooltip. The reason comes from the same rule the engine applies; the
  * engine checks again against the rendered text and the attachment files, which this can't see, when the dialog opens.
  */
-export function onlyAvailability(s: Pick<State, 'run' | 'runs' | 'graph'>, nodeId: string): { enabled: boolean; title: string } {
+export function onlyAvailability(s: Pick<State, 'run' | 'runs' | 'graph'> & Partial<Pick<State, 'subgraphs'>>, nodeId: string): { enabled: boolean; title: string } {
   const latest = s.runs[0];
   if (!latest) return { enabled: false, title: NO_RUN_YET };
   if (runActive(s)) return { enabled: false, title: 'A run is in progress.' };
-  // The tab holds the full record of the run it shows; with another run shown the engine answers in the dialog.
-  if (s.graph && s.run?.id === latest.id) {
-    const plan = onlyRunPlan(s.graph, s.run, nodeId);
+  // The tab holds the full record of the run it shows; with another run shown the engine answers in the dialog. A step
+  // inside a sub-graph, or after one, is judged on the expanded live graph (sub-graphs spec §6.3).
+  const live = liveRunGraph(s);
+  if (live.graph && s.run?.id === latest.id) {
+    const plan = onlyRunPlan(live.graph, s.run, nodeId, undefined, undefined, live.scopes);
     if (!plan.ok) return { enabled: false, title: plan.error };
   }
   return { enabled: true, title: onlyTooltip(latest.id) };
