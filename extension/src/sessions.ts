@@ -139,7 +139,9 @@ export class SessionManager {
     const app = this.d.app(folder);
     const item = app.listSessions().find((s) => s.id === sessionId);
     if (!item) return;
-    if (!(await this.d.confirm(`Delete ${item.name}? Its planner chats are removed; graphs and runs stay.`, 'Delete'))) return;
+    const moving = app.listGraphs().filter((g) => g.home === sessionId).length;
+    const graphs = moving === 0 ? '' : ` ${moving} ${plural(moving, 'graph', 'graphs')} ${plural(moving, 'moves', 'move')} to Default.`;
+    if (!(await this.d.confirm(`Delete ${item.name}? Its planner chats are removed; graphs and runs stay.${graphs}`, 'Delete'))) return;
     const isActive = this.active(folder).id === sessionId;
     const other = app.listSessions().find((s) => s.id !== sessionId && !s.problem);
     if (isActive && other && !(await this.switchTo(folder, other.id))) return;

@@ -115,6 +115,20 @@ describe('SessionManager', () => {
     await w.manager.delete(a, 'default');
     expect(app.listSessions()).toEqual([expect.objectContaining({ id: 'default', name: 'Default', tabCount: 0 })]);
   });
+
+  it('says how many graphs move to Default when a session is deleted', async () => {
+    const w = world();
+    const f = w.folders[0];
+    const app = w.apps.get(f.key)!;
+    const work = app.createSession('Work');
+    app.createGraph('A', work.id);
+    app.createGraph('B', work.id);
+    await w.manager.delete(f, work.id);
+    expect(w.deps.confirm).toHaveBeenCalledWith(expect.stringContaining('2 graphs move to Default'), 'Delete');
+    expect(app.listGraphs().every((g) => g.home === 'default')).toBe(true);
+    // Deleting a session that is not the active one never closes tabs.
+    expect(w.deps.closeGraphTabs).not.toHaveBeenCalled();
+  });
 });
 
 describe('SessionManager robustness', () => {
