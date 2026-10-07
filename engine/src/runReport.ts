@@ -1,4 +1,4 @@
-import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, fenceFor, fmtDuration, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, statusLabel, stepAttachmentNames, staleNote, supportsEffort, topoOrder, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, derivedStatus, fenceFor, fmtDuration, groupedOrder, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, scopeOf, statusLabel, stepAttachmentNames, staleNote, supportsEffort, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -84,13 +84,19 @@ function usageLine(u: NodeUsage): string {
   return `${u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens} in / ${u.outputTokens} out tokens · ${u.turns} turns${cost}`;
 }
 
-/** The steps in run order: topological order of the snapshot, then any left over (a cycle) in file order. */
+/**
+ * The steps in run order: topological order of the snapshot (any left over, a cycle, in file order), each sub-graph step
+ * moved to just before its inner steps, which it heads (sub-graphs spec §5).
+ */
 function stepOrder(run: RunMeta): GraphNode[] {
   const byId = new Map(run.snapshot.nodes.map((n) => [n.id, n]));
-  const ordered = topoOrder(run.snapshot);
-  const rest = run.snapshot.nodes.map((n) => n.id).filter((id) => !ordered.includes(id));
-  return [...ordered, ...rest].map((id) => byId.get(id)!);
+  return groupedOrder(run.snapshot).map((id) => byId.get(id)!);
 }
+
+/** How deep a step is inside sub-graphs: 0 for the run's graph's own steps. */
+const depthOf = (run: RunMeta, id: string): number => scopeOf(run.scopes, id)?.depth ?? 0;
+/** A step's state as the report shows it: a sub-graph step's derived from the steps inside it (sub-graphs spec §4.2). */
+const shownState = (run: RunMeta, n: GraphNode): NodeRunState => (n.kind === 'graph' ? derivedStatus(run, n.id) : run.nodes[n.id]) ?? { status: 'not_run' };
 
 function header(input: RunReportInput): string[] {
   const { run } = input;
@@ -129,9 +135,12 @@ function textSection(title: string, text: string): string[] {
 
 function plan(run: RunMeta, order: GraphNode[]): string[] {
   const lines = order.map((n, i) => {
-    const traits = [n.kind, ...(n.access === 'read' ? ['read-only'] : []), ...(n.workspace ? [`workspace ${inline(n.workspace)}`] : [])];
+    const sub = run.scopes?.[n.id];
+    const kind = n.kind === 'graph' ? `sub-graph "${inline(sub?.graphName ?? n.graph ?? '')}"` : n.kind;
+    const traits = [kind, ...(n.access === 'read' ? ['read-only'] : []), ...(n.workspace ? [`workspace ${inline(n.workspace)}`] : [])];
     const after = run.snapshot.edges.filter((e) => e.to === n.id).map((e) => e.from);
-    return `${i + 1}. ${n.id} · ${inline(n.title)} (${traits.join(', ')})${after.length ? ` — after ${after.join(', ')}` : ''}`;
+    // Inner steps are indented under their sub-graph step.
+    return `${'   '.repeat(depthOf(run, n.id))}${i + 1}. ${n.id} · ${inline(n.title)} (${traits.join(', ')})${after.length ? ` — after ${after.join(', ')}` : ''}`;
   });
   return ['## Plan', '', ...lines];
 }
@@ -181,19 +190,27 @@ function approvals(events: NodeEvent[], status: NodeRunState['status']): string[
 }
 
 function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined): string[] {
-  const state: NodeRunState = run.nodes[n.id] ?? { status: 'not_run' };
-  const duration = durationOf(state);
-  const out: string[] = [`### ${n.id} · ${inline(n.title)} — ${statusLabel(state.status)}${duration ? `, ${duration}` : ''}`];
+  const state: NodeRunState = shownState(run, n);
+  const duration = durationOf(run.nodes[n.id] ?? state);
+  const scope = scopeOf(run.scopes, n.id);
+  // A step inside a sub-graph is a level deeper under it, and says which graph it is from (sub-graphs spec §5).
+  const level = '#'.repeat(Math.min(6, 3 + depthOf(run, n.id)));
+  const from = scope ? ` (${inline(scope.graphName)})` : '';
+  const out: string[] = [`${level} ${n.id} · ${inline(n.title)}${from} — ${statusLabel(state.status)}${duration ? `, ${duration}` : ''}`];
   const block = (lines: string[]) => lines.length && out.push('', ...lines);
+  // A sub-graph step's section starts with its inner graph's goal, as its steps got it.
+  const innerGoal = n.kind === 'graph' ? run.rendered?.scopes?.[n.id]?.goal.trim() : undefined;
+  if (innerGoal) block([`**Goal of ${inline(run.scopes?.[n.id]?.graphName ?? n.graph ?? '')}**`, '', fenced(innerGoal)]);
   // A kept result the run knows may no longer fit (retry options): said before the step's own details.
   if (state.stale) block([`**Stale:** ${inline(staleNote(state.stale, n.id))}`]);
   // The model and effort the step ran with, resolved when the run started (step model spec §3.3); runs from before have none.
   const use = n.kind === 'agent' ? run.stepModels?.[n.id] : undefined;
   if (use) block([inline(modelLine({ model: use.model, effort: use.effort, provider: run.provider })), ...(use.note?.trim() ? ['', `_Note:_ ${inline(use.note)}`] : [])]);
   // Its attachments, its own then the graph's, by name and SHA-256 as the run started; never their contents (spec §6b.5).
-  const files = n.kind === 'agent' ? stepAttachmentNames(n.attachments, run.snapshot.attachments) : [];
+  // A step inside a sub-graph gets that graph's attachments, recorded under its id (sub-graphs spec §4.3).
+  const files = n.kind === 'agent' ? stepAttachmentNames(n.attachments, scope ? scope.attachments : run.snapshot.attachments) : [];
   if (files.length) {
-    const hash = (name: string) => run.attachments?.find((a) => a.name === name)?.sha256;
+    const hash = (name: string) => run.attachments?.find((a) => a.name === name && a.graphId === scope?.graphId)?.sha256;
     block(['**Attachments**', '', ...files.map((name) => `- ${inlineStart(name)} · ${hash(name) ? `sha256 ${hash(name)}` : 'missing when the run started'}`)]);
   }
   // After a label on the same line, so line-start markup in it (an agent can write descriptions) stays text.
