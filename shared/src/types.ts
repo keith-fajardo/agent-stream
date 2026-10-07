@@ -1,3 +1,5 @@
+import type { Scope } from './subgraphs';
+
 export type Actor = 'user' | 'agent';
 export type NodeKind = 'agent' | 'command' | 'graph';
 export type Position = { x: number; y: number };
@@ -300,10 +302,15 @@ export type RunMeta = {
   stepModels?: Record<string, StepModelUse>;
   /** Every attachment the run's steps use, with its SHA-256 when it started; a missing file has none (spec §6b.5). */
   attachments?: RunAttachment[];
+  /** The run's sub-graph steps, by expanded id (sub-graphs spec §3.1); absent in runs without any, and in runs from before. */
+  scopes?: Record<string, Scope>;
 };
 
-/** An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. */
-export type RunAttachment = { name: string; sha256?: string };
+/**
+ * An attachment as a run recorded it: its name, and its SHA-256 (hex) when the file was there. `graphId`: the inner graph
+ * whose folder holds it, for a step inside a sub-graph (sub-graphs spec §4.3); absent for the run's own graph.
+ */
+export type RunAttachment = { name: string; sha256?: string; graphId?: string };
 
 /** What one agent step of a run uses: absent fields are the provider's own default. `note` says why it isn't the step's own choice. */
 export type StepModelUse = { model?: string; effort?: EffortLevel; note?: string };
