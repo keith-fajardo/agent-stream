@@ -25,7 +25,7 @@ function setup() {
     createApp: (deps) => createApp({ ...deps, status: signedIn }),
   });
   const ui = { inputBox: vi.fn(), pickGraph: vi.fn(), pickFolder: vi.fn(), confirm: vi.fn(), openFile: vi.fn(), saveFile: vi.fn(), info: vi.fn(), error: vi.fn(), quickPick: vi.fn(), quickPickMany: vi.fn(), pickParentFolder: vi.fn(), openInNewWindow: vi.fn(), withProgress: vi.fn(), infoAction: vi.fn() } satisfies Record<keyof Ui, unknown>;
-  const { commands } = graphCommands({ engines: manager, folders: () => [folder], ui: ui as unknown as Ui, open: async () => {}, openText: async () => {}, activeTarget: () => undefined });
+  const { commands } = graphCommands({ engines: manager, folders: () => [folder], ui: ui as unknown as Ui, open: async () => {}, openText: async () => {}, activeTarget: () => undefined, sessions: (f) => manager.get(f).listSessions(), activeSession: () => 'default' });
   const app = manager.get(folder);
   const research = app.createGraph('Company research').id;
   for (const name of ['Job hunting', 'Weekly report']) {

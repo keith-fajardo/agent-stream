@@ -133,6 +133,8 @@ export async function activate(context: vscode.ExtensionContext) {
       const p = panels.active();
       return p && { folder: p.folder, graphId: p.graphId };
     },
+    sessions: (f) => manager.get(f).listSessions(),
+    activeSession: (f) => sessions.active(f).id,
   });
   for (const [name, run] of Object.entries(graph.commands)) context.subscriptions.push(vscode.commands.registerCommand(`agentStream.${name}`, run));
   const parallel = parallelCommands({

@@ -237,6 +237,11 @@
         "category": "Agent Stream"
       },
       {
+        "command": "agentStream.moveGraph",
+        "title": "Move to Session…",
+        "category": "Agent Stream"
+      },
+      {
         "command": "agentStream.deleteGraph",
         "title": "Delete Graph",
         "category": "Agent Stream"
@@ -391,6 +396,11 @@
           "command": "agentStream.duplicateGraph",
           "when": "view == agentStream.graphs && viewItem == graph",
           "group": "2_edit@2"
+        },
+        {
+          "command": "agentStream.moveGraph",
+          "when": "view == agentStream.graphs && viewItem == graph",
+          "group": "2_edit@3"
         },
         {
           "command": "agentStream.exportGraph",

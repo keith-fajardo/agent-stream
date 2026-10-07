@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { App } from '@agent-stream/engine';
-import { MAX_IMPORT_CHARS, statusLabel } from '@agent-stream/shared';
+import { isSharedHome, MAX_IMPORT_CHARS, SHARED_HOME, statusLabel } from '@agent-stream/shared';
 import type { EngineManager, Folder } from './engines';
 
 export type GraphTarget = { folder: Folder; graphId: string };
@@ -43,6 +43,9 @@ export type CommandDeps = {
   /** Opens the graph's `<id>.md` in a text editor beside the graph tab (Markdown graph files spec §7). */
   openText(target: GraphTarget): Promise<void>;
   activeTarget(): GraphTarget | undefined;
+  /** The folder's sessions, for Move to Session. */
+  sessions(folder: Folder): { id: string; name: string; problem?: string }[];
+  activeSession(folder: Folder): string;
 };
 
 /** How many recent runs Export Run Report offers. */
@@ -92,7 +95,7 @@ export function graphCommands(d: CommandDeps) {
       if (!folder) return;
       const name = await d.ui.inputBox({ prompt: 'Name of the new graph', validate: blankName });
       if (name === undefined) return;
-      const graph = app(folder).createGraph(name);
+      const graph = app(folder).createGraph(name, d.activeSession(folder));
       await d.open({ folder, graphId: graph.id });
     },
 
@@ -181,6 +184,24 @@ export function graphCommands(d: CommandDeps) {
       const t = await targetFor(target);
       if (!t) return;
       const r = app(t.folder).duplicateGraph(t.graphId);
+      if (!r.ok) d.ui.error(r.error);
+    },
+
+    async moveGraph(target?: GraphTarget): Promise<void> {
+      const t = await targetFor(target);
+      if (!t) return;
+      const engine = app(t.folder);
+      const current = engine.listGraphs().find((g) => g.id === t.graphId)?.home;
+      const items: PickItem<string>[] = [
+        ...d
+          .sessions(t.folder)
+          .filter((s) => !s.problem)
+          .map((s) => ({ label: s.name, description: s.id === current ? 'current' : undefined, value: s.id })),
+        { label: 'Shared', description: isSharedHome(current ?? '') ? 'current' : 'every session shows it', value: SHARED_HOME },
+      ];
+      const home = await d.ui.quickPick(items, `Move ${nameOf(t)} to`);
+      if (home === undefined || home === current) return;
+      const r = engine.moveGraph(t.graphId, home);
       if (!r.ok) d.ui.error(r.error);
     },
 

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '@agent-stream/engine';
-import { MAX_IMPORT_CHARS, type ProviderStatus } from '@agent-stream/shared';
+import { MAX_IMPORT_CHARS, SHARED_HOME, type ProviderStatus } from '@agent-stream/shared';
 import { graphCommands, type GraphTarget, type Ui } from '../src/commands';
 import { EngineManager, type Folder } from '../src/engines';
 import { noGit } from './helpers';
@@ -57,11 +57,30 @@ function setup(folders: Folder[] = [folder('a')]) {
     open: async (t) => void opened.push(t),
     openText: async (t) => void texts.push(t),
     activeTarget: () => active,
+    sessions: (f) => manager.get(f).listSessions(),
+    activeSession: () => 'default',
   });
   return { manager, ui, opened, texts, commands, pickGraph, folders, gate, setActive: (t: GraphTarget) => (active = t) };
 }
 
 describe('graph commands', () => {
+  it('moves a graph to a session or to Shared, and does nothing for the session it is already in', async () => {
+    const s = setup();
+    const engine = s.manager.get(s.folders[0]);
+    const work = engine.createSession('Work');
+    const g = engine.createGraph('G').id;
+    s.ui.quickPick.mockResolvedValueOnce(work.id);
+    await s.commands.moveGraph({ folder: s.folders[0], graphId: g });
+    expect(engine.listGraphs().find((x) => x.id === g)?.home).toBe(work.id);
+    s.ui.quickPick.mockResolvedValueOnce(work.id);
+    await s.commands.moveGraph({ folder: s.folders[0], graphId: g });
+    expect(s.ui.info).not.toHaveBeenCalled();
+    s.ui.quickPick.mockResolvedValueOnce(SHARED_HOME);
+    await s.commands.moveGraph({ folder: s.folders[0], graphId: g });
+    expect(engine.listGraphs().find((x) => x.id === g)?.home).toBe(SHARED_HOME);
+    expect(s.ui.error).not.toHaveBeenCalled();
+  });
+
   it('creates a graph from a name and opens it; a blank name is refused; cancelling does nothing', async () => {
     const s = setup();
     s.ui.inputBox.mockResolvedValueOnce(undefined);
