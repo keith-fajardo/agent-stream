@@ -25,6 +25,8 @@ export type NodeContext = {
   readAttachment?: (path: string) => Buffer | undefined;
   /** Agent steps with Browser on: the browser tools (browser spec §4), each provider serving them its own way. */
   browserTools?: BrowserTool[];
+  /** A step inside a sub-graph: the inner graph's name, for approval cards (sub-graphs spec §4.3). */
+  scopeName?: string;
 };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeOutcome>;

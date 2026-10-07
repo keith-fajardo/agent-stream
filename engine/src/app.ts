@@ -342,6 +342,12 @@ export function createApp(d: AppDeps) {
   }
   function deleteGraph(id: string): { ok: true } | { ok: false; error: string } {
     if (runner.activeFor(id)) return { ok: false, error: 'Stop the run first.' };
+    const user = runner.activeRuns().find((run) => Object.values(run.scopes ?? {}).some((s) => s.graphId === id));
+    if (user) {
+      const inner = graphStore.load(id);
+      const outer = graphStore.load(user.graphId);
+      return { ok: false, error: `"${inner.ok ? inner.graph.name : id}" is being used by a run of "${outer.ok ? outer.graph.name : user.snapshot.name}". Stop it first.` };
+    }
     if (planner.isBusyInGraph(id)) return { ok: false, error: "The planner is still working on this graph. Try again when it's done." };
     const r = graphStore.delete(id);
     if (!r.ok) return r;
