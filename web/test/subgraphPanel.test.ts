@@ -7,6 +7,7 @@ import { emptyGraph, type Graph, type GraphListItem, type GraphNode } from '@age
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 const { send } = await import('../src/bridge');
 const { dispatch, getState } = await import('../src/store');
+const { actions } = await import('../src/actions');
 const { NodePanel } = await import('../src/components/NodePanel');
 const { SubgraphPicker } = await import('../src/components/SubgraphPicker');
 const { pickerOptions } = await import('../src/subgraphPicker');
@@ -111,6 +112,23 @@ describe('the Node panel for a sub-graph step (spec §6.2)', () => {
     expect(save().disabled).toBe(false);
     vi.mocked(send).mockClear();
     await act(async () => save().click());
+    expect(send).toHaveBeenCalledWith({ type: 'op', graphId: 'job-hunting', op: { type: 'updateNode', id: 'n1', patch: { kind: 'graph', graph: 'weekly-report' } } });
+    await r.done();
+  });
+
+  it('⌘S does not save a sub-graph step that has no graph, and the draft stays unsaved', async () => {
+    open();
+    dispatch({ kind: 'selectNode', id: 'n1' });
+    const r = await render(createElement(NodePanel));
+    await act(async () => type([...r.container.querySelectorAll('select')][0] as HTMLSelectElement, 'graph'));
+    vi.mocked(send).mockClear();
+    await act(async () => actions.save());
+    expect(vi.mocked(send).mock.calls.filter(([m]) => m.type === 'op')).toEqual([]);
+    const save = [...r.container.querySelectorAll('button')].find((b) => b.textContent === 'Save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    // Choosing a graph makes ⌘S save it.
+    await act(async () => type(r.container.querySelector('select#node-subgraph') as HTMLSelectElement, 'weekly-report'));
+    await act(async () => actions.save());
     expect(send).toHaveBeenCalledWith({ type: 'op', graphId: 'job-hunting', op: { type: 'updateNode', id: 'n1', patch: { kind: 'graph', graph: 'weekly-report' } } });
     await r.done();
   });

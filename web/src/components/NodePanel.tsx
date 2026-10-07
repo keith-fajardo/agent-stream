@@ -119,6 +119,8 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   // The planner refines prompts and commands: a sub-graph step has neither.
   const canRefine = draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   const isGraph = draft.kind === 'graph';
+  // A sub-graph step needs its graph (spec §2.1): neither the Save button nor ⌘S saves it without one.
+  const canSave = dirty && !(isGraph && !draft.graph);
   useEffect(() => {
     reportDraft('node', dirty);
   }, [dirty]);
@@ -166,9 +168,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     setBase({ draft, at: node.updatedAt });
   };
   // ⌘S saves this draft exactly as the Save button does (spec §6a.1).
-  const draftRef = useRef({ dirty, save });
-  draftRef.current = { dirty, save };
-  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.dirty, save: () => draftRef.current.save() }), [node.id]);
+  const draftRef = useRef({ canSave, save });
+  draftRef.current = { canSave, save };
+  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
   const only = onlyAvailability({ run, runs, graph: openGraph }, node.id);
@@ -277,7 +279,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
         {node.id} · created by {node.createdBy} · last edited by {node.updatedBy}
       </p>
       <div className="actions">
-        <button className="primary" disabled={!dirty || (isGraph && !draft.graph)} onClick={save}>
+        <button className="primary" disabled={!canSave} onClick={save}>
           Save
         </button>
         <button
