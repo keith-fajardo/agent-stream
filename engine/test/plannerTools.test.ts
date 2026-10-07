@@ -36,7 +36,7 @@ function setup(checkout?: CheckoutSource) {
 describe('planner graph tools', () => {
   it('exposes the documented tools', () => {
     expect(setup().tools.map((t) => t.name)).toEqual([
-      'get_graph', 'list_models', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets',
+      'get_graph', 'list_models', 'add_node', 'update_node', 'delete_node', 'connect', 'disconnect', 'set_goal', 'set_instructions', 'set_variable', 'delete_variable', 'request_run', 'get_run', 'checkout_info', 'check_tickets', 'list_graphs',
     ]);
   });
 
