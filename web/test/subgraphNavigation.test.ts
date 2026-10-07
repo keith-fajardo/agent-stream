@@ -121,6 +121,43 @@ describe('editing inside (spec §6.1)', () => {
     dispatch({ kind: 'closeConfirm' });
   });
 
+  it('an unsaved edit of an inner step is not saved onto the outer graph’s step of the same id when climbing', async () => {
+    open();
+    // Every graph numbers its steps from n1: the inner graph has an n4 too.
+    const clash: Graph = { ...research, nodes: [...research.nodes, step('n4', { title: 'Inner four' })] };
+    dispatch({ kind: 'server', msg: { type: 'subgraphs', graphId: 'job-hunting', graphs: { 'company-research': clash, deep }, reviews: { 'company-research': { changes: [] }, deep: { changes: [] } } } });
+    actions.openStep('n4');
+    dispatch({ kind: 'selectNode', id: 'n4' });
+    const r = await render(createElement(NodePanel));
+    const title = () => r.container.querySelector('input') as HTMLInputElement;
+    expect(title().value).toBe('Inner four');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title(), 'Edited inside');
+      title().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => actions.climb(0));
+    expect(getState()).toMatchObject({ scope: [], selectedNodeId: 'n4' });
+    expect(title().value).toBe('Research the target company');
+    vi.mocked(send).mockClear();
+    await act(async () => actions.save());
+    const sent = vi.mocked(send).mock.calls.map((c) => c[0] as { type: string; graphId?: string; op?: { type: string; patch?: { title?: string } } });
+    expect(sent.some((m) => m.type === 'op' && m.graphId === 'job-hunting' && m.op?.type === 'updateNode' && m.op.patch?.title === 'Edited inside')).toBe(false);
+    expect(sent.some((m) => m.type === 'op' && m.op?.type === 'updateNode')).toBe(false);
+    await r.done();
+  });
+
+  it('the agent-change items of the Edit menu follow the shown graph’s changes', () => {
+    open();
+    const accept = () => buildMenus(getState()).find((m) => m.id === 'edit')!.items.find((i) => 'label' in i && i.label === 'Accept all agent changes') as { enabled: boolean };
+    expect(accept().enabled).toBe(false);
+    dispatch({ kind: 'server', msg: { type: 'subgraphs', graphId: 'job-hunting', graphs: { 'company-research': research, deep }, reviews: { 'company-research': { changes: [{ kind: 'node', change: 'added', id: 'n2', title: 'Read news', at: 't' }] }, deep: { changes: [] } } } });
+    expect(accept().enabled).toBe(false);
+    actions.openStep('n4');
+    expect(accept().enabled).toBe(true);
+    actions.climb(0);
+    expect(accept().enabled).toBe(false);
+  });
+
   it('the logs of an inner step are its expanded id’s', async () => {
     open();
     actions.openStep('n4');

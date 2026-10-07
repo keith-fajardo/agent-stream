@@ -53,7 +53,7 @@ export function NodePanel() {
           </span>
         </div>
       )}
-      <NodeEditor key={node.id} graphId={graph.id} node={node} workspaces={workspaces} />
+      <NodeEditor key={`${graph.id}:${node.id}`} graphId={graph.id} node={node} workspaces={workspaces} />
     </div>
   );
 }
@@ -175,7 +175,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   // ⌘S saves this draft exactly as the Save button does (spec §6a.1).
   const draftRef = useRef({ canSave, save });
   draftRef.current = { canSave, save };
-  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [node.id]);
+  useEffect(() => registerNodeDraft({ nodeId: node.id, dirty: () => draftRef.current.canSave, save: () => draftRef.current.save() }), [graphId, node.id]);
   const latest = runs[0];
   const running = run?.status === 'running';
   const only = onlyAvailability({ run, runs, graph: openGraph }, expandedIdOf({ scope }, node.id));
