@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { relativeTime, statusLabel, type GraphListItem, type ProviderStatus } from '@agent-stream/shared';
+import { isSharedHome, relativeTime, statusLabel, type GraphListItem, type ProviderStatus } from '@agent-stream/shared';
 import { isChecking, type Folder } from './engines';
 
 export class FolderItem extends vscode.TreeItem {
@@ -7,6 +7,15 @@ export class FolderItem extends vscode.TreeItem {
     super(folder.name, vscode.TreeItemCollapsibleState.Expanded);
     this.id = `folder:${folder.key}`;
     this.contextValue = 'folder';
+  }
+}
+
+export class SharedItem extends vscode.TreeItem {
+  constructor(readonly folder: Folder) {
+    super('Shared', vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `shared:${folder.key}`;
+    this.contextValue = 'shared';
+    this.iconPath = new vscode.ThemeIcon('references');
   }
 }
 
@@ -47,7 +56,13 @@ export class RetryItem extends vscode.TreeItem {
   }
 }
 
-export type GraphsSource = { folders(): Folder[]; graphs(folder: Folder): GraphListItem[]; status(): ProviderStatus; now?: () => number };
+export type GraphsSource = {
+  folders(): Folder[];
+  graphs(folder: Folder): GraphListItem[];
+  active(folder: Folder): string;
+  status(): ProviderStatus;
+  now?: () => number;
+};
 
 /** The sidebar's Graphs section (spec §4.1). The engine already sorts graphs newest first, unreadable last. */
 export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -66,12 +81,28 @@ export class GraphsView implements vscode.TreeDataProvider<vscode.TreeItem> {
 
   getChildren(parent?: vscode.TreeItem): vscode.TreeItem[] {
     const now = this.source.now?.() ?? Date.now();
-    if (parent instanceof FolderItem) return this.source.graphs(parent.folder).map((g) => new GraphItem(parent.folder, g, now));
+    if (parent instanceof SharedItem) return this.graphsIn(parent.folder, now, (h) => isSharedHome(h));
+    if (parent instanceof FolderItem) return this.sessionGroups(parent.folder, now);
     if (parent) return [];
     const status = this.source.status();
     const top: vscode.TreeItem[] = status.ok || isChecking(status) ? [] : [new RetryItem()];
     const folders = this.source.folders();
-    if (folders.length === 1) return [...top, ...this.source.graphs(folders[0]).map((g) => new GraphItem(folders[0], g, now))];
+    if (folders.length === 1) return [...top, ...this.sessionGroups(folders[0], now)];
     return [...top, ...folders.map((f) => new FolderItem(f))];
+  }
+
+  /** The active session's graphs, then the Shared group when it has any. */
+  private sessionGroups(folder: Folder, now: number): vscode.TreeItem[] {
+    const active = this.source.active(folder);
+    const own = this.graphsIn(folder, now, (h) => h === active);
+    const shared = this.source.graphs(folder).some((g) => isSharedHome(g.home ?? ''));
+    return shared ? [...own, new SharedItem(folder)] : own;
+  }
+
+  private graphsIn(folder: Folder, now: number, match: (home: string) => boolean): vscode.TreeItem[] {
+    return this.source
+      .graphs(folder)
+      .filter((g) => match(g.home ?? ''))
+      .map((g) => new GraphItem(folder, g, now));
   }
 }

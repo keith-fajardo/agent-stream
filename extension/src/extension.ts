@@ -110,7 +110,12 @@ export async function activate(context: vscode.ExtensionContext) {
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     ),
   );
-  const graphsView = new GraphsView({ folders: workspaceFolders, graphs: (f) => manager.get(f).listGraphs(), status: () => manager.status });
+  const graphsView = new GraphsView({
+    folders: workspaceFolders,
+    graphs: (f) => manager.get(f).listGraphs(),
+    active: (f) => sessions.active(f).id,
+    status: () => manager.status,
+  });
   const graphsTree = vscode.window.createTreeView('agentStream.graphs', { treeDataProvider: graphsView });
   events.graphs = () => graphsView.refresh();
   events.auth = (next) => {
@@ -274,12 +279,14 @@ export async function activate(context: vscode.ExtensionContext) {
     hasEngine: (f) => manager.has(f.key),
     changed: () => {
       sessionsView.refresh();
+      graphsView.refresh();
       showSession();
       chat.refresh(graphSources());
     },
   });
   events.sessions = () => {
     sessionsView.refresh();
+    graphsView.refresh();
     showSession();
     chat.refresh(graphSources());
   };
