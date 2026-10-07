@@ -189,12 +189,12 @@ export class GraphStore extends EventEmitter {
       const agentChanges = this.agentChanges(id).length;
       const users = usedBy.get(id);
       const steps = r.graph.nodes.length;
-      // A file that broke after it was read still loads its last good version, but is listed as broken: not offered as a sub-graph (spec §6.2).
+      // A file that broke after it was read still loads its last good version, but is listed as `broken` (not as unreadable, so it stays usable in the sidebar and chat): not offered as a sub-graph (spec §6.2).
       const errors = this.fileErrors(id);
       return {
         id,
         name: r.graph.name,
-        ...(errors.length > 0 && { error: formatFileErrors(errors) }),
+        ...(errors.length > 0 && { broken: formatFileErrors(errors) }),
         updatedAt: r.graph.updatedAt,
         ...(agentChanges > 0 && { agentChanges }),
         ...(users && { usedBy: users }),

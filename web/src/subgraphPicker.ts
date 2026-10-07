@@ -23,5 +23,5 @@ export function pickerOptions(graphs: readonly GraphListItem[], ownerId: string)
   const lookup = lookupFromList(graphs);
   return graphs
     .filter((g) => g.id !== ownerId && !wouldCreateGraphLoop(ownerId, g.id, lookup))
-    .map((g) => ({ id: g.id, label: `${g.name} · ${g.steps ?? 0} step${g.steps === 1 ? '' : 's'}`, disabled: !!g.error, ...(g.error && { title: g.error }) }));
+    .map((g) => ({ id: g.id, label: `${g.name} · ${g.steps ?? 0} step${g.steps === 1 ? '' : 's'}`, disabled: !!(g.error || g.broken), ...((g.error ?? g.broken) && { title: g.error ?? g.broken }) }));
 }

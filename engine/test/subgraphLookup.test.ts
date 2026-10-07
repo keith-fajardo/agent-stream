@@ -47,17 +47,19 @@ describe('GraphStore.lookup: the inner graph of a sub-graph step', () => {
 });
 
 describe('GraphStore.list: a graph whose file has errors now', () => {
-  it('carries the error, keeps its last good name, and is clear again once the file reads', () => {
+  it('carries broken (not error), keeps its last good name, and is clear again once the file reads', () => {
     const { store, id, file } = storeWithResearch();
     const good = readFileSync(file, 'utf8');
-    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
+    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('broken');
     writeFileSync(file, good.replace('- kind: agent', '- kind: robot'));
     // load() still gives the last good version, but the list must not offer the graph as a sub-graph (spec §6.2).
     expect(store.load(id).ok).toBe(true);
-    expect(store.list().find((g) => g.id === id)).toMatchObject({ id, name: 'Company research', error: expect.stringMatching(/kind is "robot"; use agent or command\./) });
+    expect(store.list().find((g) => g.id === id)).toMatchObject({ id, name: 'Company research', broken: expect.stringMatching(/kind is "robot"; use agent or command\./) });
+    // `error` still means never readable: the sidebar, chat and pickers keep working with the last good version.
+    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
     writeFileSync(file, good);
     store.load(id);
-    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
+    expect(store.list().find((g) => g.id === id)).not.toHaveProperty('broken');
   });
 });
 

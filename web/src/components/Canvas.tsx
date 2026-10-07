@@ -56,6 +56,12 @@ export function Canvas() {
   const [nodes, setNodes] = useState<StepFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [picking, setPicking] = useState(false);
+  // A run belongs to the tab's graph; inside a sub-graph its steps are under their expanded ids.
+  const runForGraph = run && tabGraph && run.graphId === tabGraph.id ? run : undefined;
+
+  const dragging = useRef(new Set<string>());
+  const pendingMoves = useRef(new Map<string, Position>());
+  const lastSelected = useRef<string | undefined>(undefined);
   // React Flow fits the view only when it mounts, and it remounts with each graph shown. Drop the steps of the graph we are
   // leaving as the view changes, so the new one mounts empty and fits to the steps that arrive, not to the old ones.
   const view = `${graph?.id ?? ''}@${scope.join('/')}`;
@@ -64,13 +70,10 @@ export function Canvas() {
     setShownView(view);
     setNodes([]);
     setEdges([]);
+    // Step ids repeat from graph to graph (every graph has an n1): moves and drags of the graph we leave are not the new one's.
+    pendingMoves.current.clear();
+    dragging.current.clear();
   }
-  // A run belongs to the tab's graph; inside a sub-graph its steps are under their expanded ids.
-  const runForGraph = run && tabGraph && run.graphId === tabGraph.id ? run : undefined;
-
-  const dragging = useRef(new Set<string>());
-  const pendingMoves = useRef(new Map<string, Position>());
-  const lastSelected = useRef<string | undefined>(undefined);
   // A refused edit leaves its moves unconfirmed for good: forget them, so the steps return to where the graph has them.
   const rejections = useStore((s) => s.rejections);
   useEffect(() => pendingMoves.current.clear(), [rejections]);

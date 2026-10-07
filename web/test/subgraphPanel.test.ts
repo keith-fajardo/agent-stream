@@ -63,6 +63,11 @@ describe('the picker (spec §6.2)', () => {
     ]);
   });
 
+  it('disables a graph whose file has errors now, though it still loads its last good version', () => {
+    const options = pickerOptions([{ id: 'job-hunting', name: 'Job hunting' }, { id: 'company-research', name: 'Company research', steps: 3, broken: 'line 5: kind is "robot"; use agent or command.' }], 'job-hunting');
+    expect(options).toEqual([{ id: 'company-research', label: 'Company research · 3 steps', disabled: true, title: 'line 5: kind is "robot"; use agent or command.' }]);
+  });
+
   it('+ Sub-graph adds a sub-graph step titled with the chosen graph’s name', async () => {
     open();
     vi.mocked(send).mockClear();

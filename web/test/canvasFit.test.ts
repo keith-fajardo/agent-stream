@@ -7,11 +7,13 @@ import { emptyGraph, type Graph, type GraphNode } from '@agent-stream/shared';
 vi.mock('../src/bridge', () => ({ send: vi.fn(), sendHost: vi.fn(), post: vi.fn() }));
 // React Flow only fits the view when it mounts (fitView, @xyflow/react 12), so what matters is when it mounts and which nodes it has then.
 const mounts: string[][] = [];
+const shown: { props?: { onNodeDragStop?: (e: unknown, n: unknown, ns: { id: string; position: { x: number; y: number } }[]) => void } } = {};
 vi.mock('@xyflow/react', async (original) => {
   const real = await original<typeof import('@xyflow/react')>();
   return {
     ...real,
-    ReactFlow: (props: { nodes: { id: string }[] }) => {
+    ReactFlow: (props: { nodes: { id: string }[]; onNodeDragStop?: (e: unknown, n: unknown, ns: { id: string; position: { x: number; y: number } }[]) => void }) => {
+      shown.props = props;
       const ids = props.nodes.map((n) => n.id);
       useEffect(() => void mounts.push(ids), []); // eslint-disable-line react-hooks/exhaustive-deps
       return null;
@@ -19,6 +21,8 @@ vi.mock('@xyflow/react', async (original) => {
   };
 });
 const { dispatch } = await import('../src/store');
+const { send } = await import('../src/bridge');
+const { actions } = await import('../src/actions');
 const { Canvas } = await import('../src/components/Canvas');
 const { ReactFlowProvider } = await import('@xyflow/react');
 
@@ -45,6 +49,19 @@ describe('fitting the view when the canvas goes inside a sub-graph step', () => 
     expect(mounts).toEqual([[], []]);
     await act(async () => dispatch({ kind: 'climbScope', depth: 0 }));
     expect(mounts).toEqual([[], [], []]);
+    await act(async () => root.unmount());
+  });
+
+  it('does not carry an unconfirmed move of an outer step to the inner step with the same id', async () => {
+    dispatch({ kind: 'climbScope', depth: 0 });
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => root.render(createElement(ReactFlowProvider, null, createElement(Canvas))));
+    await act(async () => shown.props!.onNodeDragStop!(null, null, [{ id: 'n1', position: { x: 5, y: 7 } }]));
+    await act(async () => dispatch({ kind: 'enterScope', stepId: 'n4' }));
+    vi.mocked(send).mockClear();
+    await act(async () => actions.save());
+    expect(vi.mocked(send).mock.calls.filter(([m]) => m.type === 'op' || m.type === 'ops')).toEqual([]);
     await act(async () => root.unmount());
   });
 });
