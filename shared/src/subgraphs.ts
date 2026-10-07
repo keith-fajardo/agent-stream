@@ -170,7 +170,10 @@ export function subgraphFirstSteps(graph: Graph, stepId: string): string[] {
   return [...inner].filter((id) => !graph.edges.some((e) => e.to === id && inner.has(e.from)));
 }
 
-/** The ids in run order, each sub-graph step moved to just before its first inner step so it heads them (run dialog and report, spec §5). */
+/**
+ * The ids in run order, each sub-graph step placed just before its inner steps and those inner steps kept together right after it,
+ * so the run dialog and report can indent them as one group (spec §5). Outer steps on parallel branches never land inside a group.
+ */
 export function groupedOrder(graph: Graph): string[] {
   const order = topoOrder(graph);
   const ids = order.length === graph.nodes.length ? order : graph.nodes.map((n) => n.id);
@@ -180,9 +183,21 @@ export function groupedOrder(graph: Graph): string[] {
   const place = (id: string): void => {
     if (placed.has(id)) return;
     const parent = parentScopeId(id);
-    if (parent !== undefined && subgraphSteps.has(parent)) place(parent);
+    if (parent !== undefined && subgraphSteps.has(parent)) {
+      place(parent);
+      return;
+    }
     placed.add(id);
     out.push(id);
+    if (!subgraphSteps.has(id)) return;
+    // The whole group now, in run order; a nested sub-graph step brings its own inner steps along.
+    for (const inner of ids) if (parentScopeId(inner) === id) placeInner(inner);
+  };
+  const placeInner = (id: string): void => {
+    if (placed.has(id)) return;
+    placed.add(id);
+    out.push(id);
+    if (subgraphSteps.has(id)) for (const inner of ids) if (parentScopeId(inner) === id) placeInner(inner);
   };
   for (const id of ids) place(id);
   return out;

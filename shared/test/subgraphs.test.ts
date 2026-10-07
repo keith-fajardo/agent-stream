@@ -169,6 +169,32 @@ describe('scopes and ids', () => {
     expect(groupedOrder(r.graph)).toEqual(['n1', 'n1/n1', 'n1/n2', 'n1/n2/n1', 'n1/n2/n2', 'n1/n2/n3']);
     expect(groupedOrder(expanded(hunting, research).graph)).toEqual(['n1', 'n2', 'n3', 'n3/n1', 'n3/n2', 'n3/n3', 'n4']);
   });
+
+  it('keeps a sub-graph step and its inner steps together even with steps on a parallel branch', () => {
+    const outer = graph('o', 'O', [agent('A'), sub('Research', 'company-research'), agent('B'), agent('C'), link('n1', 'n2'), link('n1', 'n3'), link('n3', 'n4')]);
+    const g = expanded(outer, research).graph;
+    const order = groupedOrder(g);
+    expect(order).toHaveLength(g.nodes.length);
+    expect(new Set(order).size).toBe(order.length);
+    const at = order.indexOf('n2');
+    expect(order.slice(at, at + 4).sort()).toEqual(['n2', 'n2/n1', 'n2/n2', 'n2/n3']);
+    expect(order[at]).toBe('n2');
+    // Every edge is respected except those into a sub-graph step, which heads its group.
+    for (const e of g.edges) if (e.to !== 'n2') expect(order.indexOf(e.from)).toBeLessThan(order.indexOf(e.to));
+  });
+
+  it('keeps nested groups together too', () => {
+    const level2 = graph('level-2', 'Level 2', [agent('Before'), sub('Research', 'company-research'), agent('Side'), link('n1', 'n2')]);
+    const outer = graph('o', 'O', [agent('A'), sub('Go', 'level-2'), agent('B'), agent('C'), link('n1', 'n2'), link('n1', 'n3'), link('n3', 'n4')]);
+    const g = expanded(outer, level2, research).graph;
+    const order = groupedOrder(g);
+    expect(order).toHaveLength(g.nodes.length);
+    const start = order.indexOf('n2');
+    const group = g.nodes.filter((n) => n.id.startsWith('n2/')).length + 1;
+    expect(order.slice(start, start + group).every((id) => id === 'n2' || id.startsWith('n2/'))).toBe(true);
+    const mid = order.indexOf('n2/n2');
+    expect(order.slice(mid, mid + 4).every((id) => id === 'n2/n2' || id.startsWith('n2/n2/'))).toBe(true);
+  });
 });
 
 describe('wouldCreateGraphLoop', () => {
