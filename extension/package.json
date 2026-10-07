@@ -3,7 +3,7 @@
   "displayName": "Agent Stream",
   "description": "Co-create a workflow graph with an AI planner and run it step by step on your own AI subscription: Claude, GitHub Copilot or OpenAI Codex.",
   "keywords": ["ai", "agent", "workflow", "planner", "claude", "copilot", "codex", "openai"],
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "keithfajardo",
   "license": "MIT",
   "icon": "media/icon.png",
