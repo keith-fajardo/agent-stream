@@ -271,7 +271,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
       )}
       {draft.kind === 'condition' && (
         <div className="field">
-          <p className="static-note">Arrows out of this step are labeled yes and no. Draw them with the Flow arrows.</p>
+          <p className="static-note">{"Arrows out of this step are labeled yes and no. Set the labels in the graph's Markdown view, in the Flow block (for example n2 -->|yes| n3)."}</p>
         </div>
       )}
       {draft.kind === 'stop' && (

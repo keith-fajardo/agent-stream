@@ -242,6 +242,13 @@ describe('NodePanel access and workspace', () => {
     await act(async () => root.unmount());
   });
 
+  it('tells a condition step where its yes and no labels are set: the Markdown Flow block (R24, R33)', async () => {
+    const conditionGraph: Graph = { ...graph, nodes: [{ id: 'n1', title: 'Needed?', kind: 'condition', createdBy: 'user', updatedBy: 'user', updatedAt: 't' }] };
+    const { el, root } = await render(conditionGraph);
+    expect(el.querySelector('.static-note')?.textContent).toBe("Arrows out of this step are labeled yes and no. Set the labels in the graph's Markdown view, in the Flow block (for example n2 -->|yes| n3).");
+    await act(async () => root.unmount());
+  });
+
   it("edits the workspace in the draft, suggests the graph's workspace names, and clears it with an empty value", async () => {
     const g: Graph = { ...graph, nodes: [{ ...step, workspace: 'wh_small' }, { ...step, id: 'n2', workspace: 'wh_large' }, { ...step, id: 'n3' }] };
     const { el, root, save } = await render(g);
