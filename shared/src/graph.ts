@@ -479,19 +479,25 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
 
 /**
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
- * `fromNodeId`, did not succeed last time or is marked stale, changed (see changedSinceSource), has a workspace or is a stop step
- * — and so does everything downstream of it. With no `fromNodeId` this is a retry from where the run stopped. Everything else is reused.
- * Re-run from a sub-graph step starts at its inner first steps (sub-graphs spec §4.5).
+ * `fromNodeId`, did not succeed last time or is marked stale, changed (see changedSinceSource) or has a workspace
+ * — and so does everything downstream of it. A step that the source run skipped, and a stop step, also execute again, but
+ * alone (ruling R31): its result was no result, so the steps after it that succeeded are still current, and the routing
+ * decides again whether it runs (a reused condition keeps its verdict). With no `fromNodeId` this is a retry from where
+ * the run stopped. Everything else is reused. Re-run from a sub-graph step starts at its inner first steps (sub-graphs spec §4.5).
  */
 export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[], scopes?: Record<string, Scope>): Set<string> {
   const seeds = new Set<string>(fromNodeId ? fromSeeds(graph, fromNodeId) : []);
+  /** Steps that execute again without their descendants. */
+  const alone = new Set<string>();
   const changed = changedSinceSource(graph, source, rendered, attachments, scopes);
   for (const n of graph.nodes) {
+    const state = source.nodes[n.id];
     // A step with a workspace is never reused: its files lived in that run's own worktree (spec §4.3a).
-    // A stop step always runs again: only running it halts the run, so a reused one would let a retry read succeeded.
-    if (!isCurrent(source.nodes[n.id]) || changed.has(n.id) || n.workspace || n.kind === 'stop') seeds.add(n.id);
+    if ((!isCurrent(state) && state?.status !== 'skipped') || changed.has(n.id) || n.workspace) seeds.add(n.id);
+    // A stop step always runs again (R18): only running it halts the run, so a reused one would let a retry read succeeded.
+    else if (state?.status === 'skipped' || n.kind === 'stop') alone.add(n.id);
   }
-  const execute = new Set(seeds);
+  const execute = new Set([...seeds, ...alone]);
   for (const id of seeds) for (const d of descendants(graph, id)) execute.add(d);
   return new Set(graph.nodes.map((n) => n.id).filter((id) => !execute.has(id)));
 }

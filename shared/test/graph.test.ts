@@ -247,6 +247,47 @@ describe('reusableNodeIds', () => {
     expect([...reuse].sort()).toEqual(['n1', 'n2', 'n3']);
   });
 
+  // P -> C; C yes -> A, C no -> B; A and B -> J; J -> K (R31).
+  const joined = build([
+    agent('check'),
+    { type: 'addNode', node: { title: 'needed?', kind: 'condition' } },
+    agent('a'),
+    agent('b'),
+    agent('join'),
+    agent('after'),
+    link('n1', 'n2'),
+    { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+    { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    link('n3', 'n5'),
+    link('n4', 'n5'),
+    link('n5', 'n6'),
+  ]);
+  const yesRun = (): Record<string, NodeRunState> => ({
+    n1: { status: 'succeeded' },
+    n2: { status: 'succeeded', verdict: 'yes' },
+    n3: { status: 'succeeded' },
+    n4: { status: 'skipped', error: 'not on the taken branch' },
+    n5: { status: 'succeeded' },
+    n6: { status: 'failed', error: 'boom' },
+  });
+
+  it('a skipped branch runs again alone: the join after it is reused and the failed step re-runs (R31)', () => {
+    expect(validateRunnable(joined)).toEqual([]);
+    const reuse = reusableNodeIds(joined, { snapshot: joined, nodes: yesRun() });
+    expect([...reuse].sort()).toEqual(['n1', 'n2', 'n3', 'n5']);
+    // The skipped step is evaluated again (and stays skipped, as the reused verdict is yes); the failed one re-runs.
+    expect(reuse.has('n4')).toBe(false);
+    expect(reuse.has('n6')).toBe(false);
+  });
+
+  it('an edited upstream prompt re-runs the check and everything after it (spec §6)', () => {
+    const r = applyOp(joined, { type: 'updateNode', id: 'n1', patch: { prompt: 'check it again' } }, 'user', T2);
+    if (!r.ok) throw new Error(r.error);
+    expect([...reusableNodeIds(r.graph, { snapshot: joined, nodes: yesRun() })]).toEqual([]);
+    // Unedited, the verdict is reused and the check is not spent again.
+    expect(reusableNodeIds(joined, { snapshot: joined, nodes: yesRun() }).has('n2')).toBe(true);
+  });
+
   it('re-runs nodes that did not succeed last time', () => {
     const nodes = { ...allOk(chain), n1: { status: 'failed' as const } };
     expect([...reusableNodeIds(chain, { snapshot: chain, nodes }, 'n3')]).toEqual([]);

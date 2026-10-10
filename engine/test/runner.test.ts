@@ -1065,6 +1065,35 @@ describe('Runner with condition and stop steps', () => {
     expect(done.stoppedBy).toBe('n4');
   });
 
+  it('a retry after a yes verdict reuses the join, keeps the untaken branch skipped and re-runs only the failed step (R31)', async () => {
+    const ctx = setup();
+    // n1 checks, n2 decides; yes -> n3, no -> n4; n3 and n4 join at n5; n6 follows the join.
+    const g = graphOf([agent('check'), condition('needed?'), agent('a'), agent('b'), agent('join'), agent('after'), link('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n4', 'no'), link('n3', 'n5'), link('n4', 'n5'), link('n5', 'n6')]);
+    const first = started(ctx.runner.start(withRendered(g)));
+    await tick();
+    ctx.fake.finish('n1', { ok: true, output: 'VERDICT: yes' });
+    await tick();
+    ctx.fake.finish('n3');
+    await tick();
+    ctx.fake.finish('n5');
+    await tick();
+    ctx.fake.finish('n6', { ok: false, output: '', error: 'boom' });
+    const failed = await first.done;
+    expect(failed.status).toBe('failed');
+    expect(failed.nodes.n4.status).toBe('skipped');
+    expect(failed.nodes.n5.status).toBe('succeeded');
+    ctx.fake.started.length = 0;
+    const retry = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: failed.id }), mode: 'resume' }));
+    expect(retry.run.nodes.n5.status).toBe('reused');
+    await tick();
+    ctx.fake.finish('n6');
+    const done = await retry.done;
+    expect(ctx.fake.started).toEqual(['n6']);
+    expect(done.nodes.n4.status).toBe('skipped');
+    expect(done.nodes.n5.status).toBe('reused');
+    expect(done.status).toBe('succeeded');
+  });
+
   it('a yes verdict runs the work and skips the stop', async () => {
     const { runner, fake } = setup();
     const r = started(runner.start(withRendered(gate())));
