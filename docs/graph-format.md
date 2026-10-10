@@ -103,7 +103,7 @@ A step heading is `## <id> · <title>`: the separator is a space, a middle dot (
 A step section holds, in this order:
 
 1. **Fields**, one bullet each, `- key: value`:
-   - `kind`: `agent`, `command` or `graph` (a [sub-graph step](#sub-graph-steps)). Agent Stream always writes it. When it's missing, a ```` ```prompt ```` block means an agent step and a ```` ```sh ```` block a command step. A `- graph:` line with no `kind` line and no code block also means a sub-graph step.
+   - `kind`: `agent`, `command`, `graph`, `condition` or `stop` (a [sub-graph step](#sub-graph-steps); the last two are in [Conditions and stop](#conditions-and-stop)). Agent Stream always writes it. When it's missing, a ```` ```prompt ```` block means an agent step and a ```` ```sh ```` block a command step. A `- graph:` line with no `kind` line and no code block also means a sub-graph step.
    - `access`: `read` for an agent step that only reads and reports. Missing (or `write`) means it can change files. Command steps can always change files, so `access: read` on a command step is an error.
    - `workspace`: a variant workspace name (lowercase letters, digits, `-` and `_`, starting with a letter, at most 40 characters). Steps with the same workspace share one worktree per run. Missing means this checkout.
    - `timeout`: a whole number of seconds, from 1 to 2147483.
@@ -114,7 +114,7 @@ A step section holds, in this order:
    - `attach`: a file the agent step gets every time it runs, by name. Repeat the line for each file; the order is kept.
    - `graph`: a sub-graph step's inner graph, by id (see [Sub-graph steps](#sub-graph-steps)).
 
-   Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `graph`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`.
+   Command steps have no model, effort or attachments: any of those lines on a command step is an error. The fields are written in this order: `kind`, `graph`, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`, `fail-fast`.
 2. **A description** (optional): one or more `>` lines, joined with spaces. One plain-language sentence for people: what the step does and why.
 3. **Exactly one code block** (an agent or command step; a sub-graph step has no code block: it has `value` blocks instead, see [Sub-graph steps](#sub-graph-steps)):
    - ```` ```prompt ```` (or `text`, `md`) for an agent step's prompt;
@@ -189,13 +189,48 @@ flowchart LR
 
 - The block's first line is exactly `mermaid`, with nothing after it.
 - The first line is `flowchart LR` (or `TD`, `TB`, `RL`, `BT`, or `graph …`). The direction is only for the diagram.
-- Each line is a chain of step ids joined by `-->`: `a --> b --> c` connects a to b and b to c.
+- Each line is a chain of step ids joined by `-->`: `a --> b --> c` connects a to b and b to c. An arrow out of a condition step may be labeled `-->|yes|` or `-->|no|`; a condition has exactly two, one of each (see [Conditions and stop](#conditions-and-stop)).
 - A step id may carry a label: `n1["Title"]`, `n1("Title")` or `n1[Title]`. Labels are only for the diagram: titles come from the step headings.
 - Blank lines and `%%` comments are ignored. A step id alone on a line adds no connection.
-- Anything else Mermaid offers (`-.->`, `==>`, `---`, `--->`, link text such as `-->|text|`, subgraphs, `&`, `classDef`, `style`) is an error with its line number, so the file never holds connections Agent Stream can't show. Spaces around `-->` are optional: `a-->b` works.
+- Anything else Mermaid offers (`-.->`, `==>`, `---`, `--->`, subgraphs, `&`, `classDef`, `style`) is an error with its line number, so the file never holds connections Agent Stream can't show. Other link text, such as `-->|maybe|`, is an error. Spaces around `-->` are optional: `a-->b` works.
 - Every id needs a step section, and the arrows can't loop back to an earlier step.
 - The same arrow twice is an error, and so is an arrow from a step to itself (`n1 --> n1`).
 - A line can't start with a Mermaid keyword, so a step whose id is `end`, `subgraph`, `class`, `classDef`, `style`, `linkStyle`, `click` or `direction` can't start a Flow line. Give such a step another id.
+
+## Conditions and stop
+
+A condition step sends the run one way or the other, and a stop step ends the run. Neither has a code block, and neither takes a prompt, a command, `access`, `workspace`, `model`, `effort`, `browser` or `attach`. A stop step may take `fail-fast`.
+
+````markdown
+## n3 · Is a change needed?
+
+- kind: condition
+
+> Decides whether the run goes on.
+
+## n4 · Stop the run
+
+- kind: stop
+- fail-fast: on
+````
+
+```mermaid
+flowchart LR
+  n2["Check the rules"] --> n3["Is a change needed?"]
+  n3 -->|yes| n5["Make the change"]
+  n3 -->|no| n4["Stop the run"]
+```
+
+- **Labels:** an arrow is labeled only as `-->|yes|` or `-->|no|`, and only out of a condition step. Write the label in the Flow block. The canvas can't draw labeled arrows yet.
+- **A condition step** has exactly one step before it, an agent or command step. It has exactly two arrows out, one labeled `yes` and one labeled `no`, and the run follows the one that matches the verdict.
+- **The verdict** is a marker line, `VERDICT: yes` or `VERDICT: no` (in any letter case, with spaces allowed around it). The engine reads the last line of the step's output that matches it.
+  - An agent step that feeds a condition gets this instruction added to its prompt when it runs: "End your reply with one line on its own: `VERDICT: yes` or `VERDICT: no`." The saved prompt in the file doesn't change.
+  - A command step must print the marker line itself, such as `echo "VERDICT: no"`.
+- **No valid marker line** fails the condition step, with the error `no VERDICT line in <step id> output`. The steps after it don't run, and the run ends `failed`. The verdict is never guessed.
+- **A stop step** has exactly one arrow in, labeled `yes` or `no`, from a condition step, and no arrows out. When it is reached, the run is `stopped`: steps still waiting to start are `skipped`, not cancelled.
+  - `fail-fast: on` also cancels the steps still running, the same way the Stop button does. A write step cancelled mid-edit can leave a partial change.
+  - Without `fail-fast`, or with `fail-fast: off`, running steps finish, and no new step starts.
+- A stop step inside a sub-graph stops the whole run.
 
 ## When the file has errors
 
