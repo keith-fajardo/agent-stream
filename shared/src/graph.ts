@@ -4,6 +4,7 @@ import { ONLY_AGENT_STEPS_BROWSER } from './browser';
 import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
 import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, setsStepField, sortedValues, SUBGRAPH_FIELDS_ONLY, SUBGRAPH_NEEDS_GRAPH, subgraphValuesProblem, valuesText } from './subgraphStep';
 import { innerStepIds, scopeOf, subgraphFirstSteps, type Scope } from './subgraphs';
+import { shapeProblems } from './shape';
 import { variableNameProblem } from './variables';
 import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
 
@@ -203,8 +204,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!has(op.to)) return fail(`node ${op.to} does not exist`);
       if (op.from === op.to) return fail('a node cannot depend on itself');
       if (graph.edges.some((e) => e.from === op.from && e.to === op.to)) return fail(`${op.from} -> ${op.to} already exists`);
+      if (op.label && graph.nodes.find((n) => n.id === op.from)?.kind !== 'condition') return fail(`only an arrow out of a condition step can be labeled yes or no`);
       if (wouldCreateCycle(graph, op.from, op.to)) return fail(`connecting ${op.from} -> ${op.to} would create a cycle`);
-      return done({ edges: [...graph.edges, { id: edgeId(op.from, op.to), from: op.from, to: op.to }] });
+      return done({ edges: [...graph.edges, { id: edgeId(op.from, op.to), from: op.from, to: op.to, ...(op.label && { label: op.label }) }] });
     }
     case 'disconnect': {
       if (!graph.edges.some((e) => e.from === op.from && e.to === op.to)) return fail(`${op.from} -> ${op.to} does not exist`);
@@ -337,6 +339,7 @@ export function validateRunnable(graph: Graph): string[] {
     if (n.kind === 'graph' && !n.graph) problems.push(`${n.id} "${n.title}": a sub-graph step needs a graph.`);
   }
   if (topoOrder(graph).length !== graph.nodes.length) problems.push('The graph has a cycle.');
+  problems.push(...shapeProblems(graph).map((p) => p.message));
   return problems;
 }
 
