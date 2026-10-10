@@ -158,7 +158,7 @@ describe('the App previews and starts the expanded graph', () => {
     const file = join(s.paths.graphsDir, `${s.inner}.md`);
     writeFileSync(file, readFileSync(file, 'utf8').replace('- kind: agent', '- kind: robot'));
     await s.app.handle(s.c, { type: 'previewRun', graphId: s.outer });
-    expect(s.last('runPreview').preview.problems).toEqual([expect.stringMatching(/^Step n1 uses graph "Company research", whose file has errors: line \d+: kind is "robot"; use agent or command\.$/)]);
+    expect(s.last('runPreview').preview.problems).toEqual([expect.stringMatching(/^Step n1 uses graph "Company research", whose file has errors: line \d+: kind is "robot"; use agent, command, graph, condition or stop\.$/)]);
   });
 
   it('refuses Start when the inner graph changed since the review (Review Focus 1)', async () => {

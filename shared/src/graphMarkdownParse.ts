@@ -2,10 +2,11 @@ import { COMMAND_ALWAYS_WRITES, workspaceNameProblem } from './access';
 import { attachmentListProblem, MAX_ATTACHMENTS } from './attachments';
 import { fenceCloses, fenceOpening, type Fence } from './fence';
 import { unescapeFreeTextLine } from './freeText';
-import { nodeIdProblem } from './graph';
+import { edgeId, nodeIdProblem } from './graph';
 import { MAX_TIMEOUT_SEC, STEP_SEPARATOR, type DocAttachments, type DocStep, type DocVariable, type ParseGraphResult } from './graphDoc';
 import { parseFlow, type FlowEdge } from './graphFlow';
-import type { EffortLevel, GraphFileError, NodeKind, StepModel } from './types';
+import { shapeProblems } from './shape';
+import type { EffortLevel, Graph, GraphFileError, GraphNode, NodeKind, StepModel } from './types';
 import { isEffortLevel } from './format';
 import { parseStepModel } from './stepModels';
 import { commandBrowserWarning } from './browser';
@@ -21,10 +22,10 @@ const HEADING_RE = /^(#{1,2})(?=[ \t]|$)[ \t]*(.*?)[ \t]*$/;
 const RESERVED = { goal: 'Goal', instructions: 'Instructions', variables: 'Variables', attachments: 'Attachments', flow: 'Flow' } as const;
 type Reserved = (typeof RESERVED)[keyof typeof RESERVED];
 const STEP_HEADING_RE = new RegExp(`^([A-Za-z0-9_-]+)${STEP_SEPARATOR.trimEnd()}(?: (.*))?$`);
-const FIELD_RE = /^[-*][ \t]+([A-Za-z]+)[ \t]*:[ \t]*(.*?)[ \t]*$/;
+const FIELD_RE = /^[-*][ \t]+([A-Za-z][A-Za-z-]*)[ \t]*:[ \t]*(.*?)[ \t]*$/;
 const VARIABLE_RE = /^[-*][ \t]+`([^`]*)`(?:[ \t]*:[ \t]*(.*?))?[ \t]*$/;
 const QUOTE_RE = /^>[ \t]?(.*)$/;
-const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach', 'graph'];
+const FIELD_NAMES = ['kind', 'access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach', 'graph', 'fail-fast'];
 /** The fields a sub-graph step can't have: dropped from it with a warning (spec §2.1). */
 const AGENT_AND_COMMAND_FIELDS = ['access', 'workspace', 'timeout', 'model', 'effort', 'browser', 'attach'];
 /** A field a step may repeat: one line per attachment, in order (spec §6b.3). */
@@ -195,7 +196,7 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     if (field) {
       const key = field[1].toLowerCase();
       if (phase !== 'fields') fail(item.line, `fields go at the top of step ${label}, before the description and the code block.`);
-      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort, browser, attach and graph.`);
+      else if (!FIELD_NAMES.includes(key)) fail(item.line, `unknown field "${field[1]}". Step fields are kind, access, workspace, timeout, model, effort, browser, attach, graph and fail-fast.`);
       else if (LIST_FIELDS.has(key)) lists.set(key, [...(lists.get(key) ?? []), { value: field[2], line: item.line }]);
       else if (fields.has(key)) fail(item.line, `the field ${key} appears twice in step ${label}. Keep one.`);
       else fields.set(key, { value: field[2], line: item.line });
@@ -216,8 +217,8 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
   let kind: NodeKind | undefined;
   const k = fields.get('kind');
   if (k) {
-    if (k.value === 'agent' || k.value === 'command' || k.value === 'graph') kind = k.value;
-    else fail(k.line, `kind is "${k.value}"; use agent or command.`);
+    if (k.value === 'agent' || k.value === 'command' || k.value === 'graph' || k.value === 'condition' || k.value === 'stop') kind = k.value;
+    else fail(k.line, `kind is "${k.value}"; use agent, command, graph, condition or stop.`);
   }
   const graphLine = fields.get('graph');
   // A sub-graph step: `- kind: graph`, or a graph line on a step with no prompt or sh block (spec §2.2).
@@ -225,6 +226,8 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
   let blockKind: NodeKind | undefined;
   if (isGraph) {
     if (code) fail(code.line, `step ${label} is a sub-graph step, so it can't have a \`\`\`${infoWord(code) || 'code'} block. Remove the block, or make it an agent or command step.`);
+  } else if (kind === 'condition' || kind === 'stop') {
+    if (code) fail(code.line, `a ${kind} step has no prompt or command. Remove the code block from step ${label}.`);
   } else if (!code) fail(section.line, `step ${label} has no code block. Add a \`\`\`prompt block for an agent step or a \`\`\`sh block for a command step.`);
   else if (AGENT_INFOS.has(infoWord(code))) blockKind = 'agent';
   else if (COMMAND_INFOS.has(infoWord(code))) blockKind = 'command';
@@ -281,7 +284,7 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
       else values[name] = value;
     }
   } else if (finalKind) {
-    const which = finalKind === 'agent' ? 'an agent' : 'a command';
+    const which = finalKind === 'agent' ? 'an agent' : finalKind === 'command' ? 'a command' : `a ${finalKind}`;
     if (graphLine) fail(graphLine.line, `step ${label} is ${which} step, so it can't have a graph. Remove this line, or make it a sub-graph step (kind: graph).`);
     for (const v of valueBlocks) fail(v.line, `step ${label} is ${which} step, so it can't have a value block. Remove the block, or make it a sub-graph step (kind: graph).`);
   }
@@ -339,7 +342,15 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     else if (finalKind === 'command') warnings.push({ line: b.line, message: commandBrowserWarning(label) });
     else if (b.value === 'on') browser = true;
   }
-  if (errors.length > before || !finalKind || (finalKind !== 'graph' && !code)) return null;
+  // Whether a stop step ends the run at once (spec §2.1): on, or off (the same as no line, but kept as written).
+  let failFast: boolean | undefined;
+  const ff = fields.get('fail-fast');
+  if (ff) {
+    if (ff.value === 'on') failFast = true;
+    else if (ff.value === 'off') failFast = false;
+    else fail(ff.line, 'fail-fast is on or off.');
+  }
+  if (errors.length > before || !finalKind || (finalKind !== 'graph' && finalKind !== 'condition' && finalKind !== 'stop' && !code)) return null;
   const description = quote
     .map((q) => q.trim())
     .filter(Boolean)
@@ -356,6 +367,7 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     ...(effort && { effort }),
     ...(browser && { browser }),
     ...(attachments.length > 0 && { attachments }),
+    ...(failFast !== undefined && { failFast }),
     ...(graph && { graph }),
     ...(Object.keys(values).length > 0 && { values: sortedValues(values) }),
     ...(description && { description }),
@@ -422,8 +434,38 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
   const warnings: GraphFileError[] = [];
   const steps = stepSections.map((s) => readStep(s, errors, warnings)).filter((s): s is DocStep => s !== null);
   const edges = flow ? readFlow(flow, new Set(idLines.keys()), errors) : [];
+  if (!errors.length) errors.push(...shapeErrors(steps, edges));
   if (errors.length) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
   return { ok: true, doc: { name: h1!.title, goal, instructions, variables, ...(attachments?.names.length && { attachments }), steps, edges }, ...(warnings.length > 0 && { warnings }) };
+}
+
+/**
+ * The condition, stop and label rules (spec §2), checked on the steps and arrows that read cleanly. A problem with a step
+ * is on its heading; a problem with an arrow is on the arrow's line in the Flow.
+ */
+function shapeErrors(steps: DocStep[], edges: FlowEdge[]): GraphFileError[] {
+  const lineOf = new Map<string, number>();
+  const nodes = steps.map((s, k): GraphNode => {
+    const { line, id, ...content } = s;
+    const nodeId = id ?? `step-without-id-${k}`;
+    lineOf.set(nodeId, line);
+    return { id: nodeId, ...content, createdBy: 'user', updatedBy: 'user', updatedAt: '' };
+  });
+  const graph: Graph = {
+    id: '',
+    name: '',
+    goal: '',
+    instructions: '',
+    variables: [],
+    nodes,
+    edges: edges.map(({ from, to, label }) => ({ id: edgeId(from, to), from, to, ...(label && { label }) })),
+    nodeSeq: 0,
+    updatedAt: '',
+  };
+  return shapeProblems(graph).map((p) => {
+    const arrow = edges.find((e) => p.message.startsWith(`${e.from} -> ${e.to}:`));
+    return { line: arrow?.line ?? lineOf.get(p.nodeId) ?? 1, message: p.message };
+  });
 }
 
 /** The file's lines: a leading BOM dropped, CRLF and CR read as LF. */

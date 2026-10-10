@@ -85,11 +85,11 @@ describe('graphFileChanged', () => {
     expect(store.graphFileChanged(id)).toBe('errors');
     expect(store.get(id)).toEqual(good);
     expect(text()).toBe(broken);
-    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }]);
+    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent, command, graph, condition or stop.' }]);
     expect(fileErrors).toHaveBeenLastCalledWith(id, store.fileErrors(id));
     expect(changed).not.toHaveBeenCalled();
     // The canvas can't rewrite a file the user is still fixing; moving a step only touches the side file.
-    expect(store.apply(id, { type: 'setGoal', goal: 'x' }, 'user')).toEqual({ ok: false, error: `The file ${id}.md has errors (line ${store.fileErrors(id)[0].line}: kind is "robot"; use agent or command.). Fix it first: until then this graph can't be changed here.` });
+    expect(store.apply(id, { type: 'setGoal', goal: 'x' }, 'user')).toEqual({ ok: false, error: `The file ${id}.md has errors (line ${store.fileErrors(id)[0].line}: kind is "robot"; use agent, command, graph, condition or stop.). Fix it first: until then this graph can't be changed here.` });
     expect(store.rename(id, 'Other').ok).toBe(false);
     expect(store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 1, y: 1 } }, 'user').ok).toBe(true);
     expect(text()).toBe(broken);
@@ -116,7 +116,7 @@ describe('graphFileChanged', () => {
     expect(store.graphFileChanged(id)).toBe('errors');
     expect(store.apply(id, { type: 'moveNode', id: 'n1', position: { x: 5, y: 6 } }, 'user').ok).toBe(true);
     expect(readFileSync(md, 'utf8')).toBe(broken);
-    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }]);
+    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent, command, graph, condition or stop.' }]);
     expect(store.load(id).ok).toBe(true);
     expect(store.graphFileChanged(id)).toBe('errors');
     expect(readFileSync(md, 'utf8')).toBe(broken);
@@ -329,7 +329,7 @@ describe('the graph tab’s Markdown editor', () => {
     expect(store.saveMarkdown(id, broken, base)).toEqual({ ok: true, sync: 'errors' });
     expect(text()).toBe(broken);
     expect(store.get(id)).toEqual(good);
-    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }]);
+    expect(store.fileErrors(id)).toEqual([{ line: expect.any(Number), message: 'kind is "robot"; use agent, command, graph, condition or stop.' }]);
     expect(fileErrors).toHaveBeenLastCalledWith(id, store.fileErrors(id));
     // Fixing it from the editor: the file on disk is now the broken text, the new base.
     expect(store.saveMarkdown(id, broken.replace('- kind: robot', '- kind: command\n- timeout: 9'), broken)).toEqual({ ok: true, sync: 'applied' });

@@ -48,7 +48,10 @@ function stepLines(node: GraphNode): string[] {
   // Written only when on (browser spec §2.1).
   if (node.kind === 'agent' && node.browser) fields.push('- browser: on');
   if (node.kind === 'agent') for (const name of node.attachments ?? []) fields.push(`- attach: ${name}`);
+  // Stop steps only: on, or off when the step has the field; no line means the run drains (spec §2.1).
+  if (node.kind === 'stop' && node.failFast !== undefined) fields.push(`- fail-fast: ${node.failFast ? 'on' : 'off'}`);
   const description = oneLine(node.description ?? '');
+  if (node.kind === 'condition' || node.kind === 'stop') return [`## ${node.id}${STEP_SEPARATOR}${oneLine(node.title)}`, '', ...fields, ...(description ? ['', `> ${description}`] : [])];
   const text = normText((node.kind === 'agent' ? node.prompt : node.command) ?? '');
   return [
     `## ${node.id}${STEP_SEPARATOR}${oneLine(node.title)}`,

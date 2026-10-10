@@ -22,8 +22,8 @@ export type DocStep = {
   effort?: EffortLevel;
   /** Agent steps only: `- browser: on` (browser spec §2.1). */
   browser?: true;
-  /** Stop steps only: `- fail-fast: on`. */
-  failFast?: true;
+  /** Stop steps only: `- fail-fast: on`, or `off` (kept as written; canonical form keeps only true). */
+  failFast?: boolean;
   /** Sub-graph steps only: `- graph: <id>` and the ```value <name>``` blocks (sub-graphs spec §2.2). */
   graph?: string;
   values?: Record<string, string>;
