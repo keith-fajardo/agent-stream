@@ -1043,6 +1043,28 @@ describe('Runner with condition and stop steps', () => {
     expect(fake.started).toEqual(['n1']);
   });
 
+  it('retrying a stopped run reuses the check and its verdict and runs the stop again (R18)', async () => {
+    const ctx = setup();
+    const g = gate();
+    const first = started(ctx.runner.start(withRendered(g)));
+    await tick();
+    ctx.fake.finish('n1', { ok: true, output: 'nothing to change\nVERDICT: no' });
+    const stopped = await first.done;
+    expect(stopped.status).toBe('stopped');
+    ctx.fake.started.length = 0;
+    const retry = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: stopped.id }), mode: 'resume' }));
+    expect(retry.run).toMatchObject({ mode: 'resume', sourceRunId: stopped.id });
+    expect(retry.run.nodes.n1.status).toBe('reused');
+    expect(retry.run.nodes.n2.status).toBe('reused');
+    expect(retry.run.nodes.n2.verdict).toBe('no');
+    const done = await retry.done;
+    expect(ctx.fake.started).toEqual([]);
+    expect(done.nodes.n4.status).toBe('succeeded');
+    expect(done.nodes.n3.status).toBe('skipped');
+    expect(done.status).toBe('stopped');
+    expect(done.stoppedBy).toBe('n4');
+  });
+
   it('a yes verdict runs the work and skips the stop', async () => {
     const { runner, fake } = setup();
     const r = started(runner.start(withRendered(gate())));
