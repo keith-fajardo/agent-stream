@@ -481,3 +481,30 @@ describe('legacy ids', () => {
     expect(r).toEqual({ ok: false, error: `invalid node id "fix-". ${ID_RULE}` });
   });
 });
+
+describe('condition and stop steps refuse agent and command fields', () => {
+  const T = '2026-10-10T00:00:00.000Z';
+  it('addNode refuses a timeout on a condition and a workspace on a stop, naming the field and the kind', () => {
+    const none = emptyGraph('g', 'G', T);
+    const timeout = applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', timeoutSec: 30 } }, 'user', T);
+    expect(timeout).toEqual({ ok: false, error: "a condition step can't have timeout. Remove it." });
+    const workspace = applyOp(none, { type: 'addNode', node: { title: 'Halt', kind: 'stop', workspace: 'wh_a' } }, 'user', T);
+    expect(workspace).toEqual({ ok: false, error: "a stop step can't have workspace. Remove it." });
+  });
+
+  it('updateNode refuses a timeout on an existing stop and leaves the graph unchanged', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }]);
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 30 } }, 'user', T)).toEqual({ ok: false, error: "a stop step can't have timeout. Remove it." });
+    expect(g.nodes[0].timeoutSec).toBeUndefined();
+  });
+
+  it('updateNode drops the timeout and workspace of a step that becomes a condition, and still clears with 0 or an empty workspace', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'p', timeoutSec: 30, workspace: 'wh_a' } }]);
+    const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition' } }, 'user', T);
+    expect(r.ok && r.graph.nodes[0]).toMatchObject({ kind: 'condition' });
+    expect(r.ok && r.graph.nodes[0].timeoutSec).toBeUndefined();
+    expect(r.ok && r.graph.nodes[0].workspace).toBeUndefined();
+    const cleared = applyOp(r.ok ? r.graph : g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 0, workspace: '' } }, 'user', T);
+    expect(cleared.ok).toBe(true);
+  });
+});

@@ -6,7 +6,7 @@ import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, setsStepField, sortedValues,
 import { innerStepIds, scopeOf, subgraphFirstSteps, type Scope } from './subgraphs';
 import { shapeProblems } from './shape';
 import { variableNameProblem } from './variables';
-import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
+import type { Actor, Graph, GraphNode, GraphResult, NodeKind, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
 
 /** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
 const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
@@ -53,6 +53,22 @@ export function nextNodeId(graph: Graph): string {
   return `n${max + 1}`;
 }
 
+/** The first agent or command field a new condition or stop step, or a patch to one, sets; null when it sets none. Clearing one (0, '', null, [], false, write) doesn't set it. */
+function agentFieldOn(kind: NodeKind, f: { timeoutSec?: number; access?: string; workspace?: string; model?: unknown; effort?: unknown; attachments?: string[]; browser?: boolean }): string | null {
+  if (kind !== 'condition' && kind !== 'stop') return null;
+  const set: [string, boolean][] = [
+    ['timeout', (f.timeoutSec ?? 0) > 0],
+    ['access', f.access === 'read'],
+    ['workspace', !!f.workspace?.trim()],
+    ['model', !!f.model],
+    ['effort', !!f.effort],
+    ['attachments', !!f.attachments?.length],
+    ['browser', f.browser === true],
+  ];
+  const field = set.find(([, on]) => on)?.[0];
+  return field ? `a ${kind} step can't have ${field}. Remove it.` : null;
+}
+
 function definedOnly<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
@@ -80,6 +96,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!title) return fail('a node needs a title');
       if ((op.node.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       if (op.node.access === 'read' && op.node.kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const agentField = agentFieldOn(op.node.kind, op.node);
+      if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(op.node.model, op.node.effort);
       if (modelProblem) return fail(modelProblem);
       if ((op.node.model || op.node.effort) && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
@@ -137,6 +155,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if ((patch.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const kind = patch.kind ?? node.kind;
       if (access === 'read' && kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const agentField = agentFieldOn(kind, { timeoutSec, access, workspace, model, effort, attachments, browser });
+      if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(model ?? undefined, effort ?? undefined);
       if (modelProblem) return fail(modelProblem);
       if ((model || effort) && kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
@@ -155,8 +175,10 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       const valuesProblem = values ? subgraphValuesProblem(values) : null;
       if (valuesProblem) return fail(valuesProblem);
       const nextValues = isGraph ? (values ?? node.values) : undefined;
-      let nextWorkspace = isGraph ? undefined : node.workspace;
-      if (workspace !== undefined && !isGraph) {
+      // A condition or stop step has neither a workspace nor a timeout, so becoming one drops both (spec §2).
+      const bare = kind === 'condition' || kind === 'stop';
+      let nextWorkspace = isGraph || bare ? undefined : node.workspace;
+      if (workspace !== undefined && !isGraph && !bare) {
         const trimmed = workspace.trim();
         const problem = trimmed === '' ? null : workspaceNameProblem(trimmed);
         if (problem) return fail(problem);
@@ -165,7 +187,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       // A command step can always change files, so becoming one drops `access` (spec §3.1).
       const nextAccess = kind !== 'agent' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
       // 0 clears the timeout; a missing one keeps it.
-      const nextTimeout = isGraph ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
+      const nextTimeout = isGraph || bare ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
       // Only agent steps have a model or effort, so becoming a command step drops both (spec §2.1); null clears one.
       const nextModel = kind !== 'agent' || model === null ? undefined : (model ?? node.model);
       const nextEffort = kind !== 'agent' || effort === null ? undefined : (effort ?? node.effort);
