@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shapeProblems } from '../src/shape';
+import { expandGraph } from '../src/subgraphs';
 import type { Edge, Graph, GraphNode } from '../src/types';
 
 function graph(nodes: GraphNode[], edges: Edge[]): Graph {
@@ -55,5 +56,27 @@ describe('shapeProblems', () => {
   it('a label is only allowed on an arrow out of a condition', () => {
     const g = graph([agent('n1'), agent('n2')], [arrow('n1', 'n2', 'yes')]);
     expect(messages(g)).toEqual(['n1 -> n2: only an arrow out of a condition step can be labeled yes or no.']);
+  });
+});
+
+describe('shapeProblems on an expanded run graph (R28)', () => {
+  /** Two parallel first steps, so a yes arrow into a sub-graph step using it expands to two yes arrows. */
+  const twoFirsts: Graph = { ...graph([agent('n1'), agent('n2'), agent('n3')], [arrow('n1', 'n3'), arrow('n2', 'n3')]), id: 'two-firsts' };
+  const expand = (outer: Graph) => {
+    const r = expandGraph(outer, (id) => (id === twoFirsts.id ? { ok: true, graph: twoFirsts } : { ok: false, reason: 'missing', error: 'missing' }));
+    if (!r.ok) throw new Error(JSON.stringify(r.problems));
+    return r.graph;
+  };
+  const sub = (id: string): GraphNode => ({ id, title: id, kind: 'graph', graph: 'two-firsts', ...who });
+
+  it('counts a condition\'s arrows into one sub-graph as one arrow', () => {
+    const x = expand(graph([agent('n1'), cond('n2'), sub('n3'), stop('n4')], [arrow('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n4', 'no')]));
+    expect(x.edges.filter((e) => e.from === 'n2').map((e) => `${e.to}:${e.label}`).sort()).toEqual(['n3/n1:yes', 'n3/n2:yes', 'n4:no']);
+    expect(messages(x)).toEqual([]);
+  });
+
+  it('still counts arrows into a sub-graph and into another step as two', () => {
+    const x = expand(graph([agent('n1'), cond('n2'), sub('n3'), agent('n5'), stop('n4')], [arrow('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n5', 'yes'), arrow('n2', 'n4', 'no')]));
+    expect(messages(x).join('\n')).toMatch(/exactly two arrows out, one labeled yes and one labeled no/);
   });
 });

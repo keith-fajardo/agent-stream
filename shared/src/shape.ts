@@ -7,6 +7,13 @@ export type ShapeProblem = { nodeId: string; message: string };
 export function shapeProblems(graph: Graph): ShapeProblem[] {
   const problems: ShapeProblem[] = [];
   const kindOf = (id: string) => graph.nodes.find((n) => n.id === id)?.kind;
+  /** The sub-graph step in `scope` (undefined: the outer graph) that `id` lies inside, when it is one; the same scope test as a stop's arrow to its collector. */
+  const subgraphStepAt = (id: string, scope: string | undefined): string | undefined => {
+    for (let at = parentScopeId(id); at !== undefined; at = parentScopeId(at)) {
+      if (parentScopeId(at) === scope) return kindOf(at) === 'graph' ? at : undefined;
+    }
+    return undefined;
+  };
   for (const n of graph.nodes) {
     const label = `${n.id} "${n.title}"`;
     const incoming = graph.edges.filter((e) => e.to === n.id);
@@ -20,7 +27,9 @@ export function shapeProblems(graph: Graph): ShapeProblem[] {
           problems.push({ nodeId: n.id, message: `${label}: a condition reads the verdict of an agent or command step, not a ${parent} step.` });
         }
       }
-      const labels = outgoing.map((e) => e.label ?? '').sort().join(',');
+      // In a run's expanded graph, an arrow into a sub-graph step becomes one arrow per inner first step: those count as one (R28).
+      const arrows = new Set(outgoing.map((e) => `${subgraphStepAt(e.to, parentScopeId(n.id)) ?? e.to}:${e.label ?? ''}`));
+      const labels = [...arrows].map((a) => a.slice(a.lastIndexOf(':') + 1)).sort().join(',');
       if (labels !== 'no,yes') {
         problems.push({ nodeId: n.id, message: `${label}: a condition needs exactly two arrows out, one labeled yes and one labeled no.` });
       }
