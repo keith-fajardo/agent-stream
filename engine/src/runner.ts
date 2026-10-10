@@ -530,7 +530,7 @@ export class Runner extends EventEmitter {
     this.deps.broker.beginStep(run.meta.id, nodeId);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
-    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
+    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind === 'command' ? 'command' : 'agent']; // condition and stop steps get their own arm in a later task
     // What the run resolved for this step when it started; a step added during the run gets the run's own (spec §3.1).
     const use: StepModelUse | undefined = node.kind === 'agent' ? (meta.stepModels?.[nodeId] ?? { model: meta.model, effort: meta.effort }) : undefined;
     let noted = false;

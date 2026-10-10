@@ -10,7 +10,7 @@ import { EFFORT_LEVELS, MAX_IMPORT_CHARS, PROVIDER_IDS, type ClientMessage, type
 
 const position = z.object({ x: z.number(), y: z.number() });
 const actor = z.enum(['user', 'agent']);
-const nodeKind = z.enum(['agent', 'command', 'graph']);
+const nodeKind = z.enum(['agent', 'command', 'graph', 'condition', 'stop']);
 /** A sub-graph step's values as a client sends them; names and lengths are checked by subgraphValuesProblem in applyOp. */
 const subgraphValues = z.record(z.string().max(64), z.string().max(MAX_VARIABLE_VALUE_CHARS));
 const access = z.enum(['read', 'write']);
@@ -117,6 +117,7 @@ const newNode = z.object({
   browser: z.boolean().optional(),
   graph: z.string().max(80).optional(),
   values: subgraphValues.optional(),
+  failFast: z.boolean().optional(),
   position: position.optional(),
 });
 
@@ -138,6 +139,7 @@ const nodePatch = z.object({
   graph: z.string().max(80).optional(),
   // The whole map; {} clears it.
   values: subgraphValues.optional(),
+  failFast: z.boolean().optional(),
 });
 
 const changeTarget = z.discriminatedUnion('kind', [z.object({ kind: z.literal('node'), id: z.string() }), z.object({ kind: z.literal('edge'), id: z.string() }), z.object({ kind: z.literal('all') })]);
@@ -146,7 +148,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addNode'), node: newNode }),
   z.object({ type: z.literal('updateNode'), id: z.string(), patch: nodePatch }),
   z.object({ type: z.literal('deleteNode'), id: z.string() }),
-  z.object({ type: z.literal('connect'), from: z.string(), to: z.string() }),
+  z.object({ type: z.literal('connect'), from: z.string(), to: z.string(), label: z.enum(['yes', 'no']).optional() }),
   z.object({ type: z.literal('disconnect'), from: z.string(), to: z.string() }),
   z.object({ type: z.literal('setGoal'), goal: z.string() }),
   z.object({ type: z.literal('setInstructions'), instructions: z.string() }),

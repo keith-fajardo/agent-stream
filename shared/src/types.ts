@@ -1,7 +1,7 @@
 import type { Scope, SubgraphEntry } from './subgraphs';
 
 export type Actor = 'user' | 'agent';
-export type NodeKind = 'agent' | 'command' | 'graph';
+export type NodeKind = 'agent' | 'command' | 'graph' | 'condition' | 'stop';
 export type Position = { x: number; y: number };
 
 export type NodeAccess = 'read' | 'write';
@@ -31,13 +31,17 @@ export type GraphNode = {
   graph?: string;
   /** Sub-graph steps: inner variable name → value template, in name order; absent means none. An empty value is asked for when the run starts. */
   values?: Record<string, string>;
+  /** Stop steps only: cancel the steps still running when the run stops. Missing means drain (they finish). */
+  failFast?: boolean;
   position?: Position;
   createdBy: Actor;
   updatedBy: Actor;
   updatedAt: string;
 };
 
-export type Edge = { id: string; from: string; to: string };
+/** The verdict an arrow out of a condition node waits for. */
+export type EdgeLabel = 'yes' | 'no';
+export type Edge = { id: string; from: string; to: string; label?: EdgeLabel };
 
 export type VariableDef = { name: string; description: string };
 
@@ -75,6 +79,8 @@ export type NewNodeInput = {
   browser?: boolean;
   graph?: string;
   values?: Record<string, string>;
+  /** Stop steps only: cancel the steps still running when the run stops. Missing means drain (they finish). */
+  failFast?: boolean;
   position?: Position;
 };
 
@@ -102,13 +108,15 @@ export type NodePatch = {
   graph?: string;
   /** A sub-graph step's whole values map, like `attachments`; {} clears it. */
   values?: Record<string, string>;
+  /** Stop steps only: cancel the steps still running when the run stops. Missing means drain (they finish). */
+  failFast?: boolean;
 };
 
 export type Op =
   | { type: 'addNode'; node: NewNodeInput }
   | { type: 'updateNode'; id: string; patch: NodePatch }
   | { type: 'deleteNode'; id: string }
-  | { type: 'connect'; from: string; to: string }
+  | { type: 'connect'; from: string; to: string; label?: EdgeLabel }
   | { type: 'disconnect'; from: string; to: string }
   | { type: 'setGoal'; goal: string }
   | { type: 'setInstructions'; instructions: string }
@@ -140,7 +148,7 @@ export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ChangeTarget = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'all' };
 
-export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser' | 'graph' | 'values';
+export type ChangedField = 'title' | 'description' | 'kind' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'model' | 'effort' | 'attachments' | 'browser' | 'graph' | 'values' | 'failFast';
 
 /** One difference between the user's baseline and the graph; `by`/`at` come from the latest agent op that touched it. */
 export type AgentChange =
@@ -159,9 +167,11 @@ export type NodeStatus =
   /** Never ran because a step before it failed (or itself did not run). */
   | 'not_run'
   | 'reused'
+  /** Never needed: every arrow into it leads from a branch that was not taken, or the run stopped first. */
+  | 'skipped'
   | 'interrupted';
 
-export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
+export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'stopped';
 
 export type NodeUsage = {
   inputTokens: number;
@@ -194,6 +204,8 @@ export type NodeRunState = {
   usage?: NodeUsage;
   /** A browser step's pages, each URL once in the order first visited, at most 200 (browser spec §4.4). */
   browserPages?: string[];
+  /** Condition steps: the verdict read from the step before them. */
+  verdict?: EdgeLabel;
 };
 
 /**
@@ -285,6 +297,10 @@ export type RunMeta = {
   id: string;
   graphId: string;
   status: RunStatus;
+  /** The stop step that ended the run early, when a stop step ran. */
+  stoppedBy?: string;
+  /** Run files written from this version on carry 2; older files have none (see the legacy status alias in runStore.ts). */
+  schema?: number;
   startedAt: string;
   endedAt?: string;
   sourceRunId?: string;

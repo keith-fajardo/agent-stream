@@ -33,7 +33,7 @@ const titleProblem = (title: string | undefined) => (title !== undefined && (/[\
 
 /** Changed fields in the order a person reads them: the text that runs first. */
 const FIELD_ORDER: ChangedField[] = ['prompt', 'command', 'title', 'description', 'kind', 'timeoutSec', 'access', 'workspace', 'model', 'effort', 'attachments', 'browser', 'graph', 'values'];
-const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace', model: 'model', effort: 'effort', attachments: 'attachments', browser: 'browser', graph: 'graph', values: 'values' };
+const FIELD_NAMES: Record<ChangedField, string> = { prompt: 'prompt', command: 'command', title: 'title', description: 'description', kind: 'kind', timeoutSec: 'timeout', access: 'access', workspace: 'workspace', model: 'model', effort: 'effort', attachments: 'attachments', browser: 'browser', graph: 'graph', values: 'values', failFast: 'fail fast' };
 /** "command", "prompt and description", "prompt, title and description". */
 const listed = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 const unique = (ids: string[]) => [...new Set(ids)];
