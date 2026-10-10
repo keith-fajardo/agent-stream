@@ -289,6 +289,20 @@ function readStep(section: Section, errors: GraphFileError[], warnings: GraphFil
     for (const v of valueBlocks) fail(v.line, `step ${label} is ${which} step, so it can't have a value block. Remove the block, or make it a sub-graph step (kind: graph).`);
   }
 
+  // A condition or stop step has none of the agent and command fields (spec §2): each line is an error, so the writer never drops one.
+  if (finalKind === 'condition' || finalKind === 'stop') {
+    const lines = [
+      ...AGENT_AND_COMMAND_FIELDS.flatMap((key) => {
+        const f = fields.get(key);
+        fields.delete(key);
+        return f ? [{ key, line: f.line }] : [];
+      }),
+      ...(lists.get('attach') ?? []).map((x) => ({ key: 'attach', line: x.line })),
+    ];
+    lists.delete('attach');
+    for (const d of lines.sort((x, y) => x.line - y.line)) fail(d.line, `step ${label} is a ${finalKind} step, so it can't have the field ${d.key}. Remove this line.`);
+  }
+
   let access: 'read' | undefined;
   const a = fields.get('access');
   if (a) {

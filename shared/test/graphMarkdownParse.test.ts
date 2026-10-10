@@ -328,6 +328,16 @@ describe('condition and stop steps', () => {
     expect(errors(md('# G', '## n1 · S', '- note', '', '```sh', '```'))[0].message).toMatch(/text Agent Stream can't keep/);
   });
 
+  it('rejects agent-only fields on a condition or stop step, one error per line, and keeps fail-fast on a stop', () => {
+    const flow = ['# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', '  n1 --> n2', '  n2 -->|yes| n3', '  n2 -->|no| n4', FENCE, '## n1 · A', '```sh', FENCE, '## n2 · C', '- kind: condition'];
+    const tail = (stopField: string) => ['## n3 · B', '```sh', FENCE, '## n4 · S', '- kind: stop', stopField];
+    const withModel = md(...flow, '- model: claude-opus-4-1', ...tail('- fail-fast: on'));
+    expect(errors(withModel)).toEqual([{ line: 14, message: `step n2 is a condition step, so it can't have the field model. Remove this line.` }]);
+    const withTimeout = md(...flow, ...tail('- timeout: 30'));
+    expect(errors(withTimeout)).toEqual([{ line: 19, message: `step n4 is a stop step, so it can't have the field timeout. Remove this line.` }]);
+    expect(doc(md(...flow, ...tail('- fail-fast: on'))).steps[3].failFast).toBe(true);
+  });
+
   it('puts a shape problem on its step heading', () => {
     const found = errors(md('# G', '', '## n1 · Lonely', '- kind: condition'));
     expect(found.map((e) => e.line)).toEqual([3, 3]);
