@@ -1,4 +1,4 @@
-import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, derivedStatus, fenceFor, fmtDuration, groupedOrder, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, scopeOf, statusLabel, stepAttachmentNames, staleNote, supportsEffort, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
+import { ALLOWED_EVERYTHING_LINE, ALLOWED_FOR_STEP, derivedStatus, fenceFor, fmtDuration, groupedOrder, loggedUrl, longestRun, modelLine, PAGES_VISITED, PROVIDER_NAMES, scopeOf, statusLabel, stepAttachmentNames, staleNote, supportsEffort, verdictInstructionFor, type GraphNode, type NodeEvent, type NodeRunState, type NodeUsage, type RunMeta } from '@agent-stream/shared';
 
 /** One step's records: its events in the order they happened, its output text and where the full output is kept. */
 export type RunReportStep = { events: NodeEvent[]; output?: string; outputPath?: string };
@@ -108,6 +108,7 @@ function header(input: RunReportInput): string[] {
     '',
     `- Run: ${run.id}`,
     `- Status: ${statusLabel(run.status)}`,
+    ...(run.stoppedBy ? [`- Stopped at ${run.stoppedBy}: ${inline(run.snapshot.nodes.find((n) => n.id === run.stoppedBy)?.title ?? run.stoppedBy)}`] : []),
     `- Started: ${run.startedAt}`,
     `- Duration: ${durationOf(run) ?? (run.status === 'running' ? 'still running' : 'unknown')}`,
     `- Provider: ${run.provider ? PROVIDER_NAMES[run.provider] : 'not recorded'}`,
@@ -144,7 +145,8 @@ function plan(run: RunMeta, order: GraphNode[]): string[] {
     const sub = run.scopes?.[n.id];
     const kind = n.kind === 'graph' ? `sub-graph "${inline(sub?.graphName ?? n.graph ?? '')}"` : n.kind;
     const traits = [kind, ...(n.access === 'read' ? ['read-only'] : []), ...(n.workspace ? [`workspace ${inline(n.workspace)}`] : [])];
-    const after = run.snapshot.edges.filter((e) => e.to === n.id).map((e) => e.from);
+    // An arrow out of a condition carries its label (yes or no): `n2 (yes)`.
+    const after = run.snapshot.edges.filter((e) => e.to === n.id).map((e) => (e.label ? `${e.from} (${e.label})` : e.from));
     return `${' '.repeat(indent)}${i + 1}. ${n.id} · ${inline(n.title)} (${traits.join(', ')})${after.length ? ` — after ${after.join(', ')}` : ''}`;
   });
   return ['## Plan', '', ...lines];
@@ -221,11 +223,16 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
   // After a label on the same line, so line-start markup in it (an agent can write descriptions) stays text.
   if (n.description?.trim()) block([`_Description:_ ${inline(n.description)}`]);
   // As it ran: the rendered text, which has the variable values filled in.
-  const text = run.rendered?.nodes[n.id] ?? (n.kind === 'command' ? n.command : n.prompt) ?? '';
+  // An agent step a condition reads ends with the verdict instruction, as the runner adds it at launch; the saved graph is unchanged.
+  const ranText = run.rendered?.nodes[n.id] ?? (n.kind === 'command' ? n.command : n.prompt) ?? '';
+  const text = ranText.trim() ? [ranText, verdictInstructionFor(run.snapshot, n.id)].filter((t) => t !== undefined).join('\n\n') : ranText;
   if (text.trim()) {
     if (n.kind === 'command') block(['**Command**', '', fenced(text)]);
     else block(['<details><summary>Prompt</summary>', '', fenced(text), '', '</details>']);
   }
+  // A condition step's verdict, and the reason a step was skipped (the run stopped first, or its branch was not taken).
+  if (n.kind === 'condition' && state.verdict) block([`Verdict: ${state.verdict}`]);
+  if (state.status === 'skipped' && state.error?.trim()) block([`Skipped: ${inline(state.error)}`]);
   const events = step?.events ?? [];
   block(toolCalls(events));
   block(approvals(events, state.status));
@@ -239,7 +246,7 @@ function stepSection(run: RunMeta, n: GraphNode, step: RunReportStep | undefined
     block(['**Output**', '', fenced(shown.text), ...(shown.cut && step?.outputPath ? ['', `[full output: ${inline(step.outputPath.replace(/\\/g, '/'))}]`] : [])]);
   }
   if (state.exitCode !== undefined && state.exitCode !== null) block([`**Exit code:** ${state.exitCode}`]);
-  if (state.error?.trim()) block(['**Error**', '', fenced(cut(state.error, MAX_OUTPUT).text)]);
+  if (state.status !== 'skipped' && state.error?.trim()) block(['**Error**', '', fenced(cut(state.error, MAX_OUTPUT).text)]);
   if (state.usage) block([`**Usage:** ${usageLine(state.usage)}`]);
   return out;
 }
