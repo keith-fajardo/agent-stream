@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyOp, emptyGraph, onlyRunPlan, VERDICT_INSTRUCTION, type CheckoutInfo, type Graph, type GraphNode, type Op, type RenderedRun } from '@agent-stream/shared';
-import { ApprovalBroker } from '../src/approvals';
+import { ApprovalBroker, requestApproval } from '../src/approvals';
 import type { NodeContext, NodeExecutor, NodeOutcome } from '../src/executors';
 import { newRunId, Runner } from '../src/runner';
 import { RunStore } from '../src/runStore';
@@ -54,6 +54,8 @@ function controllable() {
       };
       finishers.set(ctx.node.id, finish);
       ctx.signal.addEventListener('abort', () => finish({ ok: false, output: '', error: 'cancelled' }), { once: true });
+      // Like the real executors (shell, claude, codex): a step whose signal aborted before it started settles at once.
+      if (ctx.signal.aborted) finish({ ok: false, output: '', error: 'cancelled' });
     });
   return {
     exec,
@@ -1170,6 +1172,78 @@ describe('Runner with condition and stop steps', () => {
     expect(done.nodes.n3.status).toBe('skipped');
     expect(done.status).toBe('stopped');
     expect(done.stoppedBy).toBe('n4');
+  });
+
+  it('a stop reached at the start of a retry skips a write step that is ready in the same pass, and never launches it', async () => {
+    const { runner, fake } = setup();
+    // n5 runs beside the condition; n6 follows it. In topological order n6 comes after the stop n4.
+    const g = graphOf([agent('check'), condition('needed?'), agent('work'), stop('stop'), reader('prep'), agent('write'), link('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n4', 'no'), link('n1', 'n5'), link('n5', 'n6')]);
+    const first = started(runner.start(withRendered(g)));
+    await tick();
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    await tick();
+    fake.finish('n5');
+    const stopped = await first.done;
+    expect(stopped.status).toBe('stopped');
+    expect(stopped.nodes.n6.status).toBe('skipped');
+    fake.started.length = 0;
+    // The retry reuses n1, n2 (verdict no) and n5: the stop and n6 are both ready in the first schedule pass.
+    const retry = started(runner.start({ ...withRendered(g, { sourceRunId: stopped.id }), mode: 'resume' }));
+    expect(retry.run.nodes.n6).toMatchObject({ status: 'skipped', error: 'run stopped at n4' });
+    const done = await retry.done;
+    expect(fake.started).toEqual([]);
+    expect(done.nodes.n6).toMatchObject({ status: 'skipped', error: 'run stopped at n4' });
+    expect(done.status).toBe('stopped');
+  });
+
+  it('refuses a change to a run after its stop step fired', async () => {
+    const { runner, fake } = setup();
+    const r = started(runner.start(withRendered(graphOf([agent('check'), condition('needed?'), agent('work'), stop('stop'), agent('side'), link('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n4', 'no'), link('n1', 'n5')]))));
+    await tick();
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    await tick();
+    // n5 still drains, so the run is not over, but it takes no new work.
+    expect(r.run.nodes.n5.status).toBe('running');
+    const added = { id: 'n6', title: 'late', kind: 'agent' as const, prompt: 'x', createdBy: 'user' as const, updatedBy: 'user' as const, updatedAt: '' };
+    expect(runner.amend(r.run.id, { kind: 'add', node: added, text: 'x', after: ['n5'], before: [] }, 'n5', 's')).toEqual({ ok: false, error: 'The run was stopped at n4' });
+    expect(r.run.nodes.n6).toBeUndefined();
+    fake.finish('n5');
+    expect((await r.done).status).toBe('stopped');
+  });
+
+  it('a user Stop while the stop step is pending leaves stoppedBy unset and the run cancelled', async () => {
+    const { runner, fake } = setup();
+    const r = started(runner.start(withRendered(gate())));
+    await tick();
+    // The verdict is in, but the condition has not read it yet: the stop step is still queued.
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    runner.stop(r.run.id);
+    const done = await r.done;
+    expect(done.status).toBe('cancelled');
+    expect(done).not.toHaveProperty('stoppedBy');
+    expect(done.nodes.n4.status).toBe('cancelled');
+  });
+
+  it('fail-fast cancels a step waiting for approval and clears its card', async () => {
+    const paths = tmpProject();
+    const broker = new ApprovalBroker();
+    const fake = controllable();
+    // n5 asks for approval and waits; it ends only with a decision or an abort.
+    const asks: NodeExecutor = async (ctx) => {
+      const decided = await requestApproval({ broker, ctx, toolName: 'Bash', input: {}, card: {}, signal: ctx.signal });
+      return decided.decision === 'approve' ? { ok: true, output: 'ran' } : { ok: false, output: '', error: 'cancelled' };
+    };
+    const exec: NodeExecutor = (ctx) => (ctx.node.id === 'n5' ? asks(ctx) : fake.exec(ctx));
+    const runner = new Runner({ runStore: new RunStore(paths), broker, executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 3, leases: testLeases() });
+    const r = started(runner.start(withRendered(graphOf([agent('check'), condition('needed?'), agent('work'), stop('stop', true), reader('side'), link('n1', 'n2'), arrow('n2', 'n3', 'yes'), arrow('n2', 'n4', 'no')]))));
+    await tick();
+    expect(r.run.nodes.n5.status).toBe('waiting_approval');
+    expect(broker.pending()).toHaveLength(1);
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    const done = await r.done;
+    expect(done.nodes.n5.status).toBe('cancelled');
+    expect(done.status).toBe('stopped');
+    expect(broker.pending()).toEqual([]);
   });
 
   it('only an agent step that feeds a condition gets the verdict instruction', async () => {

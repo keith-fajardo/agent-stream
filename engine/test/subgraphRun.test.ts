@@ -223,6 +223,61 @@ describe('the runner on an expanded graph', () => {
     expect(seen[0].scopeName).toBe('Inner');
   });
 
+  /** Inner: n1 check → n2 condition → n3 work (yes) / n4 stop (no). Outer: n1 the sub-graph step → n2 after. The check answers `verdict`. */
+  async function stopInside(verdict: 'yes' | 'no') {
+    const inner = graphOf('inner', 'Inner', [
+      { type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'Check.' } },
+      { type: 'addNode', node: { title: 'Needed?', kind: 'condition' } },
+      { type: 'addNode', node: { title: 'Work', kind: 'agent', prompt: 'Work.' } },
+      { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
+      { type: 'connect', from: 'n1', to: 'n2' },
+      { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+      { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    ]);
+    const outer = graphOf('o', 'O', [{ type: 'addNode', node: { title: 'Sub', kind: 'graph', graph: 'inner' } }, { type: 'addNode', node: { title: 'After', kind: 'agent', prompt: 'After.' } }, { type: 'connect', from: 'n1', to: 'n2' }]);
+    const r = expandGraph(outer, lookupOf(inner));
+    if (!r.ok) throw new Error('expected an expansion');
+    const paths = tmpProject();
+    const ran: string[] = [];
+    const exec: NodeExecutor = async (ctx) => {
+      ran.push(ctx.node.id);
+      return { ok: true, output: ctx.node.id === 'n1/n1' ? `VERDICT: ${verdict}` : `out-${ctx.node.id}` };
+    };
+    const runStore = new RunStore(paths);
+    const runner = new Runner({ runStore, broker: new ApprovalBroker(), executors: { agent: exec, command: exec }, projectDir: paths.root, maxParallel: 2, leases: testLeases() });
+    const started = runner.start({
+      graph: r.graph,
+      rendered: { goal: '', instructions: '', nodes: { n1: '', n2: 'After.', 'n1/n1': 'Check.', 'n1/n2': '', 'n1/n3': 'Work.', 'n1/n4': '' }, scopes: { n1: { goal: '', instructions: '' } } },
+      scopes: r.scopes,
+    });
+    if (!started.ok) throw new Error(started.error);
+    return { meta: await started.done, ran, runStore };
+  }
+
+  it('a stop inside a sub-graph halts the whole outer run', { timeout: 2000 }, async () => {
+    const { meta, ran } = await stopInside('no');
+    expect(ran).toEqual(['n1/n1']);
+    expect(meta.nodes['n1/n2'].verdict).toBe('no');
+    expect(meta.nodes['n1/n4'].status).toBe('succeeded');
+    expect(meta.nodes['n1/n3'].status).toBe('skipped');
+    expect(meta.nodes.n1).toMatchObject({ status: 'skipped', error: 'run stopped at n1/n4' });
+    expect(meta.nodes.n2).toMatchObject({ status: 'skipped', error: 'run stopped at n1/n4' });
+    expect(meta.stoppedBy).toBe('n1/n4');
+    expect(meta.status).toBe('stopped');
+  });
+
+  it('a sub-graph whose stop is skipped collects only its other last steps and the run goes on', { timeout: 2000 }, async () => {
+    const { meta, ran, runStore } = await stopInside('yes');
+    expect(ran).toEqual(['n1/n1', 'n1/n3', 'n2']);
+    expect(meta.nodes['n1/n4'].status).toBe('skipped');
+    expect(meta.nodes.n1.status).toBe('succeeded');
+    const collected = runStore.readOutput(meta.id, 'n1');
+    expect(collected).toContain('### n3 · Work\nout-n1/n3');
+    expect(collected).not.toContain('Halt');
+    expect(meta).not.toHaveProperty('stoppedBy');
+    expect(meta.status).toBe('succeeded');
+  });
+
   it('fails the sub-graph step and finishes the run when completing it throws unexpectedly', { timeout: 2000 }, async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const inner = graphOf('inner', 'Inner', [{ type: 'addNode', node: { title: 'Build', kind: 'agent', prompt: 'Build it.' } }]);

@@ -19,6 +19,17 @@ describe('shapeProblems', () => {
     expect(messages(g)).toEqual([]);
   });
 
+  it('in an expanded run graph, lets a stop inside a sub-graph feed only its own sub-graph step', () => {
+    const sub: GraphNode = { id: 'n1', title: 'sub', kind: 'graph', graph: 'inner', ...who };
+    const inner = [agent('n1/n1'), cond('n1/n2'), agent('n1/n3'), stop('n1/n4')];
+    const innerArrows = [arrow('n1/n1', 'n1/n2'), arrow('n1/n2', 'n1/n3', 'yes'), arrow('n1/n2', 'n1/n4', 'no')];
+    const expanded = graph([sub, agent('n2'), ...inner], [...innerArrows, arrow('n1/n3', 'n1'), arrow('n1/n4', 'n1'), arrow('n1', 'n2')]);
+    expect(messages(expanded)).toEqual([]);
+    // Any other arrow out of that stop is still refused.
+    const leaking = graph([sub, agent('n2'), ...inner], [...innerArrows, arrow('n1/n3', 'n1'), arrow('n1/n4', 'n1'), arrow('n1/n4', 'n2'), arrow('n1', 'n2')]);
+    expect(messages(leaking)).toEqual(['n1/n4 "n1/n4": a stop step ends the run, so it cannot have arrows out.']);
+  });
+
   it('needs exactly two labeled arrows out of a condition', () => {
     const g = graph([agent('n1'), cond('n2'), stop('n4')], [arrow('n1', 'n2'), arrow('n2', 'n4', 'no')]);
     expect(messages(g).join('\n')).toMatch(/exactly two arrows out, one labeled yes and one labeled no/);

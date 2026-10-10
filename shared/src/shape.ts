@@ -1,3 +1,4 @@
+import { parentScopeId } from './subgraphs';
 import type { Graph } from './types';
 
 export type ShapeProblem = { nodeId: string; message: string };
@@ -29,7 +30,10 @@ export function shapeProblems(graph: Graph): ShapeProblem[] {
       if (incoming.length !== 1 || kindOf(arrowIn.from) !== 'condition' || !arrowIn.label) {
         problems.push({ nodeId: n.id, message: `${label}: a stop step needs exactly one arrow in, labeled yes or no, from a condition step.` });
       }
-      if (outgoing.length) problems.push({ nodeId: n.id, message: `${label}: a stop step ends the run, so it cannot have arrows out.` });
+      // In a run's expanded graph, a stop inside a sub-graph feeds that sub-graph step like every inner last step (sub-graphs spec §3.1).
+      const collector = parentScopeId(n.id);
+      const out = outgoing.filter((e) => !(e.to === collector && kindOf(e.to) === 'graph'));
+      if (out.length) problems.push({ nodeId: n.id, message: `${label}: a stop step ends the run, so it cannot have arrows out.` });
     }
     if (n.kind !== 'stop' && n.failFast !== undefined) {
       problems.push({ nodeId: n.id, message: `${label}: fail-fast is only for stop steps.` });

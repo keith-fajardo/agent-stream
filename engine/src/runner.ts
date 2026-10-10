@@ -308,6 +308,7 @@ export class Runner extends EventEmitter {
   amend(runId: string, change: RunChange, byNodeId: string, summary: string): { ok: true } | { ok: false; error: string } {
     const run = this.runs.get(runId);
     if (!run || run.finished || run.stopping) return { ok: false, error: 'The run was stopped.' };
+    if (run.halted) return { ok: false, error: `The run was stopped at ${run.halted}` };
     const meta = run.meta;
     const exists = (id: string) => meta.snapshot.nodes.some((n) => n.id === id) && meta.nodes[id] !== undefined;
     const started = (id: string) => `${id} already started; the change was not applied.`;
@@ -528,7 +529,8 @@ export class Runner extends EventEmitter {
     Promise.resolve()
       .then((): NodeOutcome => {
         this.emitEvent(run, nodeId, { type: 'start', kind: 'graph', cwd: this.deps.projectDir });
-        const lasts = new Set(upstream(meta.snapshot, nodeId));
+        // A stop step inside the sub-graph is one of its last steps, but has no output to collect.
+        const lasts = new Set(upstream(meta.snapshot, nodeId).filter((id) => meta.snapshot.nodes.find((n) => n.id === id)?.kind !== 'stop'));
         const sections = topoOrder(meta.snapshot)
           .filter((id) => lasts.has(id))
           .map((id) => {
@@ -562,16 +564,16 @@ export class Runner extends EventEmitter {
   private stopRun(run: ActiveRun, nodeId: string): void {
     run.running.set(nodeId, new AbortController());
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
+    // Halted now, inside this schedule pass: a step that is ready in the same pass is skipped, never launched (spec §3).
+    this.halt(run, nodeId);
     Promise.resolve()
-      .then(() => {
-        this.halt(run, nodeId);
-        this.complete(run, nodeId, { ok: true, output: '' }, 0);
-      })
+      .then(() => this.complete(run, nodeId, { ok: true, output: '' }, 0))
       .catch((e: unknown) => this.failInternally(run, nodeId, e));
   }
 
-  /** Stops new work. Drain leaves running steps alone; fail-fast also aborts them. */
+  /** Stops new work. Drain leaves running steps alone; fail-fast also aborts them. A run the user stopped stays cancelled. */
   private halt(run: ActiveRun, stopId: string): void {
+    if (run.stopping) return;
     run.halted = stopId;
     run.meta.stoppedBy = stopId;
     this.persist(run.meta);
@@ -581,7 +583,12 @@ export class Runner extends EventEmitter {
     for (const [id, controller] of [...run.running]) {
       if (id === stopId) continue;
       run.abortedByStop.add(id);
-      controller.abort();
+      try {
+        controller.abort();
+      } catch (e) {
+        // An abort listener that throws must not stop the halt half way, or escape the schedule pass.
+        console.error('[agent-stream] could not cancel step', id, 'of run', run.meta.id, e);
+      }
     }
   }
 
