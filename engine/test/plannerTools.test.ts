@@ -72,7 +72,7 @@ describe('planner graph tools', () => {
   it('adds a condition step and connects a labeled arrow to a stop step', async () => {
     const s = setup();
     expect(await s.call('add_node', { kind: 'agent', title: 'Check', prompt: 'Check it.' })).toEqual({ text: 'Added n1.', isError: false });
-    expect(await s.call('add_node', { kind: 'condition', title: 'Passed?', prompt: 'Did the check pass?', after: ['n1'] })).toEqual({ text: 'Added n2.', isError: false });
+    expect(await s.call('add_node', { kind: 'condition', title: 'Passed?', after: ['n1'] })).toEqual({ text: 'Added n2.', isError: false });
     expect(await s.call('add_node', { kind: 'stop', title: 'Halt', failFast: true })).toEqual({ text: 'Added n3.', isError: false });
     expect(await s.call('add_node', { kind: 'agent', title: 'Ship', prompt: 'Ship it.' })).toEqual({ text: 'Added n4.', isError: false });
     expect(await s.call('connect', { from: 'n2', to: 'n4', label: 'yes' })).toEqual({ text: 'Connected n2 -> n4 (yes).', isError: false });
@@ -86,8 +86,22 @@ describe('planner graph tools', () => {
 
   it('lets the shape rules refuse an agent-only field on a condition step, unchanged', async () => {
     const s = setup();
-    const r = await s.call('add_node', { kind: 'condition', title: 'Passed?', prompt: 'Did it pass?', timeoutSec: 30 });
+    const r = await s.call('add_node', { kind: 'condition', title: 'Passed?', timeoutSec: 30 });
     expect(r).toEqual({ text: "a condition step can't have timeout. Remove it.", isError: true });
+    expect(s.graphStore.get(s.graphId).nodes).toEqual([]);
+  });
+
+  it('add_node says a condition has no prompt and the question goes in the step before it (R30)', () => {
+    const text = setup().tools.find((t) => t.name === 'add_node')!.description;
+    expect(text).toContain('A condition has no prompt of its own');
+    expect(text).toContain('the question goes in the step before the condition, and that step\'s prompt must say what yes and no mean');
+    expect(text).not.toContain('its `prompt` says what to judge');
+  });
+
+  it('refuses a prompt on a condition step (R30)', async () => {
+    const s = setup();
+    const r = await s.call('add_node', { kind: 'condition', title: 'Passed?', prompt: 'Did it pass?' });
+    expect(r).toEqual({ text: "a condition step can't have a prompt. Put the question in the step before it.", isError: true });
     expect(s.graphStore.get(s.graphId).nodes).toEqual([]);
   });
 

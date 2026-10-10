@@ -69,6 +69,14 @@ function agentFieldOn(kind: NodeKind, f: { timeoutSec?: number; access?: string;
   return field ? `a ${kind} step can't have ${field}. Remove it.` : null;
 }
 
+/** A condition or stop step has no prompt or command (spec §2, ruling R30); an empty one is a clear and is allowed. Null when none is set. */
+function flowTextOn(kind: NodeKind, f: { prompt?: string; command?: string }): string | null {
+  if (kind !== 'condition' && kind !== 'stop') return null;
+  const field = f.prompt ? 'a prompt' : f.command ? 'a command' : null;
+  if (!field) return null;
+  return `a ${kind} step can't have ${field}. ${kind === 'condition' ? 'Put the question in the step before it.' : 'Remove it.'}`;
+}
+
 function definedOnly<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
@@ -96,7 +104,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!title) return fail('a node needs a title');
       if ((op.node.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       if (op.node.access === 'read' && op.node.kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
-      const agentField = agentFieldOn(op.node.kind, op.node);
+      const agentField = agentFieldOn(op.node.kind, op.node) ?? flowTextOn(op.node.kind, op.node);
       if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(op.node.model, op.node.effort);
       if (modelProblem) return fail(modelProblem);
@@ -155,7 +163,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if ((patch.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const kind = patch.kind ?? node.kind;
       if (access === 'read' && kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
-      const agentField = agentFieldOn(kind, { timeoutSec, access, workspace, model, effort, attachments, browser });
+      const agentField = agentFieldOn(kind, { timeoutSec, access, workspace, model, effort, attachments, browser }) ?? flowTextOn(kind, patch);
       if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(model ?? undefined, effort ?? undefined);
       if (modelProblem) return fail(modelProblem);

@@ -72,7 +72,7 @@ describe('undoState', () => {
 
 describe('undo with labels and fail-fast', () => {
   const base = run(emptyGraph('g', 'G', T), [
-    { type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } },
+    { type: 'addNode', node: { title: 'Ready', kind: 'condition' } },
     { type: 'addNode', node: { title: 'Ship', kind: 'command', command: 'ship' } },
     { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
     { type: 'connect', from: 'n1', to: 'n2', label: 'yes' },

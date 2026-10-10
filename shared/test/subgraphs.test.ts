@@ -49,7 +49,7 @@ function expanded(outer: Graph, ...graphs: Graph[]) {
   return r;
 }
 
-const cond = (title: string): Op => ({ type: 'addNode', node: { title, kind: 'condition', prompt: `Is ${title}?` } });
+const cond = (title: string): Op => ({ type: 'addNode', node: { title, kind: 'condition' } });
 const yes = (from: string, to: string): Op => ({ type: 'connect', from, to, label: 'yes' });
 const no = (from: string, to: string): Op => ({ type: 'connect', from, to, label: 'no' });
 

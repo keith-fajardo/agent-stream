@@ -145,6 +145,12 @@ describe('Planner', () => {
     expect(PLANNER_APPEND).toContain('kind "agent" is a separate AI agent run');
   });
 
+  it('says a condition has no prompt and the question goes in the step before it (R30)', () => {
+    expect(PLANNER_APPEND).toContain('A condition has no prompt of its own');
+    expect(PLANNER_APPEND).toContain("the question goes in the step before the condition, and that step's prompt must say what yes and no mean");
+    expect(PLANNER_APPEND).not.toContain('Its prompt says what to judge');
+  });
+
   it('tells the planner to write a description for every step', () => {
     expect(PLANNER_APPEND).toContain('Every step has a short plain-language description for people');
   });

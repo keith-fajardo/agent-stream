@@ -20,8 +20,8 @@ export const PLANNER_APPEND = `You are the planner inside Agent Stream, a local 
 
 How the graph works:
 - Each node is a step. kind "agent" is a separate AI agent run that receives the workflow goal, its own prompt, and the outputs of the nodes it depends on. kind "command" is an exact shell command run in the project root, with no LLM involved.
-- kind "condition" reads the verdict of the step before it and routes the run: the steps on its yes arrow or its no arrow run, the others are skipped. Its prompt says what to judge.
-- kind "stop" ends the run when it is reached; failFast true also cancels the steps still running. Condition and stop steps take no model, effort, workspace, timeout, access or browser.
+- kind "condition" reads the verdict of the step before it and routes the run: the steps on its yes arrow or its no arrow run, the others are skipped. A condition has no prompt of its own: the question goes in the step before the condition, and that step's prompt must say what yes and no mean.
+- kind "stop" ends the run when it is reached; failFast true also cancels the steps still running. Condition and stop steps take no prompt, command, model, effort, workspace, timeout, access or browser.
 - An edge from A to B means B runs after A and receives A's output. Nodes with no path between them run in parallel. A condition step needs exactly two arrows out, labeled yes and no (connect with label); a stop step is reached by the no arrow from a condition.
 - Steps that can change files take turns within one workspace; read-only steps (access: read) and steps in other workspaces run alongside them.
 - Agent nodes ask the user before every file edit or shell command. Command nodes run exactly as written once the user starts the run.

@@ -188,7 +188,7 @@ describe('validateRunnable', () => {
 
 describe('labels in signatures and reuse', () => {
   const branch = (label: 'yes' | 'no'): Graph =>
-    build([{ type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } }, cmd('Ship', 'ship'), { type: 'connect', from: 'n1', to: 'n2', label }]);
+    build([{ type: 'addNode', node: { title: 'Ready', kind: 'condition' } }, cmd('Ship', 'ship'), { type: 'connect', from: 'n1', to: 'n2', label }]);
   const allOk = (g: Graph): Record<string, NodeRunState> => Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }]));
 
   it('a label change changes the content signature', () => {
@@ -512,6 +512,22 @@ describe('condition and stop steps refuse agent and command fields', () => {
     const g = build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }]);
     expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 30 } }, 'user', T)).toEqual({ ok: false, error: "a stop step can't have timeout. Remove it." });
     expect(g.nodes[0].timeoutSec).toBeUndefined();
+  });
+
+  it('addNode refuses a prompt on a condition and a command on a stop, and allows empty ones (R30)', () => {
+    const none = emptyGraph('g', 'G', T);
+    const prompt = applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', prompt: 'Is it ready?' } }, 'user', T);
+    expect(prompt).toEqual({ ok: false, error: "a condition step can't have a prompt. Put the question in the step before it." });
+    const command = applyOp(none, { type: 'addNode', node: { title: 'Halt', kind: 'stop', command: 'echo' } }, 'user', T);
+    expect(command).toEqual({ ok: false, error: "a stop step can't have a command. Remove it." });
+    expect(applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', prompt: '', command: '' } }, 'user', T).ok).toBe(true);
+  });
+
+  it('updateNode refuses a prompt on a stop and a command on a condition, and still clears them (R30)', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop' } }, { type: 'addNode', node: { title: 'Ready?', kind: 'condition' } }]);
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { prompt: 'Stop now' } }, 'user', T)).toEqual({ ok: false, error: "a stop step can't have a prompt. Remove it." });
+    expect(applyOp(g, { type: 'updateNode', id: 'n2', patch: { command: 'echo' } }, 'user', T)).toEqual({ ok: false, error: "a condition step can't have a command. Put the question in the step before it." });
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { prompt: '', command: '' } }, 'user', T).ok).toBe(true);
   });
 
   it('updateNode drops the timeout and workspace of a step that becomes a condition, and still clears with 0 or an empty workspace', () => {

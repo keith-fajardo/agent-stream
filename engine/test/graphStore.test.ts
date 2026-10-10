@@ -349,7 +349,7 @@ describe('agent changes against the baseline', () => {
   });
 
   it('reverting a removed labeled connection restores the baseline label', () => {
-    const { store, id } = withGraph([step('n1', { kind: 'condition' }), step('n2')]);
+    const { store, id } = withGraph([step('n1', { kind: 'condition', prompt: undefined }), step('n2')]);
     expect(store.apply(id, { type: 'connect', from: 'n1', to: 'n2', label: 'yes' }, 'user').ok).toBe(true);
     store.apply(id, { type: 'disconnect', from: 'n1', to: 'n2' }, 'agent', { kind: 'planner' });
     expect(store.get(id).edges).toEqual([]);

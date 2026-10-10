@@ -128,7 +128,7 @@ describe('diffToOps', () => {
     }
     const branch = (label: 'yes' | 'no'): Graph =>
       built([
-        { type: 'addNode', node: { title: 'Is it ready', kind: 'condition', prompt: 'Is it ready?' } },
+        { type: 'addNode', node: { title: 'Is it ready', kind: 'condition' } },
         { type: 'addNode', node: { title: 'Ship', kind: 'command', command: 'ship' } },
         { type: 'connect', from: 'n1', to: 'n2', label },
       ]);

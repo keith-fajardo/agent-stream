@@ -115,7 +115,7 @@ describe('step access and workspace in export files', () => {
   it('keeps an arrow label through export and import', () => {
     let g = emptyGraph('g', 'G', T);
     const ops: Op[] = [
-      { type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } },
+      { type: 'addNode', node: { title: 'Ready', kind: 'condition' } },
       { type: 'addNode', node: { title: 'Ship', kind: 'command', command: 'ship' } },
       { type: 'connect', from: 'n1', to: 'n2', label: 'no' },
     ];
