@@ -12,7 +12,7 @@ import { effortMenu, effortsFor, modelMenu, type MenuOption } from '../stepModel
 import { dispatch, useStore } from '../store';
 
 /** `model`: `<provider>/<id>`, '' for Default; `effort`: a level, '' for Default. */
-type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string; graph: string; values: Record<string, string> };
+type Draft = { title: string; description: string; kind: NodeKind; access: 'read' | 'write'; workspace: string; model: string; effort: string; browser: boolean; prompt: string; command: string; timeoutSec: string; failFast: boolean; graph: string; values: Record<string, string> };
 
 const toDraft = (n: GraphNode): Draft => ({
   title: n.title,
@@ -26,6 +26,7 @@ const toDraft = (n: GraphNode): Draft => ({
   prompt: n.prompt ?? '',
   command: n.command ?? '',
   timeoutSec: n.timeoutSec ? String(n.timeoutSec) : '',
+  failFast: n.failFast === true,
   graph: n.graph ?? '',
   values: { ...(n.values ?? {}) },
 });
@@ -124,6 +125,9 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
   const inside = scope.length > 0;
   const canRefine = !inside && draft.kind !== 'graph' && refinable({ ...node, title: draft.title, description: draft.description, prompt: draft.prompt, command: draft.command });
   const isGraph = draft.kind === 'graph';
+  // Condition and stop steps run no agent or command: none of the agent-only fields apply (R19), and the engine refuses them.
+  const isFlow = draft.kind === 'condition' || draft.kind === 'stop';
+  const noFields = isGraph || isFlow;
   // A sub-graph step needs its graph (spec §2.1): neither the Save button nor ⌘S saves it without one.
   const canSave = dirty && !(isGraph && !draft.graph);
   useEffect(() => {
@@ -166,6 +170,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
     if (draft.command !== base.draft.command) patch.command = draft.command;
     const timeout = Number(draft.timeoutSec);
     if (draft.timeoutSec !== base.draft.timeoutSec && timeout > 0) patch.timeoutSec = timeout;
+    if (draft.kind === 'stop' && draft.failFast !== base.draft.failFast) patch.failFast = draft.failFast;
     // A sub-graph step's graph and its whole values map (sub-graphs spec §2.1); becoming one sends its graph with the kind.
     if (draft.kind === 'graph' && (draft.graph !== base.draft.graph || draft.kind !== base.draft.kind)) patch.graph = draft.graph;
     if (draft.kind === 'graph' && JSON.stringify(draft.values) !== JSON.stringify(base.draft.values)) patch.values = draft.values;
@@ -212,10 +217,12 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           <option value="agent">Agent: an AI agent run</option>
           <option value="command">Command: an exact shell command</option>
           <option value="graph">Sub-graph: another graph as one step</option>
+          <option value="condition">Condition: reads the verdict of the step before it</option>
+          <option value="stop">Stop: ends the run when reached</option>
         </select>
       </div>
       {isGraph && <SubgraphFields ownerId={graphId} graph={draft.graph} values={draft.values} onChange={(next) => setDraft({ ...draft, ...next })} />}
-      {isGraph ? null : draft.kind === 'agent' ? (
+      {noFields ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label htmlFor="node-access">Access</label>
           <select id="node-access" value={draft.access} onChange={(e) => setDraft({ ...draft, access: e.target.value as Draft['access'] })}>
@@ -229,7 +236,7 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
           <p className="static-note">Command steps can change files</p>
         </div>
       )}
-      {!isGraph && (
+      {!noFields && (
       <div className="field">
         <label htmlFor="node-workspace">Workspace</label>
         <input id="node-workspace" list="workspace-names" value={draft.workspace} placeholder="This checkout" onChange={(e) => setDraft({ ...draft, workspace: e.target.value })} />
@@ -259,7 +266,15 @@ function NodeEditor({ graphId, node, workspaces }: { graphId: string; node: Grap
       {node.kind === 'agent' && (
         <AttachmentList graphId={graphId} target={{ kind: 'step', nodeId: node.id }} names={node.attachments ?? []} hint="Drop or paste files here. This step's agent gets them every time it runs." />
       )}
-      {isGraph ? null : draft.kind === 'agent' ? (
+      {draft.kind === 'stop' && (
+        <div className="field">
+          <label className="switch-row" htmlFor="node-fail-fast">
+            <input id="node-fail-fast" type="checkbox" checked={draft.failFast} onChange={(e) => setDraft({ ...draft, failFast: e.target.checked })} />
+            Fail-fast: cancel running steps when the run stops
+          </label>
+        </div>
+      )}
+      {noFields ? null : draft.kind === 'agent' ? (
         <div className="field">
           <label>Prompt</label>
           <textarea

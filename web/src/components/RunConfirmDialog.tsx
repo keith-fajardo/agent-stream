@@ -93,6 +93,8 @@ export function RunConfirmDialog() {
   const executing = preview?.steps.filter((s) => !s.reused && !s.notRun) ?? [];
   const commands = executing.filter((s) => s.kind === 'command');
   const agents = executing.filter((s) => s.kind === 'agent');
+  // Condition and stop steps run no agent or command: a group of their own, so neither count includes them.
+  const flow = executing.filter((s) => s.kind === 'condition' || s.kind === 'stop');
   const reused = preview?.steps.filter((s) => s.reused && !s.stale) ?? [];
   const kept = preview?.steps.filter((s) => s.reused && s.stale) ?? [];
   const notRun = preview?.steps.filter((s) => s.notRun) ?? [];
@@ -198,6 +200,7 @@ export function RunConfirmDialog() {
                 </tbody>
               </table>
             )}
+            {flow.length > 0 && <p className="muted">Conditions and stops (no agent or command): {flow.map((s) => s.id).join(', ')}</p>}
             {reused.length > 0 && (
               <p className="muted">
                 Reused from run {preview.sourceRunId}: {reused.map((s) => s.id).join(', ')}
