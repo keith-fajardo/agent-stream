@@ -41,6 +41,7 @@ const graphNodeSchema = z.object({
   browser: z.boolean().optional(),
   graph: z.string().optional(),
   values: z.record(z.string(), z.string()).optional(),
+  failFast: z.boolean().optional(),
   position: position.optional(),
   createdBy: actor.default('user'),
   updatedBy: actor.default('user'),
@@ -55,7 +56,7 @@ const graphSchema = z.object({
   variables: z.array(z.object({ name: z.string(), description: z.string().default('') })).default([]),
   attachments: z.array(z.string()).optional(),
   nodes: z.array(graphNodeSchema).default([]),
-  edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string() })).default([]),
+  edges: z.array(z.object({ id: z.string(), from: z.string(), to: z.string(), label: z.enum(['yes', 'no']).optional() })).default([]),
   // A stored counter too large to count on exactly (from a huge step id) is read as 0: the step ids still count.
   nodeSeq: z.preprocess((v) => (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v) ? 0 : v), z.number().int().nonnegative().default(0)),
   updatedAt: z.string().default(''),

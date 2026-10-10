@@ -19,6 +19,17 @@ describe('parseGraph', () => {
     expect(r.ok && r.graph.nodes[0]).toEqual({ id: 'n1', title: 'n1', kind: 'agent', createdBy: 'user', updatedBy: 'user', updatedAt: '' });
   });
 
+  it('keeps failFast on a stop step and the label on an arrow', () => {
+    const r = parseGraph({
+      id: 'g',
+      name: 'G',
+      nodes: [node('c'), { id: 's', title: 's', kind: 'stop', failFast: true }],
+      edges: [{ id: 'c->s', from: 'c', to: 's', label: 'yes' }],
+    });
+    expect(r.ok && r.graph.nodes[1].failFast).toBe(true);
+    expect(r.ok && r.graph.edges[0].label).toBe('yes');
+  });
+
   it('rejects wrong shapes with a readable error', () => {
     const r = parseGraph({ id: 'g', name: 'G', nodes: [{ id: 'n1', title: 't', kind: 'robot' }] });
     expect(r.ok).toBe(false);
