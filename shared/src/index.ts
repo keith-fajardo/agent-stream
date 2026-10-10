@@ -23,3 +23,6 @@ export * from './browser';
 export * from './subgraphStep';
 export * from './subgraphs';
 export * from './graphHome';
+export * from './routing';
+export * from './verdict';
+export * from './shape';
