@@ -14,6 +14,7 @@ import {
   subgraphValueLabel,
   topoOrder,
   validateRunnable,
+  verdictInstructionFor,
   workspaceOf,
   type CheckoutInfo,
   type ExpandResult,
@@ -259,6 +260,11 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
       nodes[n.id] = '';
       continue;
     }
+    // Condition and stop steps send no prompt: empty text, never the agent path (the runner still wants an entry for every step).
+    if (n.kind === 'condition' || n.kind === 'stop') {
+      nodes[n.id] = '';
+      continue;
+    }
     const isCommand = n.kind === 'command';
     const text = render({ label: n.id, src: (isCommand ? n.command : n.prompt) ?? '', mode: isCommand ? 'command' : 'text', agentIds: isCommand ? [] : [n.id], scope: scopeKeyOf(n.id) });
     if (text !== undefined) nodes[n.id] = text;
@@ -339,6 +345,9 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
     const phrase = runs(n.id) ? browserMention(n) : undefined;
     if (phrase) warnings.push(browserOffWarning(n.id, phrase));
   }
+  // The prompt the run sends: an agent step a condition reads ends with the verdict instruction, as the runner adds it at launch.
+  // `rendered.nodes` stays the reviewed text alone, so the runner does not add the instruction twice.
+  const shownText = (id: string) => [nodes[id], verdictInstructionFor(graph, id)].filter((t) => t !== undefined).join('\n\n');
   // Run order, each sub-graph step heading its inner steps (spec §5).
   const steps: PreviewStep[] = groupedOrder(graph).map((id) => {
     const n = graph.nodes.find((x) => x.id === id)!;
@@ -349,7 +358,7 @@ export function previewRun(input: PreviewInput): PreviewOutcome {
       title: n.title,
       kind: n.kind,
       ...(n.description?.trim() && { description: n.description.trim() }),
-      ...(Object.hasOwn(nodes, id) ? { text: nodes[id] } : {}),
+      ...(Object.hasOwn(nodes, id) ? { text: shownText(id) } : {}),
       reused: reused.has(id),
       ...(staleIds.has(id) && { stale: true }),
       ...(notRun.has(id) && { notRun: true }),

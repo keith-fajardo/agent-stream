@@ -8,7 +8,9 @@ const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
 /** A step id, or a step inside sub-graphs (`n4/n2`, at most 4 parts): its folder is `n4~n2` (sub-graphs spec §4.4). */
 const NODE_ID_RE = EXPANDED_NODE_ID_RE;
 const ACTIVE = new Set(['queued', 'running', 'waiting_approval']);
-/** Status names used before the queued / not_run rename, translated when old runs are read. */
+/** Run files written from this version on carry this `schema`; `skipped` is a real status in them (condition steps, spec §2). */
+const RUN_SCHEMA = 2;
+/** Status names used before the queued / not_run rename, translated when run files without a `schema` are read. */
 const RENAMED_STATUSES: Record<string, NodeStatus> = { pending: 'queued', skipped: 'not_run' };
 
 export function isRunId(id: string): boolean {
@@ -34,6 +36,8 @@ export class RunStore {
   }
 
   create(meta: RunMeta): void {
+    // Set on the object so the saves that follow (the caller keeps it) keep the schema.
+    meta.schema = RUN_SCHEMA;
     mkdirSync(join(this.runDir(meta.id), 'nodes'), { recursive: true });
     this.save(meta);
   }
@@ -52,9 +56,12 @@ export class RunStore {
     } catch {
       return undefined;
     }
-    for (const state of Object.values(meta.nodes ?? {})) {
-      const renamed = RENAMED_STATUSES[state.status];
-      if (renamed) state.status = renamed;
+    // Only a run file with no schema is old enough to have used `skipped` for what is now `not_run`.
+    if (meta.schema === undefined) {
+      for (const state of Object.values(meta.nodes ?? {})) {
+        const renamed = RENAMED_STATUSES[state.status];
+        if (renamed) state.status = renamed;
+      }
     }
     return meta;
   }

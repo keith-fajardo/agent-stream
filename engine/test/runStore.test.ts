@@ -92,6 +92,35 @@ describe('RunStore', () => {
     expect(new RunStore(paths).get(id)?.nodes).toEqual({ n1: { status: 'failed' }, n2: { status: 'not_run' }, n3: { status: 'queued' } });
   });
 
+  it('keeps a skipped step skipped in a run file with a schema', () => {
+    const paths = tmpProject();
+    const id = '20261010-100000-5c0a';
+    mkdirSync(join(paths.runsDir, id), { recursive: true });
+    const current = { ...meta(id, 'g', 'succeeded'), schema: 2, nodes: { n1: { status: 'succeeded' }, n2: { status: 'skipped' } } };
+    writeFileSync(join(paths.runsDir, id, 'run.json'), JSON.stringify(current));
+    expect(new RunStore(paths).get(id)?.nodes).toEqual({ n1: { status: 'succeeded' }, n2: { status: 'skipped' } });
+  });
+
+  it('reads skipped as not_run in a run file with no schema', () => {
+    const paths = tmpProject();
+    const id = '20261010-100000-5c0b';
+    mkdirSync(join(paths.runsDir, id), { recursive: true });
+    const legacy = { ...meta(id, 'g', 'succeeded'), nodes: { n1: { status: 'succeeded' }, n2: { status: 'skipped' } } };
+    writeFileSync(join(paths.runsDir, id, 'run.json'), JSON.stringify(legacy));
+    expect(new RunStore(paths).get(id)?.nodes).toEqual({ n1: { status: 'succeeded' }, n2: { status: 'not_run' } });
+  });
+
+  it('writes schema 2 into a new run file, and keeps it through later saves', () => {
+    const paths = tmpProject();
+    const store = new RunStore(paths);
+    const id = '20261010-100000-5c0c';
+    const m = meta(id);
+    store.create(m);
+    store.save({ ...m, nodes: { n1: { status: 'succeeded' }, n2: { status: 'skipped' } } });
+    expect(store.get(id)?.schema).toBe(2);
+    expect(store.get(id)?.nodes.n2.status).toBe('skipped');
+  });
+
   it('marks runs left running as interrupted', () => {
     const store = new RunStore(tmpProject());
     store.create(meta('20261002-100000-aaaa', 'g', 'running'));
