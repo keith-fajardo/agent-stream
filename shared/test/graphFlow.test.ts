@@ -22,7 +22,7 @@ describe('parseChain', () => {
   });
 
   it('refuses other Mermaid links and shapes', () => {
-    for (const text of ['n1 -.-> n2', 'n1 ==> n2', 'n1 -->|yes| n2', 'n1 --- n2', 'n1 & n2 --> n3', 'n1 ---> n2', 'n1{"x"} --> n2', 'n1 -- text --> n2', 'n1 <--> n2', 'n1 --o n2', 'n1 --x n2', 'n1:::cls --> n2', 'n1 --> n2; n3', 'n1--->n2', 'n1---n2', 'n1-.->n2', 'n1==>n2', 'n1 --- n2']) {
+    for (const text of ['n1 -.-> n2', 'n1 ==> n2', 'n1 --- n2', 'n1 & n2 --> n3', 'n1 ---> n2', 'n1{"x"} --> n2', 'n1 -- text --> n2', 'n1 <--> n2', 'n1 --o n2', 'n1 --x n2', 'n1:::cls --> n2', 'n1 --> n2; n3', 'n1--->n2', 'n1---n2', 'n1-.->n2', 'n1==>n2', 'n1 --- n2']) {
       expect(parseChain(text)).toMatchObject({ ok: false, error: expect.stringContaining(ONLY_ARROWS) });
     }
     expect(parseChain('n1 -->')).toEqual({ ok: false, error: 'an arrow at the end of the line has no step after it.' });
@@ -58,6 +58,23 @@ describe('parseFlow', () => {
       { line: 20, message: `"==> n3" isn't supported. ${ONLY_ARROWS}` },
     ]);
     expect(r.edges).toEqual([{ from: 'n1', to: 'n2', line: 15 }]);
+  });
+
+  it('accepts yes and no labels on an arrow', () => {
+    const { edges, errors } = flow('flowchart LR', 'n1 -->|yes| n2', 'n1 -->|no| n3');
+    expect(errors).toEqual([]);
+    expect(edges.map((e) => e.label)).toEqual(['yes', 'no']);
+  });
+
+  it('rejects other link text', () => {
+    const { errors } = flow('flowchart LR', 'n1 -->|maybe| n2');
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toMatch(/Only -->\|yes\| and -->\|no\| labels/);
+  });
+
+  it('counts an arrow with a different label as the same pair', () => {
+    const { errors } = flow('flowchart LR', 'n1 -->|yes| n2', 'n1 --> n2');
+    expect(errors).toEqual([{ line: 13, message: 'n1 --> n2 is in the Flow twice. Remove one of them.' }]);
   });
 
   it('refuses the other Mermaid statements by keyword', () => {

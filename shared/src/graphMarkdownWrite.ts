@@ -15,7 +15,7 @@ function flowLines(graph: Graph): string[] {
   const label = new Map(graph.nodes.map((n) => [n.id, mermaidLabel(n.title)]));
   const ref = (id: string) => `${id}${label.get(id) ?? ''}`;
   const connected = new Set(graph.edges.flatMap((e) => [e.from, e.to]));
-  return ['flowchart LR', ...graph.edges.map((e) => `  ${ref(e.from)} --> ${ref(e.to)}`), ...graph.nodes.filter((n) => !connected.has(n.id)).map((n) => `  ${ref(n.id)}`)];
+  return ['flowchart LR', ...graph.edges.map((e) => `  ${ref(e.from)} -->${e.label ? `|${e.label}|` : ''} ${ref(e.to)}`), ...graph.nodes.filter((n) => !connected.has(n.id)).map((n) => `  ${ref(n.id)}`)];
 }
 
 /** A fenced block whose fence the content can't close. Empty content has no lines between the fences. */

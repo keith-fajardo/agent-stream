@@ -28,6 +28,14 @@ function lineChanges(before: string, after: string) {
 }
 
 describe('serializeGraphMarkdown', () => {
+  it('writes a yes or no label on an arrow and leaves an unlabeled arrow plain', () => {
+    const g = FIXTURES.example;
+    const labeled: Graph = { ...g, edges: g.edges.map((e, k) => (k === 0 ? { ...e, label: 'yes' as const } : e)) };
+    const text = serializeGraphMarkdown(labeled);
+    expect(text).toContain('  n1["Check table absent"] -->|yes| n2["Run model"]');
+    expect(text).toContain('  n2["Run model"] --> n3["Check table exists"]');
+  });
+
   it("writes the spec's example in the fixed order, with labels on every Flow line", () => {
     expect(serializeGraphMarkdown(FIXTURES.example)).toBe(
       [

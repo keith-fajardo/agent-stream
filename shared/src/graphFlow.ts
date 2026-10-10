@@ -11,8 +11,8 @@ const KEYWORD_RE = /^(subgraph|end|classDef|class|style|linkStyle|click|directio
 const ID_CHAR_RE = /[A-Za-z0-9_-]/;
 export const ONLY_ARROWS = 'The Flow holds only arrows between step ids, such as n1 --> n2, with optional labels such as n1["Title"].';
 
-/** The step ids of one Flow line in order (`a --> b --> c`), or why the line isn't a chain of arrows. Labels are skipped. */
-export function parseChain(text: string): { ok: true; ids: string[] } | { ok: false; error: string } {
+/** The step ids of one Flow line in order (`a --> b --> c`), or why the line isn't a chain of arrows. Node labels are skipped. `labels[k]` is the `|yes|` or `|no|` on the arrow after `ids[k]`; it is there only when some arrow has one. */
+export function parseChain(text: string): { ok: true; ids: string[]; labels?: (EdgeLabel | undefined)[] } | { ok: false; error: string } {
   let i = 0;
   const skipSpace = () => {
     while (text[i] === ' ' || text[i] === '\t') i++;
@@ -32,16 +32,26 @@ export function parseChain(text: string): { ok: true; ids: string[] } | { ok: fa
     return id;
   };
   const ids: string[] = [];
+  const labels: (EdgeLabel | undefined)[] = [];
   skipSpace();
   for (;;) {
     const ref = readRef();
     if (typeof ref !== 'string') return { ok: false, error: ref.error };
     ids.push(ref);
     skipSpace();
-    if (i >= text.length || (text[i] === ';' && text.slice(i + 1).trim() === '')) return { ok: true, ids };
+    if (i >= text.length || (text[i] === ';' && text.slice(i + 1).trim() === '')) return labels.some(Boolean) ? { ok: true, ids, labels } : { ok: true, ids };
+    const labelled = /^-->\|(yes|no)\|/.exec(text.slice(i));
     const next = text[i + 3];
-    if (!text.startsWith('-->', i) || next === '-' || next === '>' || next === '|') return { ok: false, error: `"${text.slice(i).trim()}" isn't supported. ${ONLY_ARROWS}` };
-    i += 3;
+    if (labelled) {
+      labels[ids.length - 1] = labelled[1] as EdgeLabel;
+      i += labelled[0].length;
+    } else if (!text.startsWith('-->', i) || next === '-' || next === '>') {
+      return { ok: false, error: `"${text.slice(i).trim()}" isn't supported. ${ONLY_ARROWS}` };
+    } else if (next === '|') {
+      return { ok: false, error: `"${text.slice(i).trim()}" isn't supported. Only -->|yes| and -->|no| labels are allowed, and only out of a condition step. ${ONLY_ARROWS}` };
+    } else {
+      i += 3;
+    }
     skipSpace();
     if (i >= text.length) return { ok: false, error: 'an arrow at the end of the line has no step after it.' };
   }
@@ -94,8 +104,9 @@ export function parseFlow(lines: FlowLine[], stepIds: ReadonlySet<string>, openL
         errors.push({ line, message: problem });
         continue;
       }
-      accepted = [...accepted, { id: edgeId(from, to), from, to }];
-      edges.push({ from, to, line });
+      accepted = [...accepted, { id: edgeId(from, to), from, to, ...(chain.labels?.[k] ? { label: chain.labels[k] } : {}) }];
+      const label = chain.labels?.[k];
+      edges.push(label ? { from, to, line, label } : { from, to, line });
     }
   }
   if (!header) errors.push({ line: openLine, message: 'the mermaid block is empty. Start it with "flowchart LR", then one arrow per line, such as n1 --> n2.' });
