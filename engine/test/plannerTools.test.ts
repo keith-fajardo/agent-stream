@@ -69,6 +69,38 @@ describe('planner graph tools', () => {
     ]);
   });
 
+  it('adds a condition step and connects a labeled arrow to a stop step', async () => {
+    const s = setup();
+    expect(await s.call('add_node', { kind: 'agent', title: 'Check', prompt: 'Check it.' })).toEqual({ text: 'Added n1.', isError: false });
+    expect(await s.call('add_node', { kind: 'condition', title: 'Passed?', prompt: 'Did the check pass?', after: ['n1'] })).toEqual({ text: 'Added n2.', isError: false });
+    expect(await s.call('add_node', { kind: 'stop', title: 'Halt', failFast: true })).toEqual({ text: 'Added n3.', isError: false });
+    expect(await s.call('add_node', { kind: 'agent', title: 'Ship', prompt: 'Ship it.' })).toEqual({ text: 'Added n4.', isError: false });
+    expect(await s.call('connect', { from: 'n2', to: 'n4', label: 'yes' })).toEqual({ text: 'Connected n2 -> n4 (yes).', isError: false });
+    expect(await s.call('connect', { from: 'n2', to: 'n3', label: 'no' })).toEqual({ text: 'Connected n2 -> n3 (no).', isError: false });
+    const g = s.graphStore.get(s.graphId);
+    expect(g.nodes.find((n) => n.id === 'n3')).toMatchObject({ kind: 'stop', failFast: true });
+    expect(g.edges.find((e) => e.id === 'n2->n4')?.label).toBe('yes');
+    expect(g.edges.find((e) => e.id === 'n2->n3')?.label).toBe('no');
+    expect(JSON.parse((await s.call('get_graph')).text).edges).toEqual(['n1 -> n2', 'n2 -> n4 (yes)', 'n2 -> n3 (no)']);
+  });
+
+  it('lets the shape rules refuse an agent-only field on a condition step, unchanged', async () => {
+    const s = setup();
+    const r = await s.call('add_node', { kind: 'condition', title: 'Passed?', prompt: 'Did it pass?', timeoutSec: 30 });
+    expect(r).toEqual({ text: "a condition step can't have timeout. Remove it.", isError: true });
+    expect(s.graphStore.get(s.graphId).nodes).toEqual([]);
+  });
+
+  it('refuses a label on an arrow that does not leave a condition step', async () => {
+    const s = setup();
+    await s.call('add_node', { kind: 'agent', title: 'A', prompt: 'a' });
+    await s.call('add_node', { kind: 'agent', title: 'B', prompt: 'b' });
+    const r = await s.call('connect', { from: 'n1', to: 'n2', label: 'yes' });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('condition');
+    expect(s.graphStore.get(s.graphId).edges).toEqual([]);
+  });
+
   it('adds agent-authored nodes and wires them after existing ones', async () => {
     const s = setup();
     expect(await s.call('add_node', { kind: 'command', title: 'Build', command: 'dbt build -s orders' })).toEqual({ text: 'Added n1.', isError: false });
