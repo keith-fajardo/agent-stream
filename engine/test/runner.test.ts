@@ -1108,6 +1108,28 @@ describe('Runner with condition and stop steps', () => {
     expect(done).not.toHaveProperty('stoppedBy');
   });
 
+  it('Run only after a yes verdict keeps the skipped stop skipped and ends succeeded (R32)', async () => {
+    const ctx = setup();
+    const g = gate();
+    const first = started(ctx.runner.start(withRendered(g)));
+    await tick();
+    ctx.fake.finish('n1', { ok: true, output: 'VERDICT: yes' });
+    await tick();
+    ctx.fake.finish('n3');
+    const done = await first.done;
+    expect(done.status).toBe('succeeded');
+    expect(done.nodes.n4.status).toBe('skipped');
+    ctx.fake.started.length = 0;
+    const only = started(ctx.runner.start({ ...withRendered(g, { sourceRunId: done.id, fromNodeId: 'n3' }), mode: 'only' }));
+    expect(only.run.nodes.n4).toEqual({ status: 'skipped', ...(done.nodes.n4.error && { error: done.nodes.n4.error }) });
+    await tick();
+    ctx.fake.finish('n3');
+    const after = await only.done;
+    expect(ctx.fake.started).toEqual(['n3']);
+    expect(after.nodes.n4.status).toBe('skipped');
+    expect(after.status).toBe('succeeded');
+  });
+
   it('a missing verdict fails the condition and nothing downstream runs', async () => {
     const { runner, fake } = setup();
     const r = started(runner.start(withRendered(gate())));

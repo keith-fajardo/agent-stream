@@ -199,16 +199,19 @@ export class Runner extends EventEmitter {
       if (!source) return { ok: false, error: `run ${input.sourceRunId} not found` };
     }
     const mode: RunMode | undefined = source ? (input.mode ?? (input.fromNodeId ? 'from' : 'resume')) : undefined;
-    // `reuse`: steps that keep their old result; `notRun`: steps that neither run nor keep one (only `Run only` leaves any).
+    // `reuse`: steps that keep their old result; `notRun`: steps that neither run nor keep one; `carriedSkip`: steps the source
+    // run skipped, which stay skipped (only `Run only` leaves either, R32).
     let reuse = new Set<string>();
     let notRun = new Set<string>();
+    let carriedSkip = new Set<string>();
     let stale = new Map<string, StaleReason>();
     if (source && mode === 'only') {
       const plan = onlyRunPlan(graph, source, input.fromNodeId!, input.rendered, input.attachments, input.scopes);
       if (!plan.ok) return { ok: false, error: plan.error };
       ({ reuse, notRun, stale } = plan);
+      carriedSkip = plan.skipped;
     } else if (source) reuse = reusableNodeIds(graph, source, mode === 'resume' ? undefined : input.fromNodeId, input.rendered, input.attachments, input.scopes);
-    const skipped = new Set([...reuse, ...notRun]);
+    const skipped = new Set([...reuse, ...notRun, ...carriedSkip]);
     for (const n of graph.nodes) {
       const ws = workspaceOf(n);
       if (ws !== null && !skipped.has(n.id) && !input.workspaces?.[ws]) return { ok: false, error: `Step ${n.id} uses workspace "${ws}", but this run has no worktree for it.` };
@@ -267,7 +270,9 @@ export class Runner extends EventEmitter {
           ? { ...source.nodes[n.id], status: 'reused', ...(mark && { stale: { ...mark, runId } }) }
           : notRun.has(n.id)
             ? { status: 'not_run' }
-            : { status: 'queued' };
+            : source && carriedSkip.has(n.id)
+              ? { status: 'skipped', ...(source.nodes[n.id]?.error && { error: source.nodes[n.id].error }) }
+              : { status: 'queued' };
     }
     try {
       this.deps.runStore.create(meta);

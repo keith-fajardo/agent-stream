@@ -519,12 +519,12 @@ export function staleNote(mark: Pick<StaleMark, 'reason' | 'nodeId'>, ownId?: st
 }
 
 export type OnlyRunPlan =
-  | { ok: true; reuse: Set<string>; notRun: Set<string>; stale: Map<string, StaleReason> }
+  | { ok: true; reuse: Set<string>; notRun: Set<string>; skipped: Set<string>; stale: Map<string, StaleReason> }
   | { ok: false; error: string };
 
 /**
  * What `Run only` does (retry options): `nodeId` runs, alone. Every other step that succeeded (or was reused) is reused,
- * workspace or not; one that didn't is not run. A reused step is marked stale when it follows `nodeId` (`upstream`) or was
+ * workspace or not; one the source run skipped stays skipped (ruling R32); any other one is not run. A reused step is marked stale when it follows `nodeId` (`upstream`) or was
  * edited since (`edited`), and a step following a stale one is stale for the same reason; a mark it already carries stays.
  * Refused unless every ancestor of `nodeId` has a current result: it succeeded, isn't stale and is unchanged. Also refused for a
  * step in a workspace when an ancestor shares it: the new worktree starts from HEAD, without the changes that ancestor made.
@@ -547,6 +547,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
   const after = descendants(graph, nodeId);
   const reuse = new Set<string>();
   const notRun = new Set<string>();
+  const skipped = new Set<string>();
   const stale = new Map<string, StaleReason>();
   /** Every reused step's mark, the new and the one it already carried: what the steps after it inherit. */
   const marked = new Map<string, StaleReason>();
@@ -554,7 +555,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
     if (group.has(id)) continue;
     const state = source.nodes[id];
     if (!didSucceed(state)) {
-      notRun.add(id);
+      (state?.status === 'skipped' ? skipped : notRun).add(id);
       continue;
     }
     reuse.add(id);
@@ -569,7 +570,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
       marked.set(id, mark);
     }
   }
-  return { ok: true, reuse, notRun, stale };
+  return { ok: true, reuse, notRun, skipped, stale };
 }
 
 /** Why a start request's mode, step and source run don't fit together, or null. Absent mode: the older requests, always allowed. */
