@@ -1,6 +1,6 @@
 import { edgeId, seqOf } from './graph';
 import { parseGraph } from './schemas';
-import { MAX_IMPORT_CHARS, type Graph, type GraphNode, type GraphResult, type VariableDef } from './types';
+import { MAX_IMPORT_CHARS, type EdgeLabel, type Graph, type GraphNode, type GraphResult, type VariableDef } from './types';
 
 export const EXPORT_FORMAT = 'agent-stream/graph';
 /** The format name written before the rename to Agent Stream; still accepted on import. */
@@ -14,7 +14,7 @@ export type ExportFile = {
   format: typeof EXPORT_FORMAT;
   version: typeof EXPORT_VERSION;
   exportedAt: string;
-  graph: { name: string; goal: string; instructions: string; variables: VariableDef[]; nodes: ExportedNode[]; edges: { from: string; to: string }[] };
+  graph: { name: string; goal: string; instructions: string; variables: VariableDef[]; nodes: ExportedNode[]; edges: { from: string; to: string; label?: EdgeLabel }[] };
 };
 
 /** The shareable definition (spec §5): never values, authorship, planner state, chat, ops or runs. */
@@ -32,7 +32,7 @@ export function toExportFile(graph: Graph, now: string): ExportFile {
       nodes: graph.nodes.map(({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, position }) =>
         JSON.parse(JSON.stringify({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, position })) as ExportedNode,
       ),
-      edges: graph.edges.map(({ from, to }) => ({ from, to })),
+      edges: graph.edges.map(({ from, to, label }) => ({ from, to, ...(label && { label }) })),
     },
   };
 }
@@ -62,8 +62,8 @@ export function parseExportFile(content: string, id: string, now: string): Graph
     variables: g.variables,
     nodes: nodes.map((n) => ({ ...(n as object), createdBy: 'user', updatedBy: 'user', updatedAt: now })),
     edges: edges.map((e) => {
-      const { from, to } = e as { from?: unknown; to?: unknown };
-      return { id: edgeId(String(from), String(to)), from, to };
+      const { from, to, label } = e as { from?: unknown; to?: unknown; label?: unknown };
+      return { id: edgeId(String(from), String(to)), from, to, ...(label !== undefined && { label }) };
     }),
     updatedAt: now,
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOp,
+  changedSinceSource,
   contentSignature,
   descendants,
   emptyGraph,
@@ -182,6 +183,28 @@ describe('validateRunnable', () => {
     ]);
     expect(validateRunnable(g)).toEqual(['n1 "think": an agent node needs a prompt.', 'n2 "build": a command node needs a command.']);
     expect(validateRunnable(build([agent('a')]))).toEqual([]);
+  });
+});
+
+describe('labels in signatures and reuse', () => {
+  const branch = (label: 'yes' | 'no'): Graph =>
+    build([{ type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } }, cmd('Ship', 'ship'), { type: 'connect', from: 'n1', to: 'n2', label }]);
+  const allOk = (g: Graph): Record<string, NodeRunState> => Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }]));
+
+  it('a label change changes the content signature', () => {
+    expect(contentSignature(branch('yes'))).not.toBe(contentSignature(branch('no')));
+    expect(contentSignature(branch('yes'))).toBe(contentSignature(branch('yes')));
+  });
+
+  it('an unlabeled graph keeps its edge signature entry', () => {
+    expect(contentSignature(build([agent('a'), agent('b'), link('n1', 'n2')]))).toContain('"edges":["n1->n2"]');
+  });
+
+  it('a step whose incoming arrow changed label is not reused', () => {
+    const before = branch('yes');
+    expect([...changedSinceSource(branch('no'), { snapshot: before, nodes: allOk(before) })]).toEqual(['n2']);
+    expect([...changedSinceSource(branch('yes'), { snapshot: before, nodes: allOk(before) })]).toEqual([]);
+    expect([...reusableNodeIds(branch('no'), { snapshot: before, nodes: allOk(before) })]).toEqual(['n1']);
   });
 });
 

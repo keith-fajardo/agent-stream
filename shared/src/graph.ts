@@ -190,7 +190,10 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         updatedBy: by,
         updatedAt: now,
       };
-      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? updated : n)) });
+      // Fail-fast is stored only as `true` on a stop step: off, or on another kind of step, is no field (spec §2.1).
+      const { failFast, ...unflagged } = updated;
+      const stored: GraphNode = kind === 'stop' && failFast === true ? { ...unflagged, failFast: true } : unflagged;
+      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? stored : n)) });
     }
     case 'deleteNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
@@ -326,7 +329,7 @@ export function contentSignature(g: Graph): string {
     attachments: g.attachments ?? [],
     // A sub-graph step's graph and values are added only for it, so graphs without one keep their signature.
     nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : [])]),
-    edges: g.edges.map((e) => e.id).sort(),
+    edges: g.edges.map((e) => `${e.id}${e.label ? `:${e.label}` : ''}`).sort(),
   });
 }
 
@@ -347,6 +350,11 @@ export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; 
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/** The arrows into `id` as `from:label` (no label: `from:`), so a changed yes/no label is another input. */
+function incoming(graph: Graph, id: string): string[] {
+  return graph.edges.filter((e) => e.to === id).map((e) => `${e.from}:${e.label ?? ''}`);
 }
 
 /** Every node that reaches `id` by following edges backward. */
@@ -430,7 +438,8 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
     const sameScope = (prevScope?.graphId ?? '') === (scope?.graphId ?? '');
     const sameSubgraph = n.kind !== 'graph' || ((prev?.graph ?? '') === (n.graph ?? '') && valuesText(prev?.values) === valuesText(n.values));
     const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles && sameBrowser && sameScope && sameSubgraph;
-    const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
+    // The label on an arrow into a step (yes or no out of a condition) is part of its inputs.
+    const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id)) && sameSet(incoming(graph, n.id), incoming(source.snapshot, n.id));
     if (!sameDefinition || !sameInputs) changed.add(n.id);
   }
   return changed;

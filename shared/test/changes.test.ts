@@ -23,6 +23,11 @@ describe('diffGraphs', () => {
       { kind: 'edge', change: 'added', id: 'n1->n3', from: 'n1', to: 'n3' },
     ]);
   });
+  it('reports a fail-fast edit on a stop step', () => {
+    const stop = (over: Partial<GraphNode> = {}) => node('s', { kind: 'stop', prompt: undefined, ...over });
+    expect(diffGraphs(graph([stop()]), graph([stop({ failFast: true })]))).toEqual([{ kind: 'node', change: 'changed', id: 's', title: 's', fields: ['failFast'] }]);
+    expect(diffGraphs(graph([stop()]), graph([stop({ failFast: false })]))).toEqual([]);
+  });
   it('ignores moves and authorship bookkeeping', () => {
     const base = graph([node('n1', { position: { x: 0, y: 0 } })]);
     const now = graph([node('n1', { position: { x: 50, y: 9 }, updatedBy: 'agent', updatedAt: 'later' })]);

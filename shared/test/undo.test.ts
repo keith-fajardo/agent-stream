@@ -70,6 +70,32 @@ describe('undoState', () => {
   });
 });
 
+describe('undo with labels and fail-fast', () => {
+  const base = run(emptyGraph('g', 'G', T), [
+    { type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } },
+    { type: 'addNode', node: { title: 'Ship', kind: 'command', command: 'ship' } },
+    { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
+    { type: 'connect', from: 'n1', to: 'n2', label: 'yes' },
+    { type: 'connect', from: 'n1', to: 'n3', label: 'no' },
+  ]);
+
+  it('canonical form keeps labels, and undo sees a label change', () => {
+    expect(base.edges.map((e) => e.label)).toEqual(['yes', 'no']);
+    const relabeled = run(base, [{ type: 'disconnect', from: 'n1', to: 'n2' }, { type: 'connect', from: 'n1', to: 'n2', label: 'no' }]);
+    expect(undoState(relabeled)).not.toBe(undoState(base));
+  });
+
+  it('undoes a label change and a fail-fast edit', () => {
+    const ops: Op[] = [{ type: 'disconnect', from: 'n1', to: 'n2' }, { type: 'connect', from: 'n1', to: 'n2', label: 'no' }, { type: 'updateNode', id: 'n3', patch: { failFast: true } }];
+    const after = run(base, ops);
+    expect(after.nodes.find((n) => n.id === 'n3')?.failFast).toBe(true);
+    const back = run(after, undoOps(after, base, ops));
+    expect(undoState(back)).toBe(undoState(base));
+    expect(back.edges.find((e) => e.id === 'n1->n2')?.label).toBe('yes');
+    expect(back.nodes.find((n) => n.id === 'n3')?.failFast).toBeUndefined();
+  });
+});
+
 describe('undo labels', () => {
   it('name each kind of action', () => {
     expect(undoLabel({ type: 'updateNode', id: 'n3', patch: { effort: 'high' } })).toBe('saved n3');

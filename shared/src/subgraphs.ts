@@ -96,8 +96,8 @@ function expandLevel(g: Graph, path: readonly Graph[], at: string, x: Expansion)
     const into = edges.filter((e) => e.to === s.id);
     edges = [
       ...edges.filter((e) => e.to !== s.id),
-      ...into.flatMap((e) => firsts.map((to) => ({ id: edgeId(e.from, to), from: e.from, to }))),
-      ...sub.edges.map((e) => ({ id: edgeId(p + e.from, p + e.to), from: p + e.from, to: p + e.to })),
+      ...into.flatMap((e) => firsts.map((to) => ({ id: edgeId(e.from, to), from: e.from, to, ...(e.label && { label: e.label }) }))),
+      ...sub.edges.map((e) => ({ id: edgeId(p + e.from, p + e.to), from: p + e.from, to: p + e.to, ...(e.label && { label: e.label }) })),
       ...lasts.map((from) => ({ id: edgeId(from, s.id), from, to: s.id })),
     ];
     nodes = [...nodes, ...sub.nodes.map((n): GraphNode => ({ ...n, id: p + n.id, ...(n.workspace && { workspace: scopedWorkspace(s.id, n.workspace) }) }))];

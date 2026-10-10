@@ -5,7 +5,8 @@ import type { Graph, GraphNode, NewNodeInput, NodePatch, Op, StepModel } from '.
 
 const modelText = (m: StepModel | undefined) => (m ? stepModelText(m) : '');
 
-const edgeKey = (e: { from: string; to: string }) => `${e.from}->${e.to}`;
+/** An arrow with its yes/no label: the same pair under another label is another arrow, replaced by a disconnect and a connect. */
+const edgeKey = (e: { from: string; to: string; label?: string }) => `${e.from}->${e.to}${e.label ? `|${e.label}` : ''}`;
 
 function newNode(step: DocStep): NewNodeInput {
   const { line: _line, ...node } = step;
@@ -27,6 +28,8 @@ function patchOf(node: GraphNode, step: DocStep): NodePatch {
   if (step.kind === 'agent' && modelText(node.model) !== modelText(step.model)) patch.model = step.model ?? null;
   if (step.kind === 'agent' && (node.effort ?? '') !== (step.effort ?? '')) patch.effort = step.effort ?? null;
   if (step.kind === 'agent' && JSON.stringify(node.attachments ?? []) !== JSON.stringify(step.attachments ?? [])) patch.attachments = step.attachments ?? [];
+  // Fail-fast is for stop steps; removing the line turns it off.
+  if (step.kind === 'stop' && (node.failFast === true) !== (step.failFast === true)) patch.failFast = step.failFast === true;
   // Removing the line turns the browser off.
   if (step.kind === 'agent' && (node.browser === true) !== (step.browser === true)) patch.browser = step.browser === true;
   // A sub-graph step's graph and its whole values map (spec §2.1); a step that stops being one loses both in applyOp.
@@ -55,7 +58,7 @@ export function diffToOps(current: Graph, doc: GraphDoc): Op[] {
     const patch = patchOf(node, s);
     if (Object.keys(patch).length) ops.push({ type: 'updateNode', id: node.id, patch });
   }
-  for (const e of doc.edges) if (!currentEdges.has(edgeKey(e))) ops.push({ type: 'connect', from: e.from, to: e.to });
+  for (const e of doc.edges) if (!currentEdges.has(edgeKey(e))) ops.push({ type: 'connect', from: e.from, to: e.to, ...(e.label && { label: e.label }) });
   if (doc.goal !== current.goal) ops.push({ type: 'setGoal', goal: doc.goal });
   if (doc.instructions !== current.instructions) ops.push({ type: 'setInstructions', instructions: doc.instructions });
   const attachments = doc.attachments?.names ?? [];

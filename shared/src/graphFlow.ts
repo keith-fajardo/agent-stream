@@ -1,10 +1,10 @@
 import { edgeId, emptyGraph, wouldCreateCycle } from './graph';
-import type { Edge, GraphFileError } from './types';
+import type { Edge, EdgeLabel, GraphFileError } from './types';
 
 /** One line inside the Flow's mermaid block, numbered as in the file. */
 export type FlowLine = { line: number; text: string };
 /** An arrow of the Flow, with the line it is on. */
-export type FlowEdge = { from: string; to: string; line: number };
+export type FlowEdge = { from: string; to: string; line: number; label?: EdgeLabel };
 
 const HEADER_RE = /^(?:flowchart|graph)(?:[ \t]+(?:LR|RL|TD|TB|BT))?[ \t]*;?$/;
 const KEYWORD_RE = /^(subgraph|end|classDef|class|style|linkStyle|click|direction)(?=[ \t;]|$)/;

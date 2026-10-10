@@ -111,4 +111,22 @@ describe('step access and workspace in export files', () => {
     const back = parseExportFile(JSON.stringify(file), 'copy', T);
     expect(back.ok && back.graph.nodes[1]).toMatchObject({ access: 'read', workspace: 'wh_a' });
   });
+
+  it('keeps an arrow label through export and import', () => {
+    let g = emptyGraph('g', 'G', T);
+    const ops: Op[] = [
+      { type: 'addNode', node: { title: 'Ready', kind: 'condition', prompt: 'Is it ready?' } },
+      { type: 'addNode', node: { title: 'Ship', kind: 'command', command: 'ship' } },
+      { type: 'connect', from: 'n1', to: 'n2', label: 'no' },
+    ];
+    for (const op of ops) {
+      const r = applyOp(g, op, 'user', T);
+      if (!r.ok) throw new Error(r.error);
+      g = r.graph;
+    }
+    const file = toExportFile(g, T);
+    expect(file.graph.edges).toEqual([{ from: 'n1', to: 'n2', label: 'no' }]);
+    const back = parseExportFile(JSON.stringify(file), 'copy', T);
+    expect(back.ok && back.graph.edges).toEqual([{ id: 'n1->n2', from: 'n1', to: 'n2', label: 'no' }]);
+  });
 });

@@ -766,9 +766,9 @@ function revert(baseline: Graph, graph: Graph, target: ChangeTarget, at: string)
   }
   const edge = findEdge(baseline, graph, target.id);
   if (!edge) return { ok: false, error: `edge ${target.id} does not exist` };
-  const wasThere = baseline.edges.some((e) => sameEnds(e, edge));
+  const inBaseline = baseline.edges.find((e) => sameEnds(e, edge));
   const edges = graph.edges.filter((e) => !sameEnds(e, edge));
-  return checked({ ...graph, edges: wasThere ? [...edges, { id: edgeId(edge.from, edge.to), from: edge.from, to: edge.to }] : edges, updatedAt: at });
+  return checked({ ...graph, edges: inBaseline ? [...edges, { id: edgeId(edge.from, edge.to), from: edge.from, to: edge.to, ...(inBaseline.label && { label: inBaseline.label }) }] : edges, updatedAt: at });
 }
 
 function withoutPosition(node: GraphNode): GraphNode {
