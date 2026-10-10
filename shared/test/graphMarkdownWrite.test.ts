@@ -28,6 +28,14 @@ function lineChanges(before: string, after: string) {
 }
 
 describe('serializeGraphMarkdown', () => {
+  it('writes a yes or no label on an arrow and leaves an unlabeled arrow plain', () => {
+    const g = FIXTURES.example;
+    const labeled: Graph = { ...g, edges: g.edges.map((e, k) => (k === 0 ? { ...e, label: 'yes' as const } : e)) };
+    const text = serializeGraphMarkdown(labeled);
+    expect(text).toContain('  n1["Check table absent"] -->|yes| n2["Run model"]');
+    expect(text).toContain('  n2["Run model"] --> n3["Check table exists"]');
+  });
+
   it("writes the spec's example in the fixed order, with labels on every Flow line", () => {
     expect(serializeGraphMarkdown(FIXTURES.example)).toBe(
       [
@@ -211,5 +219,37 @@ describe('the side file', () => {
     const moved = withMeta(g, parseGraphMeta(JSON.stringify({ version: 1, nodeSeq: 8, updatedAt: NOW, nodes: { n2: { position: { x: 3, y: 4 }, createdBy: 'agent', updatedBy: 'agent', updatedAt: NOW } } })), NOW);
     expect(moved.nodes[1]).toMatchObject({ position: { x: 3, y: 4 }, createdBy: 'agent', prompt: g.nodes[1].prompt });
     expect([moved.nodeSeq, moved.updatedAt, moved.nodes[0].updatedAt]).toEqual([8, NOW, NOW]);
+  });
+});
+
+describe('condition and stop steps', () => {
+  const gate = () =>
+    build('Gate', [
+      { type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'check' } },
+      { type: 'addNode', node: { title: 'Needed?', kind: 'condition', description: 'Decides whether to go on.' } },
+      { type: 'addNode', node: { title: 'Work', kind: 'command', command: 'echo work' } },
+      { type: 'addNode', node: { title: 'Stop', kind: 'stop', failFast: true } },
+      { type: 'connect', from: 'n1', to: 'n2' },
+      { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+      { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    ]);
+
+  it('writes no code block for them, and fail-fast only as set', () => {
+    const text = serializeGraphMarkdown(gate());
+    expect(text).toContain('  n2["Needed?"] -->|yes| n3["Work"]');
+    expect(text).toContain('## n2 · Needed?\n\n- kind: condition\n\n> Decides whether to go on.\n\n## n3');
+    expect(text.endsWith('## n4 · Stop\n\n- kind: stop\n- fail-fast: on\n')).toBe(true);
+    const g = gate();
+    const off: Graph = { ...g, nodes: g.nodes.map((n) => (n.id === 'n4' ? { ...n, failFast: false } : n)) };
+    expect(serializeGraphMarkdown(off).endsWith('- kind: stop\n- fail-fast: off\n')).toBe(true);
+    const plain: Graph = { ...g, nodes: g.nodes.map((n) => (n.id === 'n4' ? { ...n, failFast: undefined } : n)) };
+    expect(serializeGraphMarkdown(plain).endsWith('## n4 · Stop\n\n- kind: stop\n')).toBe(true);
+  });
+
+  it('gives the graph back exactly, and writes the same text again', () => {
+    const g = gate();
+    const text = serializeGraphMarkdown(g);
+    expect(reload(g)).toEqual(canonicalGraph(g));
+    expect(serializeGraphMarkdown(reload(g))).toBe(text);
   });
 });

@@ -115,6 +115,8 @@ export function buildFlowEdges(graph: Graph, run: RunMeta | undefined, current: 
     id: e.id,
     source: e.from,
     target: e.to,
+    // A condition's `yes` or `no` arrow is drawn with its label; an unlabeled arrow has no label key.
+    ...(e.label && { label: e.label }),
     markerEnd: { type: MarkerType.ArrowClosed },
     animated: run?.nodes[prefix + e.to]?.status === 'running',
     selected: previous.get(e.id)?.selected ?? false,

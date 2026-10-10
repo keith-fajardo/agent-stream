@@ -105,3 +105,25 @@ describe('Re-run from and Run only a sub-graph step', () => {
     expect([...plan.stale.keys()].sort()).toEqual(['n2', 'n2/n3', 'n3']);
   });
 });
+
+describe('reuse around a stop step inside a sub-graph (R18, R31)', () => {
+  /** Gate: n1 → n2 (condition); yes → n3, no → n4 (stop). */
+  const gate = graph('gate', 'Gate', [
+    agent('Check'),
+    { type: 'addNode', node: { title: 'Needed?', kind: 'condition' } },
+    agent('Work'),
+    { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
+    link('n1', 'n2'),
+    { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+    { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+  ]);
+  /** Outer: n1 → n2 (sub-graph, Gate) → n3. */
+  const outer = graph('outer', 'Outer', [agent('Plan'), { type: 'addNode', node: { title: 'Gate', kind: 'graph', graph: 'gate' } }, agent('Letter'), link('n1', 'n2'), link('n2', 'n3')]);
+
+  it('runs the stop again alone: the sub-graph step after it is reused, and only the failed step re-runs', () => {
+    const x = expand(outer, gate);
+    const nodes: Record<string, NodeRunState> = { ...done(x.graph), 'n2/n2': { status: 'succeeded', verdict: 'yes' }, 'n2/n4': { status: 'skipped' }, n3: { status: 'failed', error: 'boom' } };
+    const reuse = reusableNodeIds(x.graph, { snapshot: x.graph, nodes, scopes: x.scopes }, undefined, undefined, undefined, x.scopes);
+    expect(sorted(reuse)).toEqual(['n1', 'n2', 'n2/n1', 'n2/n2', 'n2/n3']);
+  });
+});

@@ -11,14 +11,18 @@ import {
   loggedUrl,
   scopeOf,
   onlyRunPlan,
+  readVerdict,
   reusableNodeIds,
+  routeNode,
   runModeProblem,
   toRunCheckout,
   topoOrder,
   upstream,
   validateRunnable,
+  verdictInstructionFor,
   workspaceOf,
   type CheckoutInfo,
+  type EdgeLabel,
   type Graph,
   type GraphNode,
   type LeaseHolder,
@@ -127,10 +131,15 @@ type ActiveRun = {
   stopWaiting?: () => void;
   /** This run's variant worktrees, by name. */
   workspaces: Record<string, { path: string; head: string }>;
+  /** The stop step that halted the run; no step launches after it. */
+  halted?: string;
+  /** Running steps cancelled by a fail-fast stop, so their outcome reads cancelled. */
+  abortedByStop: Set<string>;
 };
 
 const DONE_OK: ReadonlySet<NodeStatus> = new Set(['succeeded', 'reused']);
-const BLOCKED: ReadonlySet<NodeStatus> = new Set(['failed', 'not_run', 'cancelled', 'interrupted']);
+const statusesOf = (meta: RunMeta): Record<string, NodeStatus> => Object.fromEntries(Object.entries(meta.nodes).map(([id, s]) => [id, s.status]));
+const verdictsOf = (meta: RunMeta): Record<string, EdgeLabel | undefined> => Object.fromEntries(Object.entries(meta.nodes).map(([id, s]) => [id, s.verdict]));
 const waitingOn = (h: LeaseHolder): WaitingFor => ({ runId: h.runId, graphId: h.graphId, folder: h.folder });
 
 /** Only write-capable steps in this checkout that will actually run need the lease (spec §4.3). */
@@ -190,16 +199,19 @@ export class Runner extends EventEmitter {
       if (!source) return { ok: false, error: `run ${input.sourceRunId} not found` };
     }
     const mode: RunMode | undefined = source ? (input.mode ?? (input.fromNodeId ? 'from' : 'resume')) : undefined;
-    // `reuse`: steps that keep their old result; `notRun`: steps that neither run nor keep one (only `Run only` leaves any).
+    // `reuse`: steps that keep their old result; `notRun`: steps that neither run nor keep one; `carriedSkip`: steps the source
+    // run skipped, which stay skipped (only `Run only` leaves either, R32).
     let reuse = new Set<string>();
     let notRun = new Set<string>();
+    let carriedSkip = new Set<string>();
     let stale = new Map<string, StaleReason>();
     if (source && mode === 'only') {
       const plan = onlyRunPlan(graph, source, input.fromNodeId!, input.rendered, input.attachments, input.scopes);
       if (!plan.ok) return { ok: false, error: plan.error };
       ({ reuse, notRun, stale } = plan);
+      carriedSkip = plan.skipped;
     } else if (source) reuse = reusableNodeIds(graph, source, mode === 'resume' ? undefined : input.fromNodeId, input.rendered, input.attachments, input.scopes);
-    const skipped = new Set([...reuse, ...notRun]);
+    const skipped = new Set([...reuse, ...notRun, ...carriedSkip]);
     for (const n of graph.nodes) {
       const ws = workspaceOf(n);
       if (ws !== null && !skipped.has(n.id) && !input.workspaces?.[ws]) return { ok: false, error: `Step ${n.id} uses workspace "${ws}", but this run has no worktree for it.` };
@@ -258,7 +270,9 @@ export class Runner extends EventEmitter {
           ? { ...source.nodes[n.id], status: 'reused', ...(mark && { stale: { ...mark, runId } }) }
           : notRun.has(n.id)
             ? { status: 'not_run' }
-            : { status: 'queued' };
+            : source && carriedSkip.has(n.id)
+              ? { status: 'skipped', ...(source.nodes[n.id]?.error && { error: source.nodes[n.id].error }) }
+              : { status: 'queued' };
     }
     try {
       this.deps.runStore.create(meta);
@@ -282,6 +296,7 @@ export class Runner extends EventEmitter {
       leaseRoot,
       holdsLease,
       workspaces,
+      abortedByStop: new Set<string>(),
     };
     this.runs.set(meta.id, run);
     if (waitFor) this.waitForLease(run, waitFor.otherWindow);
@@ -298,6 +313,7 @@ export class Runner extends EventEmitter {
   amend(runId: string, change: RunChange, byNodeId: string, summary: string): { ok: true } | { ok: false; error: string } {
     const run = this.runs.get(runId);
     if (!run || run.finished || run.stopping) return { ok: false, error: 'The run was stopped.' };
+    if (run.halted) return { ok: false, error: `The run was stopped at ${run.halted}` };
     const meta = run.meta;
     const exists = (id: string) => meta.snapshot.nodes.some((n) => n.id === id) && meta.nodes[id] !== undefined;
     const started = (id: string) => `${id} already started; the change was not applied.`;
@@ -391,16 +407,29 @@ export class Runner extends EventEmitter {
 
   private schedule(run: ActiveRun): void {
     if (run.finished) return;
+    if (run.halted) this.skipQueued(run, `run stopped at ${run.halted}`);
     if (!run.stopping) {
-      for (const id of run.order) {
+      const nodeOf = (id: string) => run.meta.snapshot.nodes.find((n) => n.id === id);
+      // Ready stop steps launch first, so no step that is ready in the same pass starts after the run should halt (R29).
+      // The whole order follows, which visits each stop again in its place (one not yet ready may be skipped there).
+      const stopsFirst = [...run.order.filter((id) => nodeOf(id)?.kind === 'stop'), ...run.order];
+      for (const id of stopsFirst) {
         if (run.meta.nodes[id].status !== 'queued') continue;
-        const parents = upstream(run.meta.snapshot, id).map((p) => run.meta.nodes[p].status);
-        if (parents.some((s) => BLOCKED.has(s))) {
+        // Every step in the snapshot has a status from start() or amend(): routeNode reads a missing one as dead.
+        const route = routeNode(run.meta.snapshot, statusesOf(run.meta), verdictsOf(run.meta), id);
+        if (route === 'wait') continue;
+        if (route === 'not_run') {
           this.setNode(run, id, { status: 'not_run' });
           continue;
         }
-        if (!parents.every((s) => DONE_OK.has(s)) || run.running.size >= this.deps.maxParallel) continue;
-        const node = run.meta.snapshot.nodes.find((n) => n.id === id)!;
+        if (route === 'skip') {
+          this.setNode(run, id, { status: 'skipped' });
+          continue;
+        }
+        const node = nodeOf(id)!;
+        // A condition or stop step makes no model call and completes in one microtask, so the parallel limit never holds it back (R29).
+        const flow = node.kind === 'condition' || node.kind === 'stop';
+        if (run.halted || (!flow && run.running.size >= this.deps.maxParallel)) continue;
         if (isWriteCapable(node)) {
           // At most one write-capable step per workspace at a time; in the checkout only while the run holds the lease (spec §4.3).
           const workspace = workspaceOf(node);
@@ -413,6 +442,11 @@ export class Runner extends EventEmitter {
     // Queued steps with nothing running can only be waiting for the lease: the run isn't over yet.
     const waitingForLease = !run.stopping && !!run.stopWaiting && run.order.some((id) => run.meta.nodes[id].status === 'queued');
     if (run.running.size === 0 && !waitingForLease) this.finish(run);
+  }
+
+  /** Steps that have not started will not: the run was halted by a stop step. */
+  private skipQueued(run: ActiveRun, reason?: string): void {
+    for (const id of run.order) if (run.meta.nodes[id].status === 'queued') this.setNode(run, id, { status: 'skipped', error: reason });
   }
 
   /** Another write-capable step of this run is running in the same workspace. */
@@ -506,7 +540,8 @@ export class Runner extends EventEmitter {
     Promise.resolve()
       .then((): NodeOutcome => {
         this.emitEvent(run, nodeId, { type: 'start', kind: 'graph', cwd: this.deps.projectDir });
-        const lasts = new Set(upstream(meta.snapshot, nodeId));
+        // A stop step inside the sub-graph is one of its last steps, but has no output to collect.
+        const lasts = new Set(upstream(meta.snapshot, nodeId).filter((id) => meta.snapshot.nodes.find((n) => n.id === id)?.kind !== 'stop'));
         const sections = topoOrder(meta.snapshot)
           .filter((id) => lasts.has(id))
           .map((id) => {
@@ -521,16 +556,65 @@ export class Runner extends EventEmitter {
       .catch((e: unknown) => this.failInternally(run, nodeId, e));
   }
 
+  /** A condition step: no model call. It reads the verdict its parent wrote, and fails if the parent wrote none (spec §3). */
+  private decide(run: ActiveRun, nodeId: string): void {
+    run.running.set(nodeId, new AbortController());
+    this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
+    Promise.resolve()
+      .then(() => {
+        const [parent] = upstream(run.meta.snapshot, nodeId);
+        const verdict = readVerdict(this.deps.runStore.readOutput(run.meta.id, parent));
+        if (!verdict) return this.complete(run, nodeId, { ok: false, output: '', error: `no VERDICT line in ${parent} output` }, 0);
+        this.setNode(run, nodeId, { verdict });
+        this.complete(run, nodeId, { ok: true, output: `VERDICT: ${verdict}` }, 0);
+      })
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
+  }
+
+  /** A stop step: halts the run (spec §3). Its own outcome is succeeded; the run reads `stopped` at the end. */
+  private stopRun(run: ActiveRun, nodeId: string): void {
+    run.running.set(nodeId, new AbortController());
+    this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
+    // Halted now, inside this schedule pass: a step that is ready in the same pass is skipped, never launched (spec §3).
+    this.halt(run, nodeId);
+    Promise.resolve()
+      .then(() => this.complete(run, nodeId, { ok: true, output: '' }, 0))
+      .catch((e: unknown) => this.failInternally(run, nodeId, e));
+  }
+
+  /** Stops new work. Drain leaves running steps alone; fail-fast also aborts them. A run the user stopped stays cancelled. */
+  private halt(run: ActiveRun, stopId: string): void {
+    if (run.stopping) return;
+    run.halted = stopId;
+    run.meta.stoppedBy = stopId;
+    this.persist(run.meta);
+    this.skipQueued(run, `run stopped at ${stopId}`);
+    const failFast = run.meta.snapshot.nodes.find((n) => n.id === stopId)?.failFast === true;
+    if (!failFast) return;
+    for (const [id, controller] of [...run.running]) {
+      if (id === stopId) continue;
+      run.abortedByStop.add(id);
+      try {
+        controller.abort();
+      } catch (e) {
+        // An abort listener that throws must not stop the halt half way, or escape the schedule pass.
+        console.error('[agent-stream] could not cancel step', id, 'of run', run.meta.id, e);
+      }
+    }
+  }
+
   private launch(run: ActiveRun, nodeId: string): void {
     const { meta } = run;
     const node = meta.snapshot.nodes.find((n) => n.id === nodeId)!;
     if (node.kind === 'graph') return this.collect(run, nodeId);
+    if (node.kind === 'condition') return this.decide(run, nodeId);
+    if (node.kind === 'stop') return this.stopRun(run, nodeId);
     const controller = new AbortController();
     run.running.set(nodeId, controller);
     this.deps.broker.beginStep(run.meta.id, nodeId);
     this.setNode(run, nodeId, { status: 'running', startedAt: this.clock() });
     const startedAt = Date.now();
-    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors[node.kind];
+    const executor = node.kind === 'agent' ? (run.agent ?? this.deps.executors.agent) : this.deps.executors.command;
     // What the run resolved for this step when it started; a step added during the run gets the run's own (spec §3.1).
     const use: StepModelUse | undefined = node.kind === 'agent' ? (meta.stepModels?.[nodeId] ?? { model: meta.model, effort: meta.effort }) : undefined;
     let noted = false;
@@ -574,7 +658,9 @@ export class Runner extends EventEmitter {
         const execNode = executionNode(meta, nodeId);
         // The prompt names the inner graph's own workspace name; the folder is the scoped one's (spec §4.3).
         const prompted = scope && execNode.workspace ? { ...execNode, workspace: execNode.workspace.slice(folderId(scope.stepId).length + 1) } : execNode;
-        const prompt = node.kind === 'agent' ? buildNodePrompt(graph, prompted, upstreamResults, place) : '';
+        // An agent step a condition reads ends its reply with a verdict line; the saved graph is unchanged (spec §3).
+        const verdictLine = verdictInstructionFor(meta.snapshot, nodeId);
+        const prompt = node.kind === 'agent' ? [buildNodePrompt(graph, prompted, upstreamResults, place), verdictLine].filter(Boolean).join('\n\n') : '';
         const cwd = place?.path ?? this.deps.projectDir;
         const filesGraph = scope ? { ...meta.snapshot, id: scope.graphId, attachments: scope.attachments } : meta.snapshot;
         const files = stepAttachments({ store: this.attachmentStore, graph: filesGraph, node, cwd, worktree: !!place });
@@ -627,7 +713,9 @@ export class Runner extends EventEmitter {
       console.error('[agent-stream] could not write output for run', run.meta.id, nodeId, e);
     }
     this.emitEvent(run, nodeId, { type: 'result', ok: outcome.ok, durationMs, error: outcome.error, exitCode: outcome.exitCode, usage: outcome.usage });
-    const status: NodeStatus = outcome.ok ? 'succeeded' : run.stopping ? 'cancelled' : 'failed';
+    // A step cut short by Stop or by a fail-fast stop step reads cancelled, not failed.
+    const cut = run.stopping || run.abortedByStop.has(nodeId);
+    const status: NodeStatus = outcome.ok ? 'succeeded' : cut ? 'cancelled' : 'failed';
     this.setNode(run, nodeId, {
       status,
       endedAt: this.clock(),
@@ -672,7 +760,9 @@ export class Runner extends EventEmitter {
     this.endWait(run);
     delete run.meta.waitingFor;
     const statuses = Object.values(run.meta.nodes).map((s) => s.status);
-    run.meta.status = run.stopping ? 'cancelled' : statuses.every((s) => DONE_OK.has(s)) ? 'succeeded' : 'failed';
+    // A run is settled when every step succeeded, was skipped, or was cancelled by its stop step.
+    const settled = statuses.every((s) => DONE_OK.has(s) || s === 'skipped' || (s === 'cancelled' && run.meta.stoppedBy !== undefined));
+    run.meta.status = run.stopping ? 'cancelled' : !settled ? 'failed' : run.meta.stoppedBy ? 'stopped' : 'succeeded';
     run.meta.endedAt = this.clock();
     this.persist(run.meta);
     this.runs.delete(run.meta.id);

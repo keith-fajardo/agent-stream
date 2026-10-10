@@ -86,6 +86,13 @@ describe('buildFlowEdges', () => {
     expect(buildFlowEdges(chain, undefined, current).map((e) => e.selected)).toEqual([false, true]);
   });
 
+  it('carries a label on a labeled edge and none on an unlabeled one', () => {
+    const labeled: Graph = { ...chain, edges: chain.edges.map((e) => (e.id === 'n1->n2' ? { ...e, label: 'yes' as const } : e)) };
+    const [first, second] = buildFlowEdges(labeled, undefined, []);
+    expect(first!.label).toBe('yes');
+    expect('label' in second!).toBe(false);
+  });
+
   it('animates edges into a running node', () => {
     const run = runWith(chain, { n1: { status: 'succeeded' }, n2: { status: 'running' }, n3: { status: 'queued' } });
     expect(buildFlowEdges(chain, run, []).map((e) => e.animated)).toEqual([true, false]);

@@ -33,7 +33,7 @@ export function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
     <div className={classes.filter(Boolean).join(' ')}>
       <Handle type="target" position={Position.Left} />
       <div className="step-title">
-        <span className="kind-icon">{node.kind === 'agent' ? '✦' : node.kind === 'graph' ? '⧉' : '$'}</span>
+        <span className="kind-icon">{node.kind === 'agent' ? '✦' : node.kind === 'graph' ? '⧉' : node.kind === 'condition' ? '◇' : node.kind === 'stop' ? '■' : '$'}</span>
         {node.title}
       </div>
       {subgraph && (

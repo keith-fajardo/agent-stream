@@ -103,7 +103,8 @@ function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
 /**
  * Single source of truth for graphs. Every change goes through `apply`. A graph is two files (Markdown graph files spec
  * §5.1): `<id>.md`, its meaning, and `<id>.meta.json`, positions and bookkeeping.
- * Emits 'fileWarnings' (id, GraphFileError[]) for lines a read dropped (a browser line on a command step).
+ * Emits 'fileWarnings' (id, GraphFileError[]) for lines a read dropped (a browser line on a command step) and for
+ * condition, stop and label shape problems, which no longer block a read (ruling R26).
  */
 export class GraphStore extends EventEmitter {
   private cache = new Map<string, Cached>();
@@ -766,9 +767,9 @@ function revert(baseline: Graph, graph: Graph, target: ChangeTarget, at: string)
   }
   const edge = findEdge(baseline, graph, target.id);
   if (!edge) return { ok: false, error: `edge ${target.id} does not exist` };
-  const wasThere = baseline.edges.some((e) => sameEnds(e, edge));
+  const inBaseline = baseline.edges.find((e) => sameEnds(e, edge));
   const edges = graph.edges.filter((e) => !sameEnds(e, edge));
-  return checked({ ...graph, edges: wasThere ? [...edges, { id: edgeId(edge.from, edge.to), from: edge.from, to: edge.to }] : edges, updatedAt: at });
+  return checked({ ...graph, edges: inBaseline ? [...edges, { id: edgeId(edge.from, edge.to), from: edge.from, to: edge.to, ...(inBaseline.label && { label: inBaseline.label }) }] : edges, updatedAt: at });
 }
 
 function withoutPosition(node: GraphNode): GraphNode {

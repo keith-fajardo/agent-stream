@@ -136,7 +136,7 @@ describe('sub-graph step problems, in the form of other bad step lines', () => {
 
   it('names graph among the step fields, and reads kind: graph', () => {
     expect(errors(md('# G', '## n1 · A', '- colour: red', FENCE + 'prompt', FENCE))).toEqual([
-      { line: 3, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model, effort, browser, attach and graph.' },
+      { line: 3, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model, effort, browser, attach, graph and fail-fast.' },
     ]);
     expect(errors(md('# G', '## n1 · A', '- kind: graph', '- graph: g2'))).toEqual([]);
   });

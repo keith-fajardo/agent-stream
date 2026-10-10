@@ -41,7 +41,7 @@ export function undoState(g: Graph): string {
     variables: [...g.variables].sort(byKey((v) => v.name)),
     attachments: g.attachments ?? [],
     nodes: [...g.nodes].sort(byKey((n) => n.id)).map(({ createdBy: _c, updatedBy: _u, updatedAt: _a, ...n }) => n),
-    edges: g.edges.map((e) => `${e.from}->${e.to}`).sort(),
+    edges: g.edges.map((e) => `${e.from}->${e.to}${e.label ? `|${e.label}` : ''}`).sort(),
   });
 }
 
@@ -53,7 +53,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
     instructions: g.instructions,
     variables: g.variables.map((v) => ({ name: v.name, description: v.description, line: 1 })),
     ...(g.attachments?.length && { attachments: { names: [...g.attachments], line: 1 } }),
-    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, browser, attachments, description, prompt, command, graph, values }) => ({
+    steps: g.nodes.map(({ id, title, kind, access, workspace, timeoutSec, model, effort, browser, failFast, attachments, description, prompt, command, graph, values }) => ({
       id,
       title,
       kind,
@@ -63,6 +63,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
       ...(model && { model }),
       ...(effort && { effort }),
       ...(kind === 'agent' && browser === true && { browser: true as const }),
+      ...(kind === 'stop' && failFast === true && { failFast: true as const }),
       ...(kind === 'graph' && graph && { graph }),
       ...(kind === 'graph' && values && Object.keys(values).length > 0 && { values: { ...values } }),
       ...(attachments?.length && { attachments: [...attachments] }),
@@ -71,7 +72,7 @@ export function graphAsDoc(g: Graph): GraphDoc {
       ...(command && { command }),
       line: 1,
     })),
-    edges: g.edges.map((e) => ({ from: e.from, to: e.to, line: 1 })),
+    edges: g.edges.map((e) => ({ from: e.from, to: e.to, line: 1, ...(e.label && { label: e.label }) })),
   };
 }
 

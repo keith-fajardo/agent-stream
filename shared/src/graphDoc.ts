@@ -22,6 +22,8 @@ export type DocStep = {
   effort?: EffortLevel;
   /** Agent steps only: `- browser: on` (browser spec §2.1). */
   browser?: true;
+  /** Stop steps only: `- fail-fast: on`, or `off` (kept as written; canonical form keeps only true). */
+  failFast?: boolean;
   /** Sub-graph steps only: `- graph: <id>` and the ```value <name>``` blocks (sub-graphs spec §2.2). */
   graph?: string;
   values?: Record<string, string>;
@@ -37,7 +39,10 @@ export type DocVariable = { name: string; description: string; line: number };
 export type DocAttachments = { names: string[]; line: number };
 /** A graph's meaning as its Markdown file states it (Markdown graph files spec §3.1). Positions and bookkeeping are in the side file. */
 export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; attachments?: DocAttachments; steps: DocStep[]; edges: FlowEdge[] };
-/** `warnings`: lines Agent Stream dropped while reading (a browser line on a command step); the file still reads. */
+/**
+ * `warnings`: lines Agent Stream dropped while reading (a browser line on a command step), and condition, stop and label
+ * shape problems (ruling R26, still refused by validateRunnable); the file still reads.
+ */
 export type ParseGraphResult = { ok: true; doc: GraphDoc; warnings?: GraphFileError[] } | { ok: false; errors: GraphFileError[] };
 
 /** CRLF and lone CR as LF. */
@@ -73,13 +78,13 @@ export function canonicalGraph(graph: Graph): Graph {
     variables: graph.variables.map((v) => ({ name: v.name, description: oneLine(v.description) })),
     ...(graph.attachments?.length ? { attachments: [...graph.attachments] } : { attachments: undefined }),
     nodes,
-    edges: graph.edges.map((e) => ({ id: edgeId(e.from, e.to), from: e.from, to: e.to })),
+    edges: graph.edges.map((e) => ({ id: edgeId(e.from, e.to), from: e.from, to: e.to, ...(e.label && { label: e.label }) })),
     nodeSeq: Math.max(graph.nodeSeq, ...nodes.map((n) => seqOf(n.id))),
   };
 }
 
 function canonicalNode(node: GraphNode): GraphNode {
-  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, browser, graph, values, ...rest } = node;
+  const { prompt, command, description, timeoutSec, access, workspace, model, effort, attachments, browser, failFast, graph, values, ...rest } = node;
   const isGraph = node.kind === 'graph';
   const text = normText((node.kind === 'agent' ? prompt : node.kind === 'command' ? command : '') ?? '');
   const summary = oneLine(description ?? '');
@@ -95,6 +100,7 @@ function canonicalNode(node: GraphNode): GraphNode {
     ...(node.kind === 'agent' && effort && { effort }),
     ...(node.kind === 'agent' && attachments?.length && { attachments: [...attachments] }),
     ...(node.kind === 'agent' && browser === true && { browser: true }),
+    ...(node.kind === 'stop' && failFast === true && { failFast: true }),
     ...(isGraph && graph && { graph }),
     ...(isGraph && values && Object.keys(values).length > 0 && { values: sortedValues(values) }),
   };
@@ -142,7 +148,7 @@ export function legacyGraphForMarkdown(
       ...graph,
       name,
       nodes: graph.nodes.map((n) => ({ ...n, id: idOf(n.id), title: oneLine(n.title) ? n.title : UNTITLED_STEP })),
-      edges: graph.edges.map((e) => ({ id: edgeId(idOf(e.from), idOf(e.to)), from: idOf(e.from), to: idOf(e.to) })),
+      edges: graph.edges.map((e) => ({ id: edgeId(idOf(e.from), idOf(e.to)), from: idOf(e.from), to: idOf(e.to), ...(e.label && { label: e.label }) })),
       nodeSeq: Math.max(graph.nodeSeq, seq),
     },
     renamed: [...to].filter(([from, next]) => from !== next).map(([from, next]) => ({ from, to: next })),

@@ -4,8 +4,9 @@ import { ONLY_AGENT_STEPS_BROWSER } from './browser';
 import { ONLY_AGENT_STEPS_MODEL, stepModelProblem, stepModelText } from './stepModels';
 import { graphIdProblem, ONLY_SUBGRAPH_STEPS_GRAPH, setsStepField, sortedValues, SUBGRAPH_FIELDS_ONLY, SUBGRAPH_NEEDS_GRAPH, subgraphValuesProblem, valuesText } from './subgraphStep';
 import { innerStepIds, scopeOf, subgraphFirstSteps, type Scope } from './subgraphs';
+import { shapeProblems } from './shape';
 import { variableNameProblem } from './variables';
-import type { Actor, Graph, GraphNode, GraphResult, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
+import type { Actor, Graph, GraphNode, GraphResult, NodeKind, NodePatch, NodeRunState, Op, RenderedRun, RunAttachment, RunMode, StaleMark } from './types';
 
 /** 1 to 64 letters, digits, - and _; no "--" and no trailing "-", so every id can be written in the Flow (an arrow starts at a "-"). */
 const NODE_ID_RE = /^(?!.*--)(?=.{1,64}$)[A-Za-z0-9_-]*[A-Za-z0-9_]$/;
@@ -52,6 +53,30 @@ export function nextNodeId(graph: Graph): string {
   return `n${max + 1}`;
 }
 
+/** The first agent or command field a new condition or stop step, or a patch to one, sets; null when it sets none. Clearing one (0, '', null, [], false, write) doesn't set it. */
+function agentFieldOn(kind: NodeKind, f: { timeoutSec?: number; access?: string; workspace?: string; model?: unknown; effort?: unknown; attachments?: string[]; browser?: boolean }): string | null {
+  if (kind !== 'condition' && kind !== 'stop') return null;
+  const set: [string, boolean][] = [
+    ['timeout', (f.timeoutSec ?? 0) > 0],
+    ['access', f.access === 'read'],
+    ['workspace', !!f.workspace?.trim()],
+    ['model', !!f.model],
+    ['effort', !!f.effort],
+    ['attachments', !!f.attachments?.length],
+    ['browser', f.browser === true],
+  ];
+  const field = set.find(([, on]) => on)?.[0];
+  return field ? `a ${kind} step can't have ${field}. Remove it.` : null;
+}
+
+/** A condition or stop step has no prompt or command (spec §2, ruling R30); an empty one is a clear and is allowed. Null when none is set. */
+function flowTextOn(kind: NodeKind, f: { prompt?: string; command?: string }): string | null {
+  if (kind !== 'condition' && kind !== 'stop') return null;
+  const field = f.prompt ? 'a prompt' : f.command ? 'a command' : null;
+  if (!field) return null;
+  return `a ${kind} step can't have ${field}. ${kind === 'condition' ? 'Put the question in the step before it.' : 'Remove it.'}`;
+}
+
 function definedOnly<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
@@ -79,6 +104,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!title) return fail('a node needs a title');
       if ((op.node.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       if (op.node.access === 'read' && op.node.kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const agentField = agentFieldOn(op.node.kind, op.node) ?? flowTextOn(op.node.kind, op.node);
+      if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(op.node.model, op.node.effort);
       if (modelProblem) return fail(modelProblem);
       if ((op.node.model || op.node.effort) && op.node.kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
@@ -113,6 +140,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         attachments: op.node.attachments?.length ? [...op.node.attachments] : undefined,
         // Only `true` is stored: off is no field (spec §2.1).
         browser: op.node.browser === true ? true : undefined,
+        // Stored when set, true or false, as the file writer does; shapeProblems rejects it on a step that is not a stop.
+        failFast: op.node.failFast,
         graph: isGraph ? op.node.graph : undefined,
         // An empty map is no field; the values are kept in name order.
         values: isGraph && op.node.values && Object.keys(op.node.values).length > 0 ? sortedValues(op.node.values) : undefined,
@@ -134,6 +163,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if ((patch.description?.length ?? 0) > MAX_DESCRIPTION_CHARS) return fail(DESCRIPTION_TOO_LONG);
       const kind = patch.kind ?? node.kind;
       if (access === 'read' && kind === 'command') return fail(COMMAND_ALWAYS_WRITES);
+      const agentField = agentFieldOn(kind, { timeoutSec, access, workspace, model, effort, attachments, browser }) ?? flowTextOn(kind, patch);
+      if (agentField) return fail(agentField);
       const modelProblem = stepModelProblem(model ?? undefined, effort ?? undefined);
       if (modelProblem) return fail(modelProblem);
       if ((model || effort) && kind === 'command') return fail(ONLY_AGENT_STEPS_MODEL);
@@ -152,8 +183,10 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       const valuesProblem = values ? subgraphValuesProblem(values) : null;
       if (valuesProblem) return fail(valuesProblem);
       const nextValues = isGraph ? (values ?? node.values) : undefined;
-      let nextWorkspace = isGraph ? undefined : node.workspace;
-      if (workspace !== undefined && !isGraph) {
+      // A condition or stop step has neither a workspace nor a timeout, so becoming one drops both (spec §2).
+      const bare = kind === 'condition' || kind === 'stop';
+      let nextWorkspace = isGraph || bare ? undefined : node.workspace;
+      if (workspace !== undefined && !isGraph && !bare) {
         const trimmed = workspace.trim();
         const problem = trimmed === '' ? null : workspaceNameProblem(trimmed);
         if (problem) return fail(problem);
@@ -162,7 +195,7 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       // A command step can always change files, so becoming one drops `access` (spec §3.1).
       const nextAccess = kind !== 'agent' ? undefined : (access ?? node.access) === 'read' ? 'read' : undefined;
       // 0 clears the timeout; a missing one keeps it.
-      const nextTimeout = isGraph ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
+      const nextTimeout = isGraph || bare ? undefined : timeoutSec === undefined ? node.timeoutSec : timeoutSec > 0 ? timeoutSec : undefined;
       // Only agent steps have a model or effort, so becoming a command step drops both (spec §2.1); null clears one.
       const nextModel = kind !== 'agent' || model === null ? undefined : (model ?? node.model);
       const nextEffort = kind !== 'agent' || effort === null ? undefined : (effort ?? node.effort);
@@ -171,12 +204,14 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       // And the browser (browser spec §2.1); false turns it off.
       const nextBrowser = kind !== 'agent' ? false : (browser ?? node.browser === true);
       const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, graph: _graph, values: _values, ...kept } = node;
-      // A sub-graph step has no prompt or command: neither the old one nor one the patch clears.
+      // A sub-graph, condition or stop step has no prompt or command: neither the old one nor one the patch clears, so a
+      // kind change never leaves a refused field behind (R30).
       const { prompt: _prompt, command: _command, ...keptBase } = kept;
       const { prompt: _patchPrompt, command: _patchCommand, ...patchBase } = patch;
+      const noText = isGraph || bare;
       const updated: GraphNode = {
-        ...(isGraph ? keptBase : kept),
-        ...(isGraph ? patchBase : patch),
+        ...(noText ? keptBase : kept),
+        ...(noText ? patchBase : patch),
         ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),
@@ -189,7 +224,10 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         updatedBy: by,
         updatedAt: now,
       };
-      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? updated : n)) });
+      // Fail-fast is stored only as `true` on a stop step: off, or on another kind of step, is no field (spec §2.1).
+      const { failFast, ...unflagged } = updated;
+      const stored: GraphNode = kind === 'stop' && failFast === true ? { ...unflagged, failFast: true } : unflagged;
+      return done({ nodes: graph.nodes.map((n) => (n.id === op.id ? stored : n)) });
     }
     case 'deleteNode': {
       if (!has(op.id)) return fail(`node ${op.id} does not exist`);
@@ -203,8 +241,9 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       if (!has(op.to)) return fail(`node ${op.to} does not exist`);
       if (op.from === op.to) return fail('a node cannot depend on itself');
       if (graph.edges.some((e) => e.from === op.from && e.to === op.to)) return fail(`${op.from} -> ${op.to} already exists`);
+      if (op.label && graph.nodes.find((n) => n.id === op.from)?.kind !== 'condition') return fail(`only an arrow out of a condition step can be labeled yes or no`);
       if (wouldCreateCycle(graph, op.from, op.to)) return fail(`connecting ${op.from} -> ${op.to} would create a cycle`);
-      return done({ edges: [...graph.edges, { id: edgeId(op.from, op.to), from: op.from, to: op.to }] });
+      return done({ edges: [...graph.edges, { id: edgeId(op.from, op.to), from: op.from, to: op.to, ...(op.label && { label: op.label }) }] });
     }
     case 'disconnect': {
       if (!graph.edges.some((e) => e.from === op.from && e.to === op.to)) return fail(`${op.from} -> ${op.to} does not exist`);
@@ -323,8 +362,8 @@ export function contentSignature(g: Graph): string {
     instructions: g.instructions,
     attachments: g.attachments ?? [],
     // A sub-graph step's graph and values are added only for it, so graphs without one keep their signature.
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : [])]),
-    edges: g.edges.map((e) => e.id).sort(),
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : []), ...(n.kind === 'stop' ? [n.failFast === true] : [])]),
+    edges: g.edges.map((e) => `${e.id}${e.label ? `:${e.label}` : ''}`).sort(),
   });
 }
 
@@ -337,6 +376,7 @@ export function validateRunnable(graph: Graph): string[] {
     if (n.kind === 'graph' && !n.graph) problems.push(`${n.id} "${n.title}": a sub-graph step needs a graph.`);
   }
   if (topoOrder(graph).length !== graph.nodes.length) problems.push('The graph has a cycle.');
+  problems.push(...shapeProblems(graph).map((p) => p.message));
   return problems;
 }
 
@@ -344,6 +384,11 @@ export type RunSource = { snapshot: Graph; nodes: Record<string, NodeRunState>; 
 
 function sameSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/** The arrows into `id` as `from:label` (no label: `from:`), so a changed yes/no label is another input. */
+function incoming(graph: Graph, id: string): string[] {
+  return graph.edges.filter((e) => e.to === id).map((e) => `${e.from}:${e.label ?? ''}`);
 }
 
 /** Every node that reaches `id` by following edges backward. */
@@ -427,7 +472,8 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
     const sameScope = (prevScope?.graphId ?? '') === (scope?.graphId ?? '');
     const sameSubgraph = n.kind !== 'graph' || ((prev?.graph ?? '') === (n.graph ?? '') && valuesText(prev?.values) === valuesText(n.values));
     const sameDefinition = !!prev && prev.kind === n.kind && sameText && sameDescription && sameAccess && samePlace && sameModel && sameFiles && sameBrowser && sameScope && sameSubgraph;
-    const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id));
+    // The label on an arrow into a step (yes or no out of a condition) is part of its inputs.
+    const sameInputs = !!prev && sameSet(upstream(graph, n.id), upstream(source.snapshot, n.id)) && sameSet(incoming(graph, n.id), incoming(source.snapshot, n.id));
     if (!sameDefinition || !sameInputs) changed.add(n.id);
   }
   return changed;
@@ -435,18 +481,25 @@ export function changedSinceSource(graph: Graph, source: RunSource, rendered?: R
 
 /**
  * Node ids a re-run may reuse from `source` (spec §7.2). A node executes again when it is
- * `fromNodeId`, did not succeed last time or is marked stale, changed (see changedSinceSource), or has a workspace
- * — and so does everything downstream of it. With no `fromNodeId` this is a retry from where the run stopped. Everything else is reused.
- * Re-run from a sub-graph step starts at its inner first steps (sub-graphs spec §4.5).
+ * `fromNodeId`, did not succeed last time or is marked stale, changed (see changedSinceSource) or has a workspace
+ * — and so does everything downstream of it. A step that the source run skipped, and a stop step, also execute again, but
+ * alone (ruling R31): its result was no result, so the steps after it that succeeded are still current, and the routing
+ * decides again whether it runs (a reused condition keeps its verdict). With no `fromNodeId` this is a retry from where
+ * the run stopped. Everything else is reused. Re-run from a sub-graph step starts at its inner first steps (sub-graphs spec §4.5).
  */
 export function reusableNodeIds(graph: Graph, source: RunSource, fromNodeId?: string, rendered?: RenderedRun, attachments?: readonly RunAttachment[], scopes?: Record<string, Scope>): Set<string> {
   const seeds = new Set<string>(fromNodeId ? fromSeeds(graph, fromNodeId) : []);
+  /** Steps that execute again without their descendants. */
+  const alone = new Set<string>();
   const changed = changedSinceSource(graph, source, rendered, attachments, scopes);
   for (const n of graph.nodes) {
+    const state = source.nodes[n.id];
     // A step with a workspace is never reused: its files lived in that run's own worktree (spec §4.3a).
-    if (!isCurrent(source.nodes[n.id]) || changed.has(n.id) || n.workspace) seeds.add(n.id);
+    if ((!isCurrent(state) && state?.status !== 'skipped') || changed.has(n.id) || n.workspace) seeds.add(n.id);
+    // A stop step always runs again (R18): only running it halts the run, so a reused one would let a retry read succeeded.
+    else if (state?.status === 'skipped' || n.kind === 'stop') alone.add(n.id);
   }
-  const execute = new Set(seeds);
+  const execute = new Set([...seeds, ...alone]);
   for (const id of seeds) for (const d of descendants(graph, id)) execute.add(d);
   return new Set(graph.nodes.map((n) => n.id).filter((id) => !execute.has(id)));
 }
@@ -468,12 +521,12 @@ export function staleNote(mark: Pick<StaleMark, 'reason' | 'nodeId'>, ownId?: st
 }
 
 export type OnlyRunPlan =
-  | { ok: true; reuse: Set<string>; notRun: Set<string>; stale: Map<string, StaleReason> }
+  | { ok: true; reuse: Set<string>; notRun: Set<string>; skipped: Set<string>; stale: Map<string, StaleReason> }
   | { ok: false; error: string };
 
 /**
  * What `Run only` does (retry options): `nodeId` runs, alone. Every other step that succeeded (or was reused) is reused,
- * workspace or not; one that didn't is not run. A reused step is marked stale when it follows `nodeId` (`upstream`) or was
+ * workspace or not; one the source run skipped stays skipped (ruling R32); any other one is not run. A reused step is marked stale when it follows `nodeId` (`upstream`) or was
  * edited since (`edited`), and a step following a stale one is stale for the same reason; a mark it already carries stays.
  * Refused unless every ancestor of `nodeId` has a current result: it succeeded, isn't stale and is unchanged. Also refused for a
  * step in a workspace when an ancestor shares it: the new worktree starts from HEAD, without the changes that ancestor made.
@@ -496,6 +549,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
   const after = descendants(graph, nodeId);
   const reuse = new Set<string>();
   const notRun = new Set<string>();
+  const skipped = new Set<string>();
   const stale = new Map<string, StaleReason>();
   /** Every reused step's mark, the new and the one it already carried: what the steps after it inherit. */
   const marked = new Map<string, StaleReason>();
@@ -503,7 +557,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
     if (group.has(id)) continue;
     const state = source.nodes[id];
     if (!didSucceed(state)) {
-      notRun.add(id);
+      (state?.status === 'skipped' ? skipped : notRun).add(id);
       continue;
     }
     reuse.add(id);
@@ -518,7 +572,7 @@ export function onlyRunPlan(graph: Graph, source: RunSource, nodeId: string, ren
       marked.set(id, mark);
     }
   }
-  return { ok: true, reuse, notRun, stale };
+  return { ok: true, reuse, notRun, skipped, stale };
 }
 
 /** Why a start request's mode, step and source run don't fit together, or null. Absent mode: the older requests, always allowed. */

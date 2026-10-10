@@ -15,7 +15,7 @@ function flowLines(graph: Graph): string[] {
   const label = new Map(graph.nodes.map((n) => [n.id, mermaidLabel(n.title)]));
   const ref = (id: string) => `${id}${label.get(id) ?? ''}`;
   const connected = new Set(graph.edges.flatMap((e) => [e.from, e.to]));
-  return ['flowchart LR', ...graph.edges.map((e) => `  ${ref(e.from)} --> ${ref(e.to)}`), ...graph.nodes.filter((n) => !connected.has(n.id)).map((n) => `  ${ref(n.id)}`)];
+  return ['flowchart LR', ...graph.edges.map((e) => `  ${ref(e.from)} -->${e.label ? `|${e.label}|` : ''} ${ref(e.to)}`), ...graph.nodes.filter((n) => !connected.has(n.id)).map((n) => `  ${ref(n.id)}`)];
 }
 
 /** A fenced block whose fence the content can't close. Empty content has no lines between the fences. */
@@ -48,7 +48,10 @@ function stepLines(node: GraphNode): string[] {
   // Written only when on (browser spec §2.1).
   if (node.kind === 'agent' && node.browser) fields.push('- browser: on');
   if (node.kind === 'agent') for (const name of node.attachments ?? []) fields.push(`- attach: ${name}`);
+  // Stop steps only: on, or off when the step has the field; no line means the run drains (spec §2.1).
+  if (node.kind === 'stop' && node.failFast !== undefined) fields.push(`- fail-fast: ${node.failFast ? 'on' : 'off'}`);
   const description = oneLine(node.description ?? '');
+  if (node.kind === 'condition' || node.kind === 'stop') return [`## ${node.id}${STEP_SEPARATOR}${oneLine(node.title)}`, '', ...fields, ...(description ? ['', `> ${description}`] : [])];
   const text = normText((node.kind === 'agent' ? node.prompt : node.command) ?? '');
   return [
     `## ${node.id}${STEP_SEPARATOR}${oneLine(node.title)}`,

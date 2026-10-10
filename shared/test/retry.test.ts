@@ -94,6 +94,15 @@ describe('onlyRunPlan', () => {
     expect(Object.fromEntries(plan.stale)).toEqual({ n3: { reason: 'upstream', nodeId: 'n2' } });
   });
 
+  it('carries a step the source run skipped as skipped, not as not run (R32)', () => {
+    const nodes = { ...allOk(wide), n4: { status: 'skipped' as const, error: 'not on the taken branch' }, n5: ok('failed') };
+    const plan = onlyRunPlan(wide, { snapshot: wide, nodes }, 'n2');
+    if (!plan.ok) throw new Error(plan.error);
+    expect([...plan.skipped]).toEqual(['n4']);
+    expect([...plan.notRun]).toEqual(['n5']);
+    expect(plan.reuse.has('n4')).toBe(false);
+  });
+
   it('marks a reused step that was edited since, and propagates to its descendants', () => {
     const withLeaf = build([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
     const edited = edit(withLeaf, 'n2', 'edited');

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOp,
+  changedSinceSource,
   contentSignature,
   descendants,
   emptyGraph,
@@ -185,6 +186,42 @@ describe('validateRunnable', () => {
   });
 });
 
+describe('labels in signatures and reuse', () => {
+  const branch = (label: 'yes' | 'no'): Graph =>
+    build([{ type: 'addNode', node: { title: 'Ready', kind: 'condition' } }, cmd('Ship', 'ship'), { type: 'connect', from: 'n1', to: 'n2', label }]);
+  const allOk = (g: Graph): Record<string, NodeRunState> => Object.fromEntries(g.nodes.map((n) => [n.id, { status: 'succeeded' as const }]));
+
+  it('a label change changes the content signature', () => {
+    expect(contentSignature(branch('yes'))).not.toBe(contentSignature(branch('no')));
+    expect(contentSignature(branch('yes'))).toBe(contentSignature(branch('yes')));
+  });
+
+  it('fail-fast on a stop step changes the content signature; missing and false are the same', () => {
+    const stop = (failFast?: boolean) => build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', ...(failFast !== undefined && { failFast }) } }]);
+    expect(contentSignature(stop(true))).not.toBe(contentSignature(stop(false)));
+    expect(contentSignature(stop(true))).not.toBe(contentSignature(stop()));
+    expect(contentSignature(stop(false))).toBe(contentSignature(stop()));
+  });
+
+  it('an unlabeled graph keeps its edge signature entry', () => {
+    expect(contentSignature(build([agent('a'), agent('b'), link('n1', 'n2')]))).toContain('"edges":["n1->n2"]');
+  });
+
+  it('a step whose incoming arrow changed label is not reused', () => {
+    const before = branch('yes');
+    expect([...changedSinceSource(branch('no'), { snapshot: before, nodes: allOk(before) })]).toEqual(['n2']);
+    expect([...changedSinceSource(branch('yes'), { snapshot: before, nodes: allOk(before) })]).toEqual([]);
+    expect([...reusableNodeIds(branch('no'), { snapshot: before, nodes: allOk(before) })]).toEqual(['n1']);
+  });
+});
+
+describe('addNode and fail-fast', () => {
+  it('keeps failFast on a stop step, and leaves it undefined when not given', () => {
+    expect(build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }]).nodes[0].failFast).toBe(true);
+    expect(build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop' } }]).nodes[0].failFast).toBeUndefined();
+  });
+});
+
 describe('reusableNodeIds', () => {
   const chain = build([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
   const allOk = (g: Graph): Record<string, NodeRunState> =>
@@ -192,6 +229,63 @@ describe('reusableNodeIds', () => {
 
   it('re-runs the chosen node and its descendants, reusing the rest', () => {
     expect([...reusableNodeIds(chain, { snapshot: chain, nodes: allOk(chain) }, 'n2')]).toEqual(['n1']);
+  });
+
+  it('never reuses a stop step, even when it succeeded last time (R18)', () => {
+    const g = build([
+      agent('check'),
+      { type: 'addNode', node: { title: 'needed?', kind: 'condition' } },
+      agent('work'),
+      { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
+      link('n1', 'n2'),
+      { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+      { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    ]);
+    expect(validateRunnable(g)).toEqual([]);
+    const reuse = reusableNodeIds(g, { snapshot: g, nodes: allOk(g) });
+    expect(reuse.has('n4')).toBe(false);
+    expect([...reuse].sort()).toEqual(['n1', 'n2', 'n3']);
+  });
+
+  // P -> C; C yes -> A, C no -> B; A and B -> J; J -> K (R31).
+  const joined = build([
+    agent('check'),
+    { type: 'addNode', node: { title: 'needed?', kind: 'condition' } },
+    agent('a'),
+    agent('b'),
+    agent('join'),
+    agent('after'),
+    link('n1', 'n2'),
+    { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+    { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    link('n3', 'n5'),
+    link('n4', 'n5'),
+    link('n5', 'n6'),
+  ]);
+  const yesRun = (): Record<string, NodeRunState> => ({
+    n1: { status: 'succeeded' },
+    n2: { status: 'succeeded', verdict: 'yes' },
+    n3: { status: 'succeeded' },
+    n4: { status: 'skipped', error: 'not on the taken branch' },
+    n5: { status: 'succeeded' },
+    n6: { status: 'failed', error: 'boom' },
+  });
+
+  it('a skipped branch runs again alone: the join after it is reused and the failed step re-runs (R31)', () => {
+    expect(validateRunnable(joined)).toEqual([]);
+    const reuse = reusableNodeIds(joined, { snapshot: joined, nodes: yesRun() });
+    expect([...reuse].sort()).toEqual(['n1', 'n2', 'n3', 'n5']);
+    // The skipped step is evaluated again (and stays skipped, as the reused verdict is yes); the failed one re-runs.
+    expect(reuse.has('n4')).toBe(false);
+    expect(reuse.has('n6')).toBe(false);
+  });
+
+  it('an edited upstream prompt re-runs the check and everything after it (spec §6)', () => {
+    const r = applyOp(joined, { type: 'updateNode', id: 'n1', patch: { prompt: 'check it again' } }, 'user', T2);
+    if (!r.ok) throw new Error(r.error);
+    expect([...reusableNodeIds(r.graph, { snapshot: joined, nodes: yesRun() })]).toEqual([]);
+    // Unedited, the verdict is reused and the check is not spent again.
+    expect(reusableNodeIds(joined, { snapshot: joined, nodes: yesRun() }).has('n2')).toBe(true);
   });
 
   it('re-runs nodes that did not succeed last time', () => {
@@ -442,5 +536,63 @@ describe('legacy ids', () => {
     expect(parseGraph({ ...g, nodes: [node('a b')], edges: [] })).toMatchObject({ ok: false });
     const r = applyOp(emptyGraph('g', 'G', 't'), { type: 'addNode', node: node('fix-') }, 'user', 't');
     expect(r).toEqual({ ok: false, error: `invalid node id "fix-". ${ID_RULE}` });
+  });
+});
+
+describe('condition and stop steps refuse agent and command fields', () => {
+  const T = '2026-10-10T00:00:00.000Z';
+  it('addNode refuses a timeout on a condition and a workspace on a stop, naming the field and the kind', () => {
+    const none = emptyGraph('g', 'G', T);
+    const timeout = applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', timeoutSec: 30 } }, 'user', T);
+    expect(timeout).toEqual({ ok: false, error: "a condition step can't have timeout. Remove it." });
+    const workspace = applyOp(none, { type: 'addNode', node: { title: 'Halt', kind: 'stop', workspace: 'wh_a' } }, 'user', T);
+    expect(workspace).toEqual({ ok: false, error: "a stop step can't have workspace. Remove it." });
+  });
+
+  it('updateNode refuses a timeout on an existing stop and leaves the graph unchanged', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }]);
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 30 } }, 'user', T)).toEqual({ ok: false, error: "a stop step can't have timeout. Remove it." });
+    expect(g.nodes[0].timeoutSec).toBeUndefined();
+  });
+
+  it('addNode refuses a prompt on a condition and a command on a stop, and allows empty ones (R30)', () => {
+    const none = emptyGraph('g', 'G', T);
+    const prompt = applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', prompt: 'Is it ready?' } }, 'user', T);
+    expect(prompt).toEqual({ ok: false, error: "a condition step can't have a prompt. Put the question in the step before it." });
+    const command = applyOp(none, { type: 'addNode', node: { title: 'Halt', kind: 'stop', command: 'echo' } }, 'user', T);
+    expect(command).toEqual({ ok: false, error: "a stop step can't have a command. Remove it." });
+    expect(applyOp(none, { type: 'addNode', node: { title: 'Ready?', kind: 'condition', prompt: '', command: '' } }, 'user', T).ok).toBe(true);
+  });
+
+  it('updateNode refuses a prompt on a stop and a command on a condition, and still clears them (R30)', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop' } }, { type: 'addNode', node: { title: 'Ready?', kind: 'condition' } }]);
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { prompt: 'Stop now' } }, 'user', T)).toEqual({ ok: false, error: "a stop step can't have a prompt. Remove it." });
+    expect(applyOp(g, { type: 'updateNode', id: 'n2', patch: { command: 'echo' } }, 'user', T)).toEqual({ ok: false, error: "a condition step can't have a command. Put the question in the step before it." });
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { prompt: '', command: '' } }, 'user', T).ok).toBe(true);
+  });
+
+  it('updateNode clears the stored prompt and command of a step that becomes a condition or a stop (R30 follow-up)', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'Is it ready?' } }, cmd('Build', 'make')]);
+    const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition' } }, 'user', T);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.graph.nodes[0]).toMatchObject({ kind: 'condition' });
+    expect(r.graph.nodes[0]).not.toHaveProperty('prompt');
+    const s = applyOp(g, { type: 'updateNode', id: 'n2', patch: { kind: 'stop' } }, 'user', T);
+    if (!s.ok) throw new Error(s.error);
+    expect(s.graph.nodes[1]).toMatchObject({ kind: 'stop' });
+    expect(s.graph.nodes[1]).not.toHaveProperty('command');
+    expect(validateRunnable(r.graph).join('\n')).not.toMatch(/has no prompt or command/);
+    // An explicit prompt with the kind change is still refused.
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition', prompt: 'Is it ready?' } }, 'user', T)).toEqual({ ok: false, error: "a condition step can't have a prompt. Put the question in the step before it." });
+  });
+
+  it('updateNode drops the timeout and workspace of a step that becomes a condition, and still clears with 0 or an empty workspace', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'p', timeoutSec: 30, workspace: 'wh_a' } }]);
+    const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition' } }, 'user', T);
+    expect(r.ok && r.graph.nodes[0]).toMatchObject({ kind: 'condition' });
+    expect(r.ok && r.graph.nodes[0].timeoutSec).toBeUndefined();
+    expect(r.ok && r.graph.nodes[0].workspace).toBeUndefined();
+    const cleared = applyOp(r.ok ? r.graph : g, { type: 'updateNode', id: 'n1', patch: { timeoutSec: 0, workspace: '' } }, 'user', T);
+    expect(cleared.ok).toBe(true);
   });
 });

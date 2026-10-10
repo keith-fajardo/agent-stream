@@ -35,6 +35,8 @@ const STATUS_LABELS: Record<NodeStatus | RunStatus, string> = {
   cancelled: 'Cancelled',
   reused: 'Reused',
   interrupted: 'Interrupted',
+  skipped: 'Skipped',
+  stopped: 'Stopped',
 };
 
 export function statusLabel(status: NodeStatus | RunStatus): string {

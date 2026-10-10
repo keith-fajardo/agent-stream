@@ -72,10 +72,14 @@ beforeEach(() => vi.mocked(send).mockClear());
 const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
 
 describe('retryTarget', () => {
-  it('is the newest run once it stopped, failed or was interrupted', () => {
-    for (const status of ['cancelled', 'failed', 'interrupted'] as const) {
+  it('is the newest run once it was cancelled, failed, interrupted or stopped by a stop step', () => {
+    for (const status of ['cancelled', 'failed', 'interrupted', 'stopped'] as const) {
       expect(retryTarget(stateOf(runMeta('r1', status, {})))?.id).toBe('r1');
     }
+  });
+  it('is the newest run once a stop step stopped it', () => {
+    const stopped = runMeta('r1', 'stopped', { n1: ok(), n2: ok('skipped'), n3: ok('skipped') }, { stoppedBy: 'n3' });
+    expect(retryTarget(stateOf(stopped))?.id).toBe('r1');
   });
   it('is also the newest run after a success that left stale steps, and only when the tab holds that run', () => {
     const stale = runMeta('r1', 'succeeded', { n1: ok(), n2: ok(), n3: { status: 'reused', stale: { reason: 'upstream', nodeId: 'n2', runId: 'r1' } } });

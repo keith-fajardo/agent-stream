@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { COMMAND_ALWAYS_WRITES, WORKSPACE_NAME_PROBLEM } from '../src/access';
 import { escapeFreeText, unescapeFreeTextLine } from '../src/freeText';
 import { formatFileErrors, type GraphDoc } from '../src/graphDoc';
+import { validateRunnable } from '../src/graph';
 import { parseGraphMarkdown } from '../src/graphMarkdownParse';
+import { graphFromDoc } from '../src/graphMeta';
 import type { GraphFileError } from '../src/types';
 
 const md = (...lines: string[]) => lines.join('\n');
@@ -185,8 +187,8 @@ describe('parseGraphMarkdown: errors', () => {
       md('# G', '## n1 · A', '- kind: robot', '- colour: red', '- access: maybe', '- workspace: Bad Name', '- timeout: 1.5', '- timeout: 2', FENCE + 'prompt', FENCE, '## n2 · B', '> why', '- kind: agent', FENCE + 'prompt', FENCE, '> late', FENCE + 'prompt', FENCE),
     );
     expect(e).toEqual([
-      { line: 3, message: 'kind is "robot"; use agent or command.' },
-      { line: 4, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model, effort, browser, attach and graph.' },
+      { line: 3, message: 'kind is "robot"; use agent, command, graph, condition or stop.' },
+      { line: 4, message: 'unknown field "colour". Step fields are kind, access, workspace, timeout, model, effort, browser, attach, graph and fail-fast.' },
       { line: 5, message: 'access is "maybe"; use read or write.' },
       { line: 6, message: `workspace "Bad Name": ${WORKSPACE_NAME_PROBLEM}` },
       { line: 7, message: 'timeout is "1.5"; use a whole number of seconds from 1 to 2147483.' },
@@ -235,7 +237,7 @@ describe('parseGraphMarkdown: errors', () => {
   });
 
   it('knows step ids from headings even when the step itself has an error', () => {
-    expect(errors(md('# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', 'n1', FENCE, '## n1 · A', '- kind: robot', FENCE + 'sh', FENCE))).toEqual([{ line: 8, message: 'kind is "robot"; use agent or command.' }]);
+    expect(errors(md('# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', 'n1', FENCE, '## n1 · A', '- kind: robot', FENCE + 'sh', FENCE))).toEqual([{ line: 8, message: 'kind is "robot"; use agent, command, graph, condition or stop.' }]);
   });
 
   it('says the whole id rule for a bad id', () => {
@@ -278,5 +280,88 @@ describe('free text escapes', () => {
     expect(written.split('\n')).toEqual(['\\## Looks like a section', '\\# Looks like a name', '\\\\## already escaped', '### a real sub-heading', FENCE, '## inside a block', FENCE, '\\````', 'never closed']);
     expect(doc(md('# G', '## Goal', written)).goal).toBe(goal);
     expect(unescapeFreeTextLine('\\plain')).toBe('\\plain');
+  });
+});
+
+describe('condition and stop steps', () => {
+  it('reads a condition, a stop with fail-fast, and labeled arrows', () => {
+    const text = [
+      '# Gate', '', '## Flow', '', '```mermaid', 'flowchart LR',
+      '  n1["Check"] --> n2["Needed?"]',
+      '  n2["Needed?"] -->|yes| n3["Work"]',
+      '  n2["Needed?"] -->|no| n4["Stop"]',
+      '```', '',
+      '## n1 · Check', '', '- kind: agent', '', '```prompt', 'check', '```', '',
+      '## n2 · Needed?', '', '- kind: condition', '',
+      '## n3 · Work', '', '- kind: command', '', '```sh', 'echo work', '```', '',
+      '## n4 · Stop', '', '- kind: stop', '- fail-fast: on', '',
+    ].join('\n');
+    const parsed = parseGraphMarkdown(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.doc.steps.find((s) => s.id === 'n4')?.failFast).toBe(true);
+    expect(parsed.doc.edges.find((e) => e.to === 'n3')?.label).toBe('yes');
+  });
+
+  it('reports a stop step that has a code block', () => {
+    const text = '# G\n\n## Flow\n\n```mermaid\nflowchart LR\n  n1["S"]\n```\n\n## n1 · S\n\n- kind: stop\n\n```sh\necho\n```\n';
+    const parsed = parseGraphMarkdown(text);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((e) => e.message).join('\n')).toMatch(/a stop step has no prompt or command/);
+  });
+
+  it('warns about a label on an arrow from an agent step, on the line of the arrow, and still reads the file (R26)', () => {
+    const text = '# G\n\n## Flow\n\n```mermaid\nflowchart LR\n  n1["A"] -->|yes| n2["B"]\n```\n\n## n1 · A\n\n- kind: agent\n\n```prompt\np\n```\n\n## n2 · B\n\n- kind: agent\n\n```prompt\np\n```\n';
+    const parsed = parseGraphMarkdown(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const warning = parsed.warnings?.find((e) => /only an arrow out of a condition/.test(e.message));
+    expect(warning?.line).toBe(7);
+  });
+
+  it('reads fail-fast off as false, rejects other values, and names every kind in the kind message', () => {
+    const stop = (...field: string[]) =>
+      md('# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', '  n1 --> n2', '  n2 -->|yes| n3', '  n2 -->|no| n4', FENCE, '## n1 · A', '```sh', FENCE, '## n2 · C', '- kind: condition', '## n3 · B', '```sh', FENCE, '## n4 · S', '- kind: stop', ...field);
+    expect(doc(stop('- fail-fast: off')).steps[3].failFast).toBe(false);
+    expect(doc(stop()).steps[3].failFast).toBeUndefined();
+    expect(errors(stop('- fail-fast: maybe')).find((e) => e.line === 19)?.message).toBe('fail-fast is on or off.');
+    expect(errors(md('# G', '## n1 · S', '- kind: robot', '', '```sh', '```'))[0].message).toBe('kind is "robot"; use agent, command, graph, condition or stop.');
+    expect(errors(md('# G', '## n1 · S', '- note', '', '```sh', '```'))[0].message).toMatch(/text Agent Stream can't keep/);
+  });
+
+  it('rejects agent-only fields on a condition or stop step, one error per line, and keeps fail-fast on a stop', () => {
+    const flow = ['# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', '  n1 --> n2', '  n2 -->|yes| n3', '  n2 -->|no| n4', FENCE, '## n1 · A', '```sh', FENCE, '## n2 · C', '- kind: condition'];
+    const tail = (stopField: string) => ['## n3 · B', '```sh', FENCE, '## n4 · S', '- kind: stop', stopField];
+    const withModel = md(...flow, '- model: claude-opus-4-1', ...tail('- fail-fast: on'));
+    expect(errors(withModel)).toEqual([{ line: 14, message: `step n2 is a condition step, so it can't have the field model. Remove this line.` }]);
+    const withTimeout = md(...flow, ...tail('- timeout: 30'));
+    expect(errors(withTimeout)).toEqual([{ line: 19, message: `step n4 is a stop step, so it can't have the field timeout. Remove this line.` }]);
+    expect(doc(md(...flow, ...tail('- fail-fast: on'))).steps[3].failFast).toBe(true);
+  });
+
+  it('puts a shape problem on its step heading, as a warning (R26)', () => {
+    const parsed = parseGraphMarkdown(md('# G', '', '## n1 · Lonely', '- kind: condition'));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const found = parsed.warnings ?? [];
+    expect(found.map((e) => e.line)).toEqual([3, 3]);
+    expect(found[0].message).toMatch(/a condition needs exactly one step before it/);
+  });
+
+  it('reads a condition with one arrow out, warns on its line, and validateRunnable still blocks the run (R26)', () => {
+    const text = md(
+      '# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', '  n1 --> n2', '  n2 -->|yes| n3', FENCE,
+      '## n1 · A', '```sh', 'echo VERDICT: yes', FENCE,
+      '## n2 · C', '- kind: condition',
+      '## n3 · B', '```sh', 'echo work', FENCE,
+    );
+    const parsed = parseGraphMarkdown(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const message = 'n2 "C": a condition needs exactly two arrows out, one labeled yes and one labeled no.';
+    expect(parsed.warnings).toEqual([{ line: 12, message }]);
+    const graph = graphFromDoc(parsed.doc, undefined, 'g', '2026-10-10T00:00:00Z');
+    expect(validateRunnable(graph)).toContain(message);
   });
 });

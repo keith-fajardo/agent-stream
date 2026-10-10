@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Graph, NodeEvent, RunMeta } from '@agent-stream/shared';
+import { VERDICT_INSTRUCTION, type Graph, type NodeEvent, type RunMeta } from '@agent-stream/shared';
 import { buildRunReport, fenced, type RunReportInput } from '../src/runReport';
 
 const SECRET = 'hunter2-do-not-leak';
@@ -382,5 +382,72 @@ describe('buildRunReport', () => {
     const md = buildRunReport(input);
     expect(md).toContain('### n1 · Inspect ## \\<b\\>bold\\</b\\> — Succeeded, 42.0 s');
     expect(headings(md)).not.toContain('## <b>bold</b>');
+  });
+
+  describe('a run stopped by a stop step', () => {
+    const stopSnapshot: Graph = {
+      ...snapshot,
+      nodes: [
+        node('n1', { title: 'Check the data', prompt: 'Is the data clean?' }),
+        node('n2', { title: 'Clean?', kind: 'condition' }),
+        node('n3', { title: 'Load it', prompt: 'Load the data.' }),
+        node('n4', { title: 'Halt', kind: 'stop' }),
+      ],
+      edges: [
+        { id: 'n1->n2', from: 'n1', to: 'n2' },
+        { id: 'n2->n3', from: 'n2', to: 'n3', label: 'yes' },
+        { id: 'n2->n4', from: 'n2', to: 'n4', label: 'no' },
+      ],
+      nodeSeq: 4,
+    };
+    const stopped: RunMeta = {
+      ...run,
+      status: 'stopped',
+      stoppedBy: 'n4',
+      snapshot: stopSnapshot,
+      rendered: { goal: snapshot.goal, instructions: snapshot.instructions, nodes: { n1: 'Is the data clean?', n3: 'Load the data.' } },
+      amendments: undefined,
+      workspaces: undefined,
+      nodes: {
+        n1: { status: 'succeeded', durationMs: 5 },
+        n2: { status: 'succeeded', verdict: 'no' },
+        n3: { status: 'skipped', error: 'run stopped at n4' },
+        n4: { status: 'succeeded' },
+      },
+    };
+    const md = () => buildRunReport({ graphName: 'Gate', run: stopped, steps: {}, now: 'now' });
+
+    it('names the stop step in the header', () => {
+      const head = md().slice(0, md().indexOf('## Goal'));
+      expect(head).toContain('- Status: Stopped');
+      expect(head).toContain('- Stopped at n4: Halt');
+    });
+
+    it('shows a condition step its verdict and a skipped step its reason', () => {
+      const text = md();
+      const n2 = text.slice(text.indexOf('### n2'), text.indexOf('### n3'));
+      const n3 = text.slice(text.indexOf('### n3'), text.indexOf('### n4'));
+      expect(n2).toContain('Verdict: no');
+      expect(n3).toContain('Skipped: run stopped at n4');
+      expect(n3).not.toContain('**Error**');
+    });
+
+    it('lists each arrow into a step with its label', () => {
+      const plan = md().slice(md().indexOf('## Plan'), md().indexOf('## Steps'));
+      expect(plan).toContain('n3 · Load it (agent) — after n2 (yes)');
+      expect(plan).toContain('n4 · Halt (stop) — after n2 (no)');
+      expect(plan).toContain('n2 · Clean? (condition) — after n1');
+      expect(plan).not.toContain('after n1 (');
+    });
+
+    it('shows the verdict instruction in the prompt of an agent step a condition reads, as the runner appends it', () => {
+      const text = md();
+      const n1 = text.slice(text.indexOf('### n1'), text.indexOf('### n2'));
+      const n3 = text.slice(text.indexOf('### n3'), text.indexOf('### n4'));
+      expect(n1).toContain(`Is the data clean?\n\n${VERDICT_INSTRUCTION}`);
+      expect(n3).not.toContain('VERDICT');
+      // The saved prompt text is untouched.
+      expect(stopSnapshot.nodes[0].prompt).toBe('Is the data clean?');
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, emptyGraph, type CheckoutInfo, type Graph, type Op, type RunMeta } from '@agent-stream/shared';
+import { applyOp, emptyGraph, VERDICT_INSTRUCTION, type CheckoutInfo, type Graph, type Op, type RunMeta } from '@agent-stream/shared';
 import { envLookup, looksLikeCredential, previewRun } from '../src/runPreview';
 
 function graphOf(ops: Op[]): Graph {
@@ -31,6 +31,28 @@ describe('previewRun', () => {
     ]);
     expect(preview.variables).toEqual([{ name: 'model', value: 'orders v2' }]);
     expect(rendered).toEqual({ goal: '', instructions: '', nodes: { n1: "dbt build -s 'orders v2'", n2: 'Check orders v2 in dev' } });
+  });
+
+  it('shows the verdict instruction on the agent step a condition reads, and no prompt on condition and stop steps', () => {
+    const g = graphOf([
+      agent('Check', 'Is it ready?'),
+      { type: 'addNode', node: { kind: 'condition', title: 'Ready?' } },
+      agent('Ship', 'Ship it'),
+      { type: 'addNode', node: { kind: 'stop', title: 'Halt' } },
+      link('n1', 'n2'),
+      { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+      { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    ]);
+    const { preview, rendered } = previewRun({ graph: g, values: {}, env: env() });
+    expect(preview.problems).toEqual([]);
+    const text = (id: string) => preview.steps.find((s) => s.id === id)?.text;
+    expect(text('n1')).toBe(`Is it ready?\n\n${VERDICT_INSTRUCTION}`);
+    expect(text('n1')).toContain('VERDICT:');
+    expect(text('n3')).toBe('Ship it');
+    expect(text('n2')).toBe('');
+    expect(text('n4')).toBe('');
+    // What the run reviews stays the prompt alone: the runner adds the instruction itself when it launches the step.
+    expect(rendered?.nodes).toEqual({ n1: 'Is it ready?', n2: '', n3: 'Ship it', n4: '' });
   });
 
   it('carries a step description into the preview only when it is not blank', () => {

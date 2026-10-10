@@ -20,8 +20,8 @@ export function changedSinceRun(s: Pick<State, 'run' | 'graph'> & Partial<Pick<S
   return !!live && contentSignature(s.run.snapshot) !== contentSignature(live);
 }
 
-/** The runs Retry from where it stopped applies to: they ended without every step finishing. */
-const STOPPED: ReadonlySet<RunStatus> = new Set(['cancelled', 'failed', 'interrupted']);
+/** The runs Retry from where it stopped applies to: they ended without every step finishing, a stop step's halt included (it runs again, R18). */
+const STOPPED: ReadonlySet<RunStatus> = new Set(['cancelled', 'failed', 'interrupted', 'stopped']);
 
 export const RETRY_LABEL = '↻ Retry from where it stopped';
 export const NO_RUN_YET = 'Run the graph once first';

@@ -348,6 +348,15 @@ describe('agent changes against the baseline', () => {
     expect(store.readOps(id).at(-1)).toMatchObject({ by: 'user', op: { type: 'revertChange', target: { kind: 'node', id: 'n4' } } });
   });
 
+  it('reverting a removed labeled connection restores the baseline label', () => {
+    const { store, id } = withGraph([step('n1', { kind: 'condition', prompt: undefined }), step('n2')]);
+    expect(store.apply(id, { type: 'connect', from: 'n1', to: 'n2', label: 'yes' }, 'user').ok).toBe(true);
+    store.apply(id, { type: 'disconnect', from: 'n1', to: 'n2' }, 'agent', { kind: 'planner' });
+    expect(store.get(id).edges).toEqual([]);
+    expect(store.apply(id, { type: 'revertChange', target: { kind: 'edge', id: 'n1->n2' } }, 'user').ok).toBe(true);
+    expect(store.get(id).edges).toEqual([{ id: 'n1->n2', from: 'n1', to: 'n2', label: 'yes' }]);
+  });
+
   it('reverts a changed step to its baseline fields, keeping where it is', () => {
     const { store, id } = withGraph([step('n1', { kind: 'command', command: 'make', prompt: undefined, timeoutSec: 30 })]);
     store.apply(id, { type: 'updateNode', id: 'n1', patch: { title: 'Agent', description: 'why', command: 'make all', timeoutSec: 60 } }, 'agent', { kind: 'planner' });

@@ -40,7 +40,7 @@ export function defineTool<S extends ZodRawShape>(name: string, description: str
   };
 }
 
-const kind = z.enum(['agent', 'command', 'graph']);
+const kind = z.enum(['agent', 'command', 'graph', 'condition', 'stop']);
 /** A sub-graph step's values: inner variable name → value, a template that may use this graph's variables (sub-graphs spec §7). */
 const subgraphValues = z.record(z.string(), z.string());
 const access = z.enum(['read', 'write']);
@@ -65,7 +65,7 @@ export function summarizeGraph(graph: Graph, graphName: (id: string) => string |
     variables: graph.variables.map(({ name, description }) => ({ name, description })),
     // Names only, as context: the planner never gets their contents, and can't add or remove them (step model spec §6b.1).
     ...(graph.attachments?.length && { attachments: graph.attachments }),
-    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, browser, graph: inner, values, createdBy, updatedBy }) => ({
+    nodes: graph.nodes.map(({ id, title, kind: k, description, prompt, command, timeoutSec, access: a, workspace, model, effort: e, attachments, browser, graph: inner, values, failFast, createdBy, updatedBy }) => ({
       id, title, kind: k, description, prompt, command, timeoutSec,
       ...(a === 'read' && { access: 'read' as const }),
       ...(workspace && { workspace }),
@@ -76,9 +76,10 @@ export function summarizeGraph(graph: Graph, graphName: (id: string) => string |
       // A sub-graph step: the graph it runs, by id and name, and its values (sub-graphs spec §7).
       ...(inner && { graph: inner, graphName: graphName(inner) ?? null }),
       ...(values && { values }),
+      ...(failFast && { failFast: true }),
       createdBy, updatedBy,
     })),
-    edges: graph.edges.map((e) => `${e.from} -> ${e.to}`),
+    edges: graph.edges.map((e) => `${e.from} -> ${e.to}${e.label ? ` (${e.label})` : ''}`),
   };
 }
 
@@ -109,7 +110,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'add_node',
-      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root; kind "graph" runs another graph of this folder (`graph`, an id from list_graphs) as one step, with `values` for its variables (each a template that may use this graph\'s variables; leave one out to have it asked when the run starts). `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s. `browser` true lets an agent step use the Agent Stream browser, with the user\'s logins (clicks and typing ask the user first): set it only for steps that need websites.',
+      'Add a step. kind "agent" runs a separate AI agent with `prompt`; kind "command" runs the exact shell `command` in the project root; kind "graph" runs another graph of this folder (`graph`, an id from list_graphs) as one step, with `values` for its variables (each a template that may use this graph\'s variables; leave one out to have it asked when the run starts). kind "condition" reads the verdict of the step before it and routes the run along its yes or no arrow; give it exactly two arrows out, made with connect and label "yes" or "no". A condition has no prompt of its own: the question goes in the step before the condition, and that step\'s prompt must say what yes and no mean. kind "stop" ends the run when reached; `failFast` true also cancels the steps still running. Condition and stop steps take no prompt, command, timeoutSec, access, workspace, model, effort or browser. `after` lists ids of steps this one depends on; an edge is created from each. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" marks an agent step that only reads and reports: it can\'t edit files or run commands. Command steps can always change files. `workspace` names a variant workspace (lowercase letters, digits, - and _): steps with the same workspace run in their own Git worktree for each run, for A/B tests; leave it out for this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` give an agent step its own model and effort; leave them out for the run\'s. `browser` true lets an agent step use the Agent Stream browser, with the user\'s logins (clicks and typing ask the user first): set it only for steps that need websites.',
       {
         kind,
         title: z.string(),
@@ -125,11 +126,12 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         browser: z.boolean().optional(),
         graph: z.string().optional(),
         values: subgraphValues.optional(),
+        failFast: z.boolean().optional(),
       },
       async (a) => {
         const m = modelArg(a.model || undefined);
         if (!m.ok) return reply(m.error, true);
-        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }), ...(a.browser !== undefined && { browser: a.browser }), ...(a.graph !== undefined && { graph: a.graph }), ...(a.values && { values: a.values }) } });
+        const r = apply({ type: 'addNode', node: { title: a.title, kind: a.kind, description: a.description, prompt: a.prompt, command: a.command, timeoutSec: a.timeoutSec, access: a.access, workspace: a.workspace, ...(m.model && { model: m.model }), ...(a.effort && { effort: a.effort }), ...(a.browser !== undefined && { browser: a.browser }), ...(a.graph !== undefined && { graph: a.graph }), ...(a.values && { values: a.values }), ...(a.failFast !== undefined && { failFast: a.failFast }) } });
         if (!r.ok) return reply(r.error, true);
         const id = r.graph.nodes[r.graph.nodes.length - 1].id;
         const errors: string[] = [];
@@ -142,7 +144,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     ),
     defineTool(
       'update_node',
-      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s. `browser` true or false switches the Agent Stream browser on or off for an agent step. A sub-graph step (kind "graph") takes `graph` and `values`; `values` replaces all of them.',
+      'Change fields of a step. Only the fields you pass change. `description` is one plain-language sentence for people saying what the step does and why. `access` "read" or "write"; `workspace` "" puts the step back in this checkout. `model` ("<provider>/<id>", an id from list_models) and `effort` set an agent step\'s own model and effort; "" puts either back on the run\'s. `browser` true or false switches the Agent Stream browser on or off for an agent step. A sub-graph step (kind "graph") takes `graph` and `values`; `values` replaces all of them. A stop step (kind "stop") takes `failFast` true or false.',
       {
         id: z.string(),
         title: z.string().optional(),
@@ -158,6 +160,7 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
         browser: z.boolean().optional(),
         graph: z.string().optional(),
         values: subgraphValues.optional(),
+        failFast: z.boolean().optional(),
       },
       async ({ id, model, effort: e, ...rest }) => {
         const m = modelArg(model);
@@ -169,8 +172,8 @@ export function graphTools(d: PlannerToolDeps): GraphTool[] {
     defineTool('delete_node', 'Delete a step and its edges.', { id: z.string() }, async ({ id }) =>
       outcome(apply({ type: 'deleteNode', id }), `Deleted ${id}.`),
     ),
-    defineTool('connect', 'Make `to` run after `from` and receive its output.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
-      outcome(apply({ type: 'connect', from, to }), `Connected ${from} -> ${to}.`),
+    defineTool('connect', 'Make `to` run after `from` and receive its output. `label` "yes" or "no" marks an arrow out of a condition step: `to` runs only when the verdict matches.', { from: z.string(), to: z.string(), label: z.enum(['yes', 'no']).optional() }, async ({ from, to, label }) =>
+      outcome(apply({ type: 'connect', from, to, ...(label && { label }) }), `Connected ${from} -> ${to}${label ? ` (${label})` : ''}.`),
     ),
     defineTool('disconnect', 'Remove the edge from `from` to `to`.', { from: z.string(), to: z.string() }, async ({ from, to }) =>
       outcome(apply({ type: 'disconnect', from, to }), `Disconnected ${from} -> ${to}.`),

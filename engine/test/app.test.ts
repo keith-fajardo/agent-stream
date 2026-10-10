@@ -2058,7 +2058,7 @@ describe('graph files changed outside Agent Stream', () => {
     const { app, graphId, edit, c } = withFile();
     edit('- kind: command', '- kind: robot');
     expect(app.graphFileChanged(graphId)).toBe('errors');
-    expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors: [{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }] });
+    expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors: [{ line: expect.any(Number), message: 'kind is "robot"; use agent, command, graph, condition or stop.' }] });
     await app.handle(c.client, { type: 'openGraph', graphId });
     expect(c.last('graphOpened').fileErrors).toEqual(c.last('graphFileErrors').errors);
     // Back to the text the store holds: nothing to apply, and the problems are gone.
@@ -2160,7 +2160,7 @@ describe('the graph tab’s Markdown editor', () => {
     const broken = base.replace('- kind: command', '- kind: robot');
     await app.handle(c.client, { type: 'saveGraphMarkdown', graphId, text: broken, base });
     expect(text()).toBe(broken);
-    const errors = [{ line: expect.any(Number), message: 'kind is "robot"; use agent or command.' }];
+    const errors = [{ line: expect.any(Number), message: 'kind is "robot"; use agent, command, graph, condition or stop.' }];
     expect(c.last('graphMarkdownSaved')).toEqual({ type: 'graphMarkdownSaved', graphId, ok: false, text: broken, errors });
     expect(c.last('graphFileErrors')).toEqual({ type: 'graphFileErrors', graphId, errors });
     expect(app.graphStore.get(graphId).nodes[0].kind).toBe('command');

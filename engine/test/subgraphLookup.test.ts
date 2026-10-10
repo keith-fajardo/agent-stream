@@ -34,7 +34,7 @@ describe('GraphStore.lookup: the inner graph of a sub-graph step', () => {
     const { store, id, file } = storeWithResearch();
     writeFileSync(file, readFileSync(file, 'utf8').replace('- kind: agent', '- kind: robot'));
     const r = store.lookup(id);
-    expect(r).toEqual({ ok: false, reason: 'broken', error: expect.stringMatching(/^line \d+: kind is "robot"; use agent or command\.$/), name: 'Company research' });
+    expect(r).toEqual({ ok: false, reason: 'broken', error: expect.stringMatching(/^line \d+: kind is "robot"; use agent, command, graph, condition or stop\.$/), name: 'Company research' });
     // load still gives the last good graph for the tab that shows it; only a sub-graph step refuses it.
     expect(store.load(id).ok).toBe(true);
   });
@@ -54,7 +54,7 @@ describe('GraphStore.list: a graph whose file has errors now', () => {
     writeFileSync(file, good.replace('- kind: agent', '- kind: robot'));
     // load() still gives the last good version, but the list must not offer the graph as a sub-graph (spec §6.2).
     expect(store.load(id).ok).toBe(true);
-    expect(store.list().find((g) => g.id === id)).toMatchObject({ id, name: 'Company research', broken: expect.stringMatching(/kind is "robot"; use agent or command\./) });
+    expect(store.list().find((g) => g.id === id)).toMatchObject({ id, name: 'Company research', broken: expect.stringMatching(/kind is "robot"; use agent, command, graph, condition or stop\./) });
     // `error` still means never readable: the sidebar, chat and pickers keep working with the last good version.
     expect(store.list().find((g) => g.id === id)).not.toHaveProperty('error');
     writeFileSync(file, good);

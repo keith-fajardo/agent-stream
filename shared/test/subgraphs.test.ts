@@ -49,6 +49,20 @@ function expanded(outer: Graph, ...graphs: Graph[]) {
   return r;
 }
 
+const cond = (title: string): Op => ({ type: 'addNode', node: { title, kind: 'condition' } });
+const yes = (from: string, to: string): Op => ({ type: 'connect', from, to, label: 'yes' });
+const no = (from: string, to: string): Op => ({ type: 'connect', from, to, label: 'no' });
+
+describe('expandGraph with labeled arrows', () => {
+  it('keeps the labels of the inner graph and of the arrows into the sub-graph step', () => {
+    const branching = graph('branching', 'Branching', [cond('Ready'), agent('Ship'), agent('Hold'), yes('n1', 'n2'), no('n1', 'n3')]);
+    const outer = graph('outer', 'Outer', [cond('Go'), sub('Branch', 'branching'), agent('Skip it'), yes('n1', 'n2'), no('n1', 'n3')]);
+    const r = expanded(outer, branching);
+    const labelled = r.graph.edges.filter((e) => e.label).map((e) => `${e.id}:${e.label}`).sort();
+    expect(labelled).toEqual(['n1->n2/n1:yes', 'n1->n3:no', 'n2/n1->n2/n2:yes', 'n2/n1->n2/n3:no']);
+  });
+});
+
 describe('expandGraph', () => {
   it('leaves a graph without sub-graph steps as it is', () => {
     const r = expanded(research);
