@@ -199,7 +199,7 @@ flowchart LR
 
 ## Conditions and stop
 
-A condition step sends the run one way or the other, and a stop step ends the run. Neither has a code block, and neither takes a prompt, a command, `access`, `workspace`, `model`, `effort`, `browser` or `attach`. A stop step may take `fail-fast`.
+A condition step sends the run one way or the other, and a stop step ends the run. Neither has a code block, and neither takes a prompt, a command, `access`, `workspace`, `timeout`, `model`, `effort`, `browser`, `attach`, a `graph` line or a `value` block. A stop step may take `fail-fast`.
 
 ````markdown
 ## n3 · Is a change needed?
@@ -221,9 +221,9 @@ flowchart LR
   n3 -->|no| n4["Stop the run"]
 ```
 
-- **Labels:** an arrow is labeled only as `-->|yes|` or `-->|no|`, and only out of a condition step. Write the label in the Flow block. The canvas can't draw labeled arrows yet.
+- **Labels:** an arrow is labeled only as `-->|yes|` or `-->|no|`, and only out of a condition step. The canvas shows the labels but can't set them; write them in the Flow block.
 - **A condition step** has exactly one step before it, an agent or command step. It has exactly two arrows out, one labeled `yes` and one labeled `no`, and the run follows the one that matches the verdict.
-- **The verdict** is a marker line, `VERDICT: yes` or `VERDICT: no` (in any letter case, with spaces allowed around it). The engine reads the last line of the step's output that matches it.
+- **The verdict** is a marker line, `VERDICT: yes` or `VERDICT: no` (in any letter case, with spaces allowed around it; one period after the word is allowed too, as in `VERDICT: yes.`). The engine reads the last line of the step's output that matches it.
   - An agent step that feeds a condition gets this instruction added to its prompt when it runs: "End your reply with one line on its own: `VERDICT: yes` or `VERDICT: no`." The saved prompt in the file doesn't change.
   - A command step must print the marker line itself, such as `echo "VERDICT: no"`.
 - **No valid marker line** fails the condition step, with the error `no VERDICT line in <step id> output`. The steps after it don't run, and the run ends `failed`. The verdict is never guessed.
