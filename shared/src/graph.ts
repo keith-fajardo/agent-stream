@@ -204,12 +204,14 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
       // And the browser (browser spec §2.1); false turns it off.
       const nextBrowser = kind !== 'agent' ? false : (browser ?? node.browser === true);
       const { access: _access, workspace: _workspace, timeoutSec: _timeoutSec, model: _model, effort: _effort, attachments: _attachments, browser: _browser, graph: _graph, values: _values, ...kept } = node;
-      // A sub-graph step has no prompt or command: neither the old one nor one the patch clears.
+      // A sub-graph, condition or stop step has no prompt or command: neither the old one nor one the patch clears, so a
+      // kind change never leaves a refused field behind (R30).
       const { prompt: _prompt, command: _command, ...keptBase } = kept;
       const { prompt: _patchPrompt, command: _patchCommand, ...patchBase } = patch;
+      const noText = isGraph || bare;
       const updated: GraphNode = {
-        ...(isGraph ? keptBase : kept),
-        ...(isGraph ? patchBase : patch),
+        ...(noText ? keptBase : kept),
+        ...(noText ? patchBase : patch),
         ...(nextTimeout !== undefined && { timeoutSec: nextTimeout }),
         ...(nextAccess && { access: nextAccess }),
         ...(nextWorkspace && { workspace: nextWorkspace }),

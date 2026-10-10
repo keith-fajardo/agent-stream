@@ -571,6 +571,21 @@ describe('condition and stop steps refuse agent and command fields', () => {
     expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { prompt: '', command: '' } }, 'user', T).ok).toBe(true);
   });
 
+  it('updateNode clears the stored prompt and command of a step that becomes a condition or a stop (R30 follow-up)', () => {
+    const g = build([{ type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'Is it ready?' } }, cmd('Build', 'make')]);
+    const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition' } }, 'user', T);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.graph.nodes[0]).toMatchObject({ kind: 'condition' });
+    expect(r.graph.nodes[0]).not.toHaveProperty('prompt');
+    const s = applyOp(g, { type: 'updateNode', id: 'n2', patch: { kind: 'stop' } }, 'user', T);
+    if (!s.ok) throw new Error(s.error);
+    expect(s.graph.nodes[1]).toMatchObject({ kind: 'stop' });
+    expect(s.graph.nodes[1]).not.toHaveProperty('command');
+    expect(validateRunnable(r.graph).join('\n')).not.toMatch(/has no prompt or command/);
+    // An explicit prompt with the kind change is still refused.
+    expect(applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition', prompt: 'Is it ready?' } }, 'user', T)).toEqual({ ok: false, error: "a condition step can't have a prompt. Put the question in the step before it." });
+  });
+
   it('updateNode drops the timeout and workspace of a step that becomes a condition, and still clears with 0 or an empty workspace', () => {
     const g = build([{ type: 'addNode', node: { title: 'Check', kind: 'agent', prompt: 'p', timeoutSec: 30, workspace: 'wh_a' } }]);
     const r = applyOp(g, { type: 'updateNode', id: 'n1', patch: { kind: 'condition' } }, 'user', T);
