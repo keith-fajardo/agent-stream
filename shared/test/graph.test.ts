@@ -231,6 +231,22 @@ describe('reusableNodeIds', () => {
     expect([...reusableNodeIds(chain, { snapshot: chain, nodes: allOk(chain) }, 'n2')]).toEqual(['n1']);
   });
 
+  it('never reuses a stop step, even when it succeeded last time (R18)', () => {
+    const g = build([
+      agent('check'),
+      { type: 'addNode', node: { title: 'needed?', kind: 'condition' } },
+      agent('work'),
+      { type: 'addNode', node: { title: 'Halt', kind: 'stop' } },
+      link('n1', 'n2'),
+      { type: 'connect', from: 'n2', to: 'n3', label: 'yes' },
+      { type: 'connect', from: 'n2', to: 'n4', label: 'no' },
+    ]);
+    expect(validateRunnable(g)).toEqual([]);
+    const reuse = reusableNodeIds(g, { snapshot: g, nodes: allOk(g) });
+    expect(reuse.has('n4')).toBe(false);
+    expect([...reuse].sort()).toEqual(['n1', 'n2', 'n3']);
+  });
+
   it('re-runs nodes that did not succeed last time', () => {
     const nodes = { ...allOk(chain), n1: { status: 'failed' as const } };
     expect([...reusableNodeIds(chain, { snapshot: chain, nodes }, 'n3')]).toEqual([]);
