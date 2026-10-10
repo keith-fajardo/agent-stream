@@ -330,7 +330,7 @@ export function contentSignature(g: Graph): string {
     instructions: g.instructions,
     attachments: g.attachments ?? [],
     // A sub-graph step's graph and values are added only for it, so graphs without one keep their signature.
-    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : [])]),
+    nodes: g.nodes.map((n) => [n.id, n.kind, n.title, n.description ?? '', n.prompt ?? '', n.command ?? '', n.timeoutSec ?? null, n.access ?? 'write', n.workspace ?? '', n.model ? stepModelText(n.model) : '', n.effort ?? '', n.attachments ?? [], n.browser === true, ...(n.kind === 'graph' ? [n.graph ?? '', sortedValues(n.values)] : []), ...(n.kind === 'stop' ? [n.failFast === true] : [])]),
     edges: g.edges.map((e) => `${e.id}${e.label ? `:${e.label}` : ''}`).sort(),
   });
 }

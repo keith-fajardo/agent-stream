@@ -196,6 +196,13 @@ describe('labels in signatures and reuse', () => {
     expect(contentSignature(branch('yes'))).toBe(contentSignature(branch('yes')));
   });
 
+  it('fail-fast on a stop step changes the content signature; missing and false are the same', () => {
+    const stop = (failFast?: boolean) => build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', ...(failFast !== undefined && { failFast }) } }]);
+    expect(contentSignature(stop(true))).not.toBe(contentSignature(stop(false)));
+    expect(contentSignature(stop(true))).not.toBe(contentSignature(stop()));
+    expect(contentSignature(stop(false))).toBe(contentSignature(stop()));
+  });
+
   it('an unlabeled graph keeps its edge signature entry', () => {
     expect(contentSignature(build([agent('a'), agent('b'), link('n1', 'n2')]))).toContain('"edges":["n1->n2"]');
   });
