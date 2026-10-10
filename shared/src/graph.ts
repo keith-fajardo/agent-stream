@@ -114,6 +114,8 @@ export function applyOp(graph: Graph, op: Op, by: Actor, now: string, options: A
         attachments: op.node.attachments?.length ? [...op.node.attachments] : undefined,
         // Only `true` is stored: off is no field (spec §2.1).
         browser: op.node.browser === true ? true : undefined,
+        // Stored when set, true or false, as the file writer does; shapeProblems rejects it on a step that is not a stop.
+        failFast: op.node.failFast,
         graph: isGraph ? op.node.graph : undefined,
         // An empty map is no field; the values are kept in name order.
         values: isGraph && op.node.values && Object.keys(op.node.values).length > 0 ? sortedValues(op.node.values) : undefined,

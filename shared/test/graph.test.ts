@@ -208,6 +208,13 @@ describe('labels in signatures and reuse', () => {
   });
 });
 
+describe('addNode and fail-fast', () => {
+  it('keeps failFast on a stop step, and leaves it undefined when not given', () => {
+    expect(build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }]).nodes[0].failFast).toBe(true);
+    expect(build([{ type: 'addNode', node: { title: 'Halt', kind: 'stop' } }]).nodes[0].failFast).toBeUndefined();
+  });
+});
+
 describe('reusableNodeIds', () => {
   const chain = build([agent('a'), agent('b'), agent('c'), link('n1', 'n2'), link('n2', 'n3')]);
   const allOk = (g: Graph): Record<string, NodeRunState> =>

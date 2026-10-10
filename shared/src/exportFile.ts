@@ -9,7 +9,7 @@ export const EXPORT_VERSION = 1;
 // Defined in types.ts so the message schemas can bound text with it without importing this module back.
 export { MAX_IMPORT_CHARS };
 
-export type ExportedNode = Pick<GraphNode, 'id' | 'title' | 'kind' | 'description' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'position'>;
+export type ExportedNode = Pick<GraphNode, 'id' | 'title' | 'kind' | 'description' | 'prompt' | 'command' | 'timeoutSec' | 'access' | 'workspace' | 'failFast' | 'position'>;
 export type ExportFile = {
   format: typeof EXPORT_FORMAT;
   version: typeof EXPORT_VERSION;
@@ -29,8 +29,8 @@ export function toExportFile(graph: Graph, now: string): ExportFile {
       instructions: graph.instructions,
       variables: graph.variables.map(({ name, description }) => ({ name, description })),
       // JSON round trip drops fields that are undefined.
-      nodes: graph.nodes.map(({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, position }) =>
-        JSON.parse(JSON.stringify({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, position })) as ExportedNode,
+      nodes: graph.nodes.map(({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, failFast, position }) =>
+        JSON.parse(JSON.stringify({ id, title, kind, description, prompt, command, timeoutSec, access, workspace, failFast, position })) as ExportedNode,
       ),
       edges: graph.edges.map(({ from, to, label }) => ({ from, to, ...(label && { label }) })),
     },

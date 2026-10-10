@@ -129,4 +129,13 @@ describe('step access and workspace in export files', () => {
     const back = parseExportFile(JSON.stringify(file), 'copy', T);
     expect(back.ok && back.graph.edges).toEqual([{ id: 'n1->n2', from: 'n1', to: 'n2', label: 'no' }]);
   });
+
+  it('keeps fail-fast on a stop step through export and import', () => {
+    const r = applyOp(emptyGraph('g', 'G', T), { type: 'addNode', node: { title: 'Halt', kind: 'stop', failFast: true } }, 'user', T);
+    if (!r.ok) throw new Error(r.error);
+    const file = toExportFile(r.graph, T);
+    expect(file.graph.nodes[0].failFast).toBe(true);
+    const back = parseExportFile(JSON.stringify(file), 'copy', T);
+    expect(back.ok && back.graph.nodes[0].failFast).toBe(true);
+  });
 });
