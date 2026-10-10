@@ -103,7 +103,8 @@ function withContentOf(node: GraphNode, source: GraphNode): GraphNode {
 /**
  * Single source of truth for graphs. Every change goes through `apply`. A graph is two files (Markdown graph files spec
  * §5.1): `<id>.md`, its meaning, and `<id>.meta.json`, positions and bookkeeping.
- * Emits 'fileWarnings' (id, GraphFileError[]) for lines a read dropped (a browser line on a command step).
+ * Emits 'fileWarnings' (id, GraphFileError[]) for lines a read dropped (a browser line on a command step) and for
+ * condition, stop and label shape problems, which no longer block a read (ruling R26).
  */
 export class GraphStore extends EventEmitter {
   private cache = new Map<string, Cached>();

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { COMMAND_ALWAYS_WRITES, WORKSPACE_NAME_PROBLEM } from '../src/access';
 import { escapeFreeText, unescapeFreeTextLine } from '../src/freeText';
 import { formatFileErrors, type GraphDoc } from '../src/graphDoc';
+import { validateRunnable } from '../src/graph';
 import { parseGraphMarkdown } from '../src/graphMarkdownParse';
+import { graphFromDoc } from '../src/graphMeta';
 import type { GraphFileError } from '../src/types';
 
 const md = (...lines: string[]) => lines.join('\n');
@@ -309,13 +311,13 @@ describe('condition and stop steps', () => {
     expect(parsed.errors.map((e) => e.message).join('\n')).toMatch(/a stop step has no prompt or command/);
   });
 
-  it('reports a label on an arrow from an agent step, on the line of the arrow', () => {
+  it('warns about a label on an arrow from an agent step, on the line of the arrow, and still reads the file (R26)', () => {
     const text = '# G\n\n## Flow\n\n```mermaid\nflowchart LR\n  n1["A"] -->|yes| n2["B"]\n```\n\n## n1 · A\n\n- kind: agent\n\n```prompt\np\n```\n\n## n2 · B\n\n- kind: agent\n\n```prompt\np\n```\n';
     const parsed = parseGraphMarkdown(text);
-    expect(parsed.ok).toBe(false);
-    if (parsed.ok) return;
-    const error = parsed.errors.find((e) => /only an arrow out of a condition/.test(e.message));
-    expect(error?.line).toBe(7);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const warning = parsed.warnings?.find((e) => /only an arrow out of a condition/.test(e.message));
+    expect(warning?.line).toBe(7);
   });
 
   it('reads fail-fast off as false, rejects other values, and names every kind in the kind message', () => {
@@ -338,9 +340,28 @@ describe('condition and stop steps', () => {
     expect(doc(md(...flow, ...tail('- fail-fast: on'))).steps[3].failFast).toBe(true);
   });
 
-  it('puts a shape problem on its step heading', () => {
-    const found = errors(md('# G', '', '## n1 · Lonely', '- kind: condition'));
+  it('puts a shape problem on its step heading, as a warning (R26)', () => {
+    const parsed = parseGraphMarkdown(md('# G', '', '## n1 · Lonely', '- kind: condition'));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const found = parsed.warnings ?? [];
     expect(found.map((e) => e.line)).toEqual([3, 3]);
     expect(found[0].message).toMatch(/a condition needs exactly one step before it/);
+  });
+
+  it('reads a condition with one arrow out, warns on its line, and validateRunnable still blocks the run (R26)', () => {
+    const text = md(
+      '# G', '## Flow', FENCE + 'mermaid', 'flowchart LR', '  n1 --> n2', '  n2 -->|yes| n3', FENCE,
+      '## n1 · A', '```sh', 'echo VERDICT: yes', FENCE,
+      '## n2 · C', '- kind: condition',
+      '## n3 · B', '```sh', 'echo work', FENCE,
+    );
+    const parsed = parseGraphMarkdown(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const message = 'n2 "C": a condition needs exactly two arrows out, one labeled yes and one labeled no.';
+    expect(parsed.warnings).toEqual([{ line: 12, message }]);
+    const graph = graphFromDoc(parsed.doc, undefined, 'g', '2026-10-10T00:00:00Z');
+    expect(validateRunnable(graph)).toContain(message);
   });
 });

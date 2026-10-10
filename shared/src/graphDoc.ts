@@ -39,7 +39,10 @@ export type DocVariable = { name: string; description: string; line: number };
 export type DocAttachments = { names: string[]; line: number };
 /** A graph's meaning as its Markdown file states it (Markdown graph files spec §3.1). Positions and bookkeeping are in the side file. */
 export type GraphDoc = { name: string; goal: string; instructions: string; variables: DocVariable[]; attachments?: DocAttachments; steps: DocStep[]; edges: FlowEdge[] };
-/** `warnings`: lines Agent Stream dropped while reading (a browser line on a command step); the file still reads. */
+/**
+ * `warnings`: lines Agent Stream dropped while reading (a browser line on a command step), and condition, stop and label
+ * shape problems (ruling R26, still refused by validateRunnable); the file still reads.
+ */
 export type ParseGraphResult = { ok: true; doc: GraphDoc; warnings?: GraphFileError[] } | { ok: false; errors: GraphFileError[] };
 
 /** CRLF and lone CR as LF. */

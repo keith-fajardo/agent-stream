@@ -448,14 +448,17 @@ export function parseGraphMarkdown(text: string): ParseGraphResult {
   const warnings: GraphFileError[] = [];
   const steps = stepSections.map((s) => readStep(s, errors, warnings)).filter((s): s is DocStep => s !== null);
   const edges = flow ? readFlow(flow, new Set(idLines.keys()), errors) : [];
-  if (!errors.length) errors.push(...shapeErrors(steps, edges));
+  // Shape problems warn and do not block the read (ruling R26): the canvas can save a condition whose arrows are not yet
+  // labeled, and the graph must still open to be fixed. validateRunnable refuses to run it with the same messages.
+  if (!errors.length) warnings.push(...shapeErrors(steps, edges));
   if (errors.length) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
+  warnings.sort((a, b) => a.line - b.line);
   return { ok: true, doc: { name: h1!.title, goal, instructions, variables, ...(attachments?.names.length && { attachments }), steps, edges }, ...(warnings.length > 0 && { warnings }) };
 }
 
 /**
- * The condition, stop and label rules (spec §2), checked on the steps and arrows that read cleanly. A problem with a step
- * is on its heading; a problem with an arrow is on the arrow's line in the Flow.
+ * The condition, stop and label rules (spec §2), checked when the file has no other error. They are returned as warnings
+ * (ruling R26). A problem with a step is on its heading; a problem with an arrow is on the arrow's line in the Flow.
  */
 function shapeErrors(steps: DocStep[], edges: FlowEdge[]): GraphFileError[] {
   const lineOf = new Map<string, number>();
