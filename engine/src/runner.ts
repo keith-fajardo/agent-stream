@@ -409,7 +409,11 @@ export class Runner extends EventEmitter {
     if (run.finished) return;
     if (run.halted) this.skipQueued(run, `run stopped at ${run.halted}`);
     if (!run.stopping) {
-      for (const id of run.order) {
+      const nodeOf = (id: string) => run.meta.snapshot.nodes.find((n) => n.id === id);
+      // Ready stop steps launch first, so no step that is ready in the same pass starts after the run should halt (R29).
+      // The whole order follows, which visits each stop again in its place (one not yet ready may be skipped there).
+      const stopsFirst = [...run.order.filter((id) => nodeOf(id)?.kind === 'stop'), ...run.order];
+      for (const id of stopsFirst) {
         if (run.meta.nodes[id].status !== 'queued') continue;
         // Every step in the snapshot has a status from start() or amend(): routeNode reads a missing one as dead.
         const route = routeNode(run.meta.snapshot, statusesOf(run.meta), verdictsOf(run.meta), id);
@@ -422,8 +426,10 @@ export class Runner extends EventEmitter {
           this.setNode(run, id, { status: 'skipped' });
           continue;
         }
-        if (run.halted || run.running.size >= this.deps.maxParallel) continue;
-        const node = run.meta.snapshot.nodes.find((n) => n.id === id)!;
+        const node = nodeOf(id)!;
+        // A condition or stop step makes no model call and completes in one microtask, so the parallel limit never holds it back (R29).
+        const flow = node.kind === 'condition' || node.kind === 'stop';
+        if (run.halted || (!flow && run.running.size >= this.deps.maxParallel)) continue;
         if (isWriteCapable(node)) {
           // At most one write-capable step per workspace at a time; in the checkout only while the run holds the lease (spec §4.3).
           const workspace = workspaceOf(node);

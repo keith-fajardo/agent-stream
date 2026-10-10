@@ -1130,6 +1130,44 @@ describe('Runner with condition and stop steps', () => {
     expect(after.status).toBe('succeeded');
   });
 
+  it('a stop launches before a ready sibling, past the parallel limit, and that sibling never starts (R29)', async () => {
+    const { runner, fake } = setup(3);
+    // n1 feeds n2 (condition) and the readers n3, n4, n5; n2's no arrow reaches the stop n6, its yes arrow n7.
+    // In topological order n5 comes before n6, and with n3 and n4 running there is room for only one more step.
+    const g = graphOf([agent('check'), condition('needed?'), reader('r1'), reader('r2'), reader('r3'), stop('stop'), agent('work'), link('n1', 'n2'), link('n1', 'n3'), link('n1', 'n4'), link('n1', 'n5'), arrow('n2', 'n6', 'no'), arrow('n2', 'n7', 'yes')]);
+    const r = started(runner.start(withRendered(g)));
+    await tick();
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    await tick();
+    expect(r.run.nodes.n2.verdict).toBe('no');
+    expect(r.run.nodes.n6.status).toBe('succeeded');
+    expect(r.run.nodes.n5).toMatchObject({ status: 'skipped', error: 'run stopped at n6' });
+    expect(fake.started).toEqual(['n1', 'n3', 'n4']);
+    fake.finish('n3');
+    fake.finish('n4');
+    const done = await r.done;
+    expect(fake.started).toEqual(['n1', 'n3', 'n4']);
+    expect(done.status).toBe('stopped');
+  });
+
+  it('a condition and its stop launch while maxParallel steps are running (R29)', async () => {
+    const { runner, fake } = setup(3);
+    // n1 feeds the readers n2, n3, n4 and the condition n5, which comes last in topological order.
+    const g = graphOf([agent('check'), reader('r1'), reader('r2'), reader('r3'), condition('needed?'), agent('work'), stop('stop'), link('n1', 'n2'), link('n1', 'n3'), link('n1', 'n4'), link('n1', 'n5'), arrow('n5', 'n6', 'yes'), arrow('n5', 'n7', 'no')]);
+    const r = started(runner.start(withRendered(g)));
+    await tick();
+    fake.finish('n1', { ok: true, output: 'VERDICT: no' });
+    await tick();
+    expect(fake.started).toEqual(['n1', 'n2', 'n3', 'n4']);
+    expect(r.run.nodes.n5).toMatchObject({ status: 'succeeded', verdict: 'no' });
+    expect(r.run.nodes.n7.status).toBe('succeeded');
+    expect(r.run.nodes.n6.status).toBe('skipped');
+    for (const id of ['n2', 'n3', 'n4']) fake.finish(id);
+    const done = await r.done;
+    expect(done.status).toBe('stopped');
+    expect(done.stoppedBy).toBe('n7');
+  });
+
   it('a missing verdict fails the condition and nothing downstream runs', async () => {
     const { runner, fake } = setup();
     const r = started(runner.start(withRendered(gate())));
